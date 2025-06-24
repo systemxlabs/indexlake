@@ -40,6 +40,7 @@ pub fn schema_to_arrow_schema(schema: &Schema) -> ILResult<ArrowSchema> {
 
 pub fn arrow_datatype_to_datatype(datatype: &ArrowDataType) -> ILResult<DataType> {
     match datatype {
+        ArrowDataType::Int16 => Ok(DataType::Int16),
         ArrowDataType::Int32 => Ok(DataType::Int32),
         ArrowDataType::Int64 => Ok(DataType::Int64),
         ArrowDataType::Float32 => Ok(DataType::Float32),
@@ -56,6 +57,7 @@ pub fn arrow_datatype_to_datatype(datatype: &ArrowDataType) -> ILResult<DataType
 
 pub fn datatype_to_arrow_datatype(datatype: &DataType) -> ArrowDataType {
     match datatype {
+        DataType::Int16 => ArrowDataType::Int16,
         DataType::Int32 => ArrowDataType::Int32,
         DataType::Int64 => ArrowDataType::Int64,
         DataType::Float32 => ArrowDataType::Float32,

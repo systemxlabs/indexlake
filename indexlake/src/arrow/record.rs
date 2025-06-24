@@ -8,10 +8,9 @@ use crate::{
 };
 use arrow::array::{
     Array, BinaryArray, BinaryBuilder, BooleanArray, BooleanBuilder, Float32Array, Float32Builder,
-    Float64Array, Float64Builder, Int32Array, Int32Builder, Int64Array, Int64Builder, RecordBatch,
-    StringArray, StringBuilder, make_builder,
+    Float64Array, Float64Builder, Int16Array, Int16Builder, Int32Array, Int32Builder, Int64Array,
+    Int64Builder, RecordBatch, StringArray, StringBuilder, make_builder,
 };
-use arrow::datatypes::DataType as ArrowDataType;
 
 macro_rules! builder_append {
     ($builder:expr, $builder_ty:ty, $field:expr, $row:expr, $row_method:ident, $index:expr, $convert:expr) => {{
@@ -51,6 +50,11 @@ pub fn rows_to_arrow_record(schema: &Schema, rows: &[Row]) -> ILResult<RecordBat
     for row in rows {
         for (i, field) in schema.fields.iter().enumerate() {
             match field.data_type {
+                DataType::Int16 => {
+                    builder_append!(array_builders[i], Int16Builder, field, row, int16, i, |v| {
+                        Ok::<_, ILError>(v as i16)
+                    });
+                }
                 DataType::Int32 => {
                     builder_append!(array_builders[i], Int32Builder, field, row, int32, i, |v| {
                         Ok::<_, ILError>(v as i32)
@@ -144,6 +148,16 @@ pub fn record_batch_to_rows(record_batch: &RecordBatch, schema: SchemaRef) -> IL
         let any_array = record_batch.column(arrow_col_idx).as_any();
         let mut column_scalars = Vec::with_capacity(record_batch.num_rows());
         match field.data_type {
+            DataType::Int16 => {
+                let array = any_array.downcast_ref::<Int16Array>().ok_or_else(|| {
+                    ILError::InternalError(format!(
+                        "Failed to downcast field {field:?} to Int16Array"
+                    ))
+                })?;
+                for v in array.iter() {
+                    column_scalars.push(Scalar::Int16(v));
+                }
+            }
             DataType::Int32 => {
                 let array = any_array.downcast_ref::<Int32Array>().ok_or_else(|| {
                     ILError::InternalError(format!(

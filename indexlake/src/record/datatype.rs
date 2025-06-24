@@ -2,6 +2,7 @@ use crate::{ILError, ILResult, catalog::CatalogDatabase};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataType {
+    Int16,
     Int32,
     Int64,
     Float32,
@@ -14,6 +15,7 @@ pub enum DataType {
 impl DataType {
     pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
         match self {
+            DataType::Int16 => "SMALLINT".to_string(),
             DataType::Int32 => "INTEGER".to_string(),
             DataType::Int64 => "BIGINT".to_string(),
             DataType::Float32 => match database {
@@ -35,6 +37,7 @@ impl DataType {
 
     pub(crate) fn parse_sql_type(s: &str, database: CatalogDatabase) -> ILResult<Self> {
         match (s, database) {
+            ("SMALLINT", CatalogDatabase::Sqlite) => Ok(DataType::Int16),
             ("INTEGER", CatalogDatabase::Sqlite) => Ok(DataType::Int32),
             ("BIGINT", CatalogDatabase::Sqlite) => Ok(DataType::Int64),
             ("FLOAT", CatalogDatabase::Sqlite) => Ok(DataType::Float32),
@@ -42,6 +45,7 @@ impl DataType {
             ("VARCHAR", CatalogDatabase::Sqlite) => Ok(DataType::Utf8),
             ("BLOB", CatalogDatabase::Sqlite) => Ok(DataType::Binary),
             ("BOOLEAN", CatalogDatabase::Sqlite) => Ok(DataType::Boolean),
+            ("SMALLINT", CatalogDatabase::Postgres) => Ok(DataType::Int16),
             ("INTEGER", CatalogDatabase::Postgres) => Ok(DataType::Int32),
             ("BIGINT", CatalogDatabase::Postgres) => Ok(DataType::Int64),
             ("FLOAT4", CatalogDatabase::Postgres) => Ok(DataType::Float32),
@@ -59,6 +63,7 @@ impl DataType {
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            DataType::Int16 => write!(f, "Int16"),
             DataType::Int32 => write!(f, "Int32"),
             DataType::Int64 => write!(f, "Int64"),
             DataType::Float32 => write!(f, "Float32"),

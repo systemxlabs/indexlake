@@ -161,6 +161,12 @@ fn pg_row_to_row(pg_row: &bb8_postgres::tokio_postgres::Row, schema: &SchemaRef)
     let mut values = Vec::new();
     for (idx, field) in schema.fields.iter().enumerate() {
         let scalar = match field.data_type {
+            DataType::Int16 => {
+                let v: Option<i16> = pg_row
+                    .try_get(idx)
+                    .map_err(|e| ILError::CatalogError(e.to_string()))?;
+                Scalar::Int16(v)
+            }
             DataType::Int32 => {
                 let v: Option<i32> = pg_row
                     .try_get(idx)

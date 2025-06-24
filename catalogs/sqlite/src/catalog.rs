@@ -69,7 +69,7 @@ impl Transaction for SqliteTransaction {
             .next()
             .map_err(|e| ILError::CatalogError(e.to_string()))?
         {
-            let row = sqlite_row_to_row(&sqlite_row, &schema)?;
+            let row = sqlite_row_to_row(sqlite_row, &schema)?;
             rows.push(row);
         }
         Ok(Box::pin(futures::stream::iter(rows).map(Ok)))
@@ -141,6 +141,12 @@ fn sqlite_row_to_row(sqlite_row: &rusqlite::Row, schema: &SchemaRef) -> ILResult
     let mut row_values = Vec::new();
     for (idx, field) in schema.fields.iter().enumerate() {
         let scalar = match field.data_type {
+            DataType::Int16 => {
+                let v: Option<i16> = sqlite_row
+                    .get(idx)
+                    .map_err(|e| ILError::CatalogError(e.to_string()))?;
+                Scalar::Int16(v)
+            }
             DataType::Int32 => {
                 let v: Option<i32> = sqlite_row
                     .get(idx)

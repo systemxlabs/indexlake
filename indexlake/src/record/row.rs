@@ -24,6 +24,14 @@ impl Row {
         self.int64(idx)
     }
 
+    pub fn int16(&self, index: usize) -> ILResult<Option<i16>> {
+        match self.values[index] {
+            Scalar::Int16(v) => Ok(v),
+            _ => Err(ILError::InternalError(format!(
+                "Expected Int16 at index {index} for row {self:?}"
+            ))),
+        }
+    }
     pub fn int32(&self, index: usize) -> ILResult<Option<i32>> {
         match self.values[index] {
             Scalar::Int32(v) => Ok(v),

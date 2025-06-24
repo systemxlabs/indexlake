@@ -6,6 +6,7 @@ use crate::{ILError, ILResult, catalog::CatalogDatabase};
 
 #[derive(Debug, Clone, Drive, DriveMut)]
 pub enum Scalar {
+    Int16(Option<i16>),
     Int32(Option<i32>),
     Int64(Option<i64>),
     Float32(Option<f32>),
@@ -18,6 +19,8 @@ pub enum Scalar {
 impl Scalar {
     pub fn is_null(&self) -> bool {
         match self {
+            Scalar::Int16(None) => true,
+            Scalar::Int16(Some(_)) => false,
             Scalar::Int32(None) => true,
             Scalar::Int32(Some(_)) => false,
             Scalar::Int64(None) => true,
@@ -44,6 +47,8 @@ impl Scalar {
 
     pub fn to_sql(&self, database: CatalogDatabase) -> String {
         match self {
+            Scalar::Int16(Some(value)) => value.to_string(),
+            Scalar::Int16(None) => "null".to_string(),
             Scalar::Int32(Some(value)) => value.to_string(),
             Scalar::Int32(None) => "null".to_string(),
             Scalar::Int64(Some(value)) => value.to_string(),
@@ -66,6 +71,8 @@ impl Scalar {
 
     pub fn add(&self, other: &Scalar) -> ILResult<Scalar> {
         match (self, other) {
+            (Scalar::Int16(Some(v1)), Scalar::Int16(Some(v2))) => Ok(Scalar::Int16(Some(v1 + v2))),
+            (Scalar::Int16(None), _) | (_, Scalar::Int16(None)) => Ok(Scalar::Int16(None)),
             (Scalar::Int32(Some(v1)), Scalar::Int32(Some(v2))) => Ok(Scalar::Int32(Some(v1 + v2))),
             (Scalar::Int32(None), _) | (_, Scalar::Int32(None)) => Ok(Scalar::Int32(None)),
             (Scalar::Int64(Some(v1)), Scalar::Int64(Some(v2))) => Ok(Scalar::Int64(Some(v1 + v2))),
@@ -87,6 +94,8 @@ impl Scalar {
 
     pub fn sub(&self, other: &Scalar) -> ILResult<Scalar> {
         match (self, other) {
+            (Scalar::Int16(Some(v1)), Scalar::Int16(Some(v2))) => Ok(Scalar::Int16(Some(v1 - v2))),
+            (Scalar::Int16(None), _) | (_, Scalar::Int16(None)) => Ok(Scalar::Int16(None)),
             (Scalar::Int32(Some(v1)), Scalar::Int32(Some(v2))) => Ok(Scalar::Int32(Some(v1 - v2))),
             (Scalar::Int32(None), _) | (_, Scalar::Int32(None)) => Ok(Scalar::Int32(None)),
             (Scalar::Int64(Some(v1)), Scalar::Int64(Some(v2))) => Ok(Scalar::Int64(Some(v1 - v2))),
@@ -108,6 +117,8 @@ impl Scalar {
 
     pub fn mul(&self, other: &Scalar) -> ILResult<Scalar> {
         match (self, other) {
+            (Scalar::Int16(Some(v1)), Scalar::Int16(Some(v2))) => Ok(Scalar::Int16(Some(v1 * v2))),
+            (Scalar::Int16(None), _) | (_, Scalar::Int16(None)) => Ok(Scalar::Int16(None)),
             (Scalar::Int32(Some(v1)), Scalar::Int32(Some(v2))) => Ok(Scalar::Int32(Some(v1 * v2))),
             (Scalar::Int32(None), _) | (_, Scalar::Int32(None)) => Ok(Scalar::Int32(None)),
             (Scalar::Int64(Some(v1)), Scalar::Int64(Some(v2))) => Ok(Scalar::Int64(Some(v1 * v2))),
@@ -129,6 +140,8 @@ impl Scalar {
 
     pub fn div(&self, other: &Scalar) -> ILResult<Scalar> {
         match (self, other) {
+            (Scalar::Int16(Some(v1)), Scalar::Int16(Some(v2))) => Ok(Scalar::Int16(Some(v1 / v2))),
+            (Scalar::Int16(None), _) | (_, Scalar::Int16(None)) => Ok(Scalar::Int16(None)),
             (Scalar::Int32(Some(v1)), Scalar::Int32(Some(v2))) => Ok(Scalar::Int32(Some(v1 / v2))),
             (Scalar::Int32(None), _) | (_, Scalar::Int32(None)) => Ok(Scalar::Int32(None)),
             (Scalar::Int64(Some(v1)), Scalar::Int64(Some(v2))) => Ok(Scalar::Int64(Some(v1 / v2))),
@@ -150,6 +163,8 @@ impl Scalar {
 
     pub fn rem(&self, other: &Scalar) -> ILResult<Scalar> {
         match (self, other) {
+            (Scalar::Int16(Some(v1)), Scalar::Int16(Some(v2))) => Ok(Scalar::Int16(Some(v1 % v2))),
+            (Scalar::Int16(None), _) | (_, Scalar::Int16(None)) => Ok(Scalar::Int16(None)),
             (Scalar::Int32(Some(v1)), Scalar::Int32(Some(v2))) => Ok(Scalar::Int32(Some(v1 % v2))),
             (Scalar::Int32(None), _) | (_, Scalar::Int32(None)) => Ok(Scalar::Int32(None)),
             (Scalar::Int64(Some(v1)), Scalar::Int64(Some(v2))) => Ok(Scalar::Int64(Some(v1 % v2))),
@@ -173,6 +188,8 @@ impl Scalar {
 impl PartialEq for Scalar {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Scalar::Int16(v1), Scalar::Int16(v2)) => v1.eq(v2),
+            (Scalar::Int16(_), _) => false,
             (Scalar::Int32(v1), Scalar::Int32(v2)) => v1.eq(v2),
             (Scalar::Int32(_), _) => false,
             (Scalar::Int64(v1), Scalar::Int64(v2)) => v1.eq(v2),
@@ -202,6 +219,8 @@ impl Eq for Scalar {}
 impl PartialOrd for Scalar {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
+            (Scalar::Int16(v1), Scalar::Int16(v2)) => v1.partial_cmp(v2),
+            (Scalar::Int16(_), _) => None,
             (Scalar::Int32(v1), Scalar::Int32(v2)) => v1.partial_cmp(v2),
             (Scalar::Int32(_), _) => None,
             (Scalar::Int64(v1), Scalar::Int64(v2)) => v1.partial_cmp(v2),
@@ -229,6 +248,8 @@ impl PartialOrd for Scalar {
 impl Display for Scalar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Scalar::Int16(Some(value)) => write!(f, "{}", value),
+            Scalar::Int16(None) => write!(f, "null"),
             Scalar::Int32(Some(value)) => write!(f, "{}", value),
             Scalar::Int32(None) => write!(f, "null"),
             Scalar::Int64(Some(value)) => write!(f, "{}", value),
