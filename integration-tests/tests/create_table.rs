@@ -127,6 +127,7 @@ async fn table_data_types(
     client.create_namespace(namespace_name).await.unwrap();
 
     let table_schema = Arc::new(Schema::new(vec![
+        Field::new("int16_col", DataType::Int16, true),
         Field::new("int32_col", DataType::Int32, true),
         Field::new("int64_col", DataType::Int64, true),
         Field::new("float32_col", DataType::Float32, true),
@@ -149,6 +150,7 @@ async fn table_data_types(
     let table = client.load_table(namespace_name, table_name).await.unwrap();
 
     let columns = vec![
+        "int16_col".to_string(),
         "int32_col".to_string(),
         "int64_col".to_string(),
         "float32_col".to_string(),
@@ -158,6 +160,7 @@ async fn table_data_types(
         "boolean_col".to_string(),
     ];
     let values = vec![vec![
+        Scalar::Int16(Some(1)),
         Scalar::Int32(Some(1)),
         Scalar::Int64(Some(2)),
         Scalar::Float32(Some(1.1)),
@@ -174,11 +177,11 @@ async fn table_data_types(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-----------+-----------+-------------+-------------+----------+------------+-------------+
-| int32_col | int64_col | float32_col | float64_col | utf8_col | binary_col | boolean_col |
-+-----------+-----------+-------------+-------------+----------+------------+-------------+
-| 1         | 2         | 1.1         | 2.2         | utf8     | 0001       | true        |
-+-----------+-----------+-------------+-------------+----------+------------+-------------+"#,
+        r#"+-----------+-----------+-----------+-------------+-------------+----------+------------+-------------+
+| int16_col | int32_col | int64_col | float32_col | float64_col | utf8_col | binary_col | boolean_col |
++-----------+-----------+-----------+-------------+-------------+----------+------------+-------------+
+| 1         | 1         | 2         | 1.1         | 2.2         | utf8     | 0001       | true        |
++-----------+-----------+-----------+-------------+-------------+----------+------------+-------------+"#,
     );
 }
 
