@@ -1,15 +1,12 @@
-use std::sync::Arc;
-
 use arrow::{
-    array::{ArrayRef, AsArray, BooleanArray, Datum, RecordBatch},
-    datatypes::{DataType, Schema},
-    error::ArrowError,
+    array::RecordBatch,
+    datatypes::DataType,
 };
 use derive_visitor::{Drive, DriveMut};
 
 use crate::{
-    ILError, ILResult,
-    catalog::{CatalogDatabase, Row, Scalar},
+    ILResult,
+    catalog::CatalogDatabase,
     expr::{ColumnarValue, Expr, apply_cmp},
 };
 
@@ -22,12 +19,20 @@ pub struct LikeExpr {
 }
 
 impl LikeExpr {
+    pub fn new(negated: bool, expr: Box<Expr>, pattern: Box<Expr>, case_insensitive: bool) -> Self {
+        Self {
+            negated,
+            case_insensitive,
+            expr,
+            pattern,
+        }
+    }
     pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
         let expr = self.expr.to_sql(database)?;
         let pattern = self.pattern.to_sql(database)?;
         match (self.negated, self.case_insensitive) {
-            (true, true) => Ok(format!("NOT ILIKE {}", pattern)),
-            (true, false) => Ok(format!("NOT LIKE {}", pattern)),
+            (true, true) => Ok(format!("{} NOT ILIKE {}", expr, pattern)),
+            (true, false) => Ok(format!("{} NOT LIKE {}", expr, pattern)),
             (false, true) => Ok(format!("{} ILIKE {}", expr, pattern)),
             (false, false) => Ok(format!("{} LIKE {}", expr, pattern)),
         }
@@ -45,6 +50,7 @@ impl LikeExpr {
         }
     }
 
+    #[allow(unused)]
     pub fn data_type(&self) -> ILResult<DataType> {
         Ok(DataType::Boolean)
     }

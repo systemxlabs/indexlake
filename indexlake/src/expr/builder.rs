@@ -1,6 +1,6 @@
 use crate::{
     catalog::Scalar,
-    expr::{BinaryExpr, BinaryOp, Expr},
+    expr::{BinaryExpr, BinaryOp, Expr, like::LikeExpr},
 };
 
 impl Expr {
@@ -42,6 +42,26 @@ impl Expr {
 
     pub fn is_not_null(self) -> Expr {
         Expr::IsNotNull(Box::new(self))
+    }
+
+    /// Return `self LIKE other`
+    pub fn like(self, other: Expr) -> Expr {
+        Expr::LikeExpr(LikeExpr::new(false, Box::new(self), Box::new(other), false))
+    }
+
+    /// Return `self NOT LIKE other`
+    pub fn not_like(self, other: Expr) -> Expr {
+        Expr::LikeExpr(LikeExpr::new(true, Box::new(self), Box::new(other), false))
+    }
+
+    /// Return `self ILIKE other`
+    pub fn ilike(self, other: Expr) -> Expr {
+        Expr::LikeExpr(LikeExpr::new(false, Box::new(self), Box::new(other), true))
+    }
+
+    /// Return `self NOT ILIKE other`
+    pub fn not_ilike(self, other: Expr) -> Expr {
+        Expr::LikeExpr(LikeExpr::new(true, Box::new(self), Box::new(other), true))
     }
 }
 
