@@ -1,9 +1,9 @@
 mod binary;
 mod builder;
 mod compute;
+mod like;
 mod utils;
 mod visitor;
-mod like;
 
 pub use binary::*;
 pub use builder::*;
@@ -24,7 +24,9 @@ use parquet::arrow::{ArrowSchemaConverter, ProjectionMask, arrow_reader::ArrowPr
 use derive_visitor::{Drive, DriveMut};
 
 use crate::{
-    catalog::{CatalogDatabase, Row, Scalar}, expr::like::LikeExpr, ILError, ILResult
+    ILError, ILResult,
+    catalog::{CatalogDatabase, Row, Scalar},
+    expr::like::LikeExpr,
 };
 
 /// Represents logical expressions such as `A + 1`
