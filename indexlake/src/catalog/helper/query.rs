@@ -72,7 +72,9 @@ impl TransactionHelper {
             .iter()
             .map(|f| f.to_sql(self.database))
             .collect::<Result<Vec<_>, _>>()?;
-        filter_strs.push(format!("{INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'"));
+        filter_strs.push(format!(
+            "{INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'"
+        ));
 
         let limit_clause = limit
             .map(|limit| format!(" LIMIT {limit}"))
@@ -290,7 +292,9 @@ impl CatalogHelper {
             .map(|f| f.to_sql(self.catalog.database()))
             .collect::<Result<Vec<_>, _>>()?;
 
-        filter_strs.push(format!("{INTERNAL_FLAG_FIELD_NAME} IS NULL"));
+        filter_strs.push(format!(
+            "{INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'"
+        ));
 
         if let Some(row_ids) = row_ids {
             filter_strs.push(format!(
