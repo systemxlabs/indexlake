@@ -72,7 +72,7 @@ impl TransactionHelper {
             .iter()
             .map(|f| f.to_sql(self.database))
             .collect::<Result<Vec<_>, _>>()?;
-        filter_strs.push(format!("{INTERNAL_FLAG_FIELD_NAME} IS NULL"));
+        filter_strs.push(format!("{INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'"));
 
         let limit_clause = limit
             .map(|limit| format!(" LIMIT {limit}"))
