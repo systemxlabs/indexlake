@@ -26,7 +26,7 @@ impl TransactionHelper {
 
         self.transaction
             .execute(&format!(
-                "UPDATE {} SET {} WHERE {} AND {INTERNAL_FLAG_FIELD_NAME} IS NULL",
+                "UPDATE {} SET {} WHERE {} AND {INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'",
                 inline_row_table_name(table_id),
                 set_strs.join(", "),
                 condition.to_sql(self.database)?
