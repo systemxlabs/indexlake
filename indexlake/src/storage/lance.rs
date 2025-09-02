@@ -206,7 +206,7 @@ pub(crate) async fn read_lance_file_by_record_and_row_id_condition(
             take_array.data_type()
         ))
     })?;
-    let match_row_ids = fixed_size_binary_array_to_uuids(&match_row_id_array)?
+    let match_row_ids = fixed_size_binary_array_to_uuids(match_row_id_array)?
         .into_iter()
         .collect::<HashSet<_>>();
 

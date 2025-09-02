@@ -223,9 +223,9 @@ async fn write_lance_file(
         let row_id_array = extract_row_id_array_from_record_batch(batch)?;
         row_ids.extend(fixed_size_binary_array_to_uuids(&row_id_array)?);
 
-        writer.write_batch(&batch).await?;
+        writer.write_batch(batch).await?;
         for builder in index_builders.iter_mut() {
-            builder.append(&batch)?;
+            builder.append(batch)?;
         }
     }
 
