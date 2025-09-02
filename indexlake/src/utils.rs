@@ -1,7 +1,7 @@
 use std::{collections::HashSet, hash::Hash, sync::Arc};
 
 use arrow::{
-    array::{Array, ArrayRef, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions},
+    array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions},
     datatypes::{FieldRef, Schema},
     ipc::{reader::StreamReader, writer::StreamWriter},
 };
@@ -77,6 +77,14 @@ pub fn extract_row_id_array_from_record_batch(
 pub fn extract_row_ids_from_record_batch(record_batch: &RecordBatch) -> ILResult<Vec<Uuid>> {
     let row_id_array = extract_row_id_array_from_record_batch(record_batch)?;
     fixed_size_binary_array_to_uuids(&row_id_array)
+}
+
+pub fn array_to_uuids(array: &dyn Array) -> ILResult<Vec<Uuid>> {
+    let data_type = array.data_type();
+    let fixed_size_binary_array = array.as_fixed_size_binary_opt().ok_or_else(|| {
+        ILError::internal(format!("array is not an FixedSizeBinaryArray: {data_type}",))
+    })?;
+    fixed_size_binary_array_to_uuids(fixed_size_binary_array)
 }
 
 pub fn fixed_size_binary_array_to_uuids(array: &FixedSizeBinaryArray) -> ILResult<Vec<Uuid>> {

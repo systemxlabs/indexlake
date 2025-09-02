@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use arrow::array::{ArrayRef, AsArray, RecordBatch, UInt64Array};
+use arrow::array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow_schema::Schema;
 use futures::StreamExt;
 use lance_core::cache::LanceCache;
@@ -25,8 +25,8 @@ use crate::{
     expr::{Expr, merge_filters},
     storage::{DataFileFormat, Storage},
     utils::{
-        build_projection_from_condition, build_row_id_array, extract_row_ids_from_record_batch,
-        fixed_size_binary_array_to_uuids,
+        array_to_uuids, build_projection_from_condition, build_row_id_array,
+        extract_row_ids_from_record_batch,
     },
 };
 
@@ -200,13 +200,7 @@ pub(crate) async fn read_lance_file_by_record_and_row_id_condition(
     let index_array = UInt64Array::from(indices);
 
     let take_array = arrow::compute::take(valid_row_ids_array.as_ref(), &index_array, None)?;
-    let match_row_id_array = take_array.as_fixed_size_binary_opt().ok_or_else(|| {
-        ILError::internal(format!(
-            "match row id array should be FixedSizeBinaryArray, but got {:?}",
-            take_array.data_type()
-        ))
-    })?;
-    let match_row_ids = fixed_size_binary_array_to_uuids(match_row_id_array)?
+    let match_row_ids = array_to_uuids(&take_array)?
         .into_iter()
         .collect::<HashSet<_>>();
 
