@@ -8,6 +8,7 @@ mod s3;
 pub(crate) use lance::*;
 pub use opendal::services::S3Config;
 pub(crate) use parquet::*;
+use uuid::Uuid;
 
 use crate::{
     ILError, ILResult, RecordBatchStream,
@@ -230,7 +231,7 @@ pub(crate) async fn read_data_file_by_record(
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
     filters: Vec<Expr>,
-    row_ids: Option<&HashSet<i64>>,
+    row_ids: Option<&HashSet<Uuid>>,
     batch_size: usize,
 ) -> ILResult<RecordBatchStream> {
     match data_file_record.format {
@@ -311,7 +312,7 @@ pub(crate) async fn find_matched_row_ids_from_data_file(
     table_schema: &Schema,
     condition: &Expr,
     data_file_record: &DataFileRecord,
-) -> ILResult<HashSet<i64>> {
+) -> ILResult<HashSet<Uuid>> {
     match data_file_record.format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
             find_matched_row_ids_from_parquet_file(

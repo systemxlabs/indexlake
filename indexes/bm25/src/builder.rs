@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use arrow::{
-    array::{ArrayRef, AsArray, Int64Array, ListArray, ListBuilder, PrimitiveBuilder},
+    array::{ArrayRef, AsArray, FixedSizeBinaryArray, ListArray, ListBuilder, PrimitiveBuilder},
     datatypes::{DataType, Field, FieldRef, Float32Type, Schema, SchemaRef, UInt32Type},
     record_batch::RecordBatch,
 };
@@ -23,7 +23,7 @@ use crate::{ArrowScorer, BM25Index, BM25IndexParams, JiebaTokenizer};
 
 static BM25_INDEX_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
     Arc::new(Schema::new(vec![
-        Field::new("row_id", DataType::Int64, false),
+        Field::new("row_id", DataType::FixedSizeBinary(16), false),
         Field::new(
             "embedding_indices",
             DataType::List(BM25_INDEX_SCHEMA_EMBEDDING_INDICES_INNER_FIELD.clone()),
@@ -48,7 +48,7 @@ pub struct Bm25IndexBuilder {
     index_def: IndexDefinationRef,
     params: BM25IndexParams,
     embedder: Embedder<u32, JiebaTokenizer>,
-    embeddings: Vec<(Int64Array, ListArray, ListArray)>,
+    embeddings: Vec<(FixedSizeBinaryArray, ListArray, ListArray)>,
 }
 
 impl Bm25IndexBuilder {
@@ -97,8 +97,10 @@ impl IndexBuilder for Bm25IndexBuilder {
             let row_id_array = batch
                 .column(0)
                 .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or(ILError::index("Failed to downcast row id to Int64Array"))?;
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .ok_or(ILError::index(
+                    "Failed to downcast row id to FixedSizeBinaryArray",
+                ))?;
             let indices_array = batch
                 .column(1)
                 .as_any()
@@ -153,8 +155,10 @@ impl IndexBuilder for Bm25IndexBuilder {
             let row_id_array = batch
                 .column(0)
                 .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or(ILError::index("Failed to downcast row id to Int64Array"))?;
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .ok_or(ILError::index(
+                    "Failed to downcast row id to FixedSizeBinaryArray",
+                ))?;
             let indices_array = batch
                 .column(1)
                 .as_any()

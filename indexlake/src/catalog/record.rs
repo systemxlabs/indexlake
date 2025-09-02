@@ -184,7 +184,7 @@ pub(crate) struct DataFileRecord {
     pub(crate) format: DataFileFormat,
     pub(crate) relative_path: String,
     pub(crate) record_count: i64,
-    pub(crate) row_ids: Vec<i64>,
+    pub(crate) row_ids: Vec<Uuid>,
     pub(crate) validity: Vec<bool>,
 }
 
@@ -193,7 +193,7 @@ impl DataFileRecord {
         let row_ids_bytes = self
             .row_ids
             .iter()
-            .flat_map(|id| id.to_le_bytes())
+            .flat_map(|id| id.into_bytes())
             .collect::<Vec<_>>();
         let validity_bytes = Self::validity_to_bytes(&self.validity);
         format!(
@@ -254,12 +254,11 @@ impl DataFileRecord {
         let record_count = row.int64(4)?.expect("record_count is not null");
 
         let row_ids_bytes = row.binary(5)?.expect("row_ids is not null");
-        let row_ids_chunks = row_ids_bytes.chunks_exact(8);
+        let row_ids_chunks = row_ids_bytes.chunks_exact(16);
         let mut row_ids = Vec::with_capacity(record_count as usize);
         for chunk in row_ids_chunks {
-            row_ids.push(i64::from_le_bytes(chunk.try_into().map_err(|e| {
-                ILError::internal(format!("Invalid row ids bytes: {e:?}"))
-            })?));
+            let row_id = Uuid::from_slice(chunk)?;
+            row_ids.push(row_id);
         }
 
         let validity_bytes = row.binary(6)?.expect("validity is not null");
@@ -283,7 +282,7 @@ impl DataFileRecord {
         self.validity.iter().filter(|valid| **valid).count()
     }
 
-    pub(crate) fn valid_row_ids(&self) -> impl Iterator<Item = i64> {
+    pub(crate) fn valid_row_ids(&self) -> impl Iterator<Item = Uuid> {
         self.row_ids.iter().enumerate().filter_map(
             |(i, id)| {
                 if self.validity[i] { Some(*id) } else { None }
@@ -291,7 +290,10 @@ impl DataFileRecord {
         )
     }
 
-    pub(crate) fn row_ranges(&self, row_ids: Option<&HashSet<i64>>) -> ILResult<Vec<Range<usize>>> {
+    pub(crate) fn row_ranges(
+        &self,
+        row_ids: Option<&HashSet<Uuid>>,
+    ) -> ILResult<Vec<Range<usize>>> {
         let offsets = self
             .validity
             .iter()
@@ -322,7 +324,7 @@ impl DataFileRecord {
         Ok(ranges)
     }
 
-    pub(crate) fn row_selection(&self, row_ids: Option<&HashSet<i64>>) -> ILResult<RowSelection> {
+    pub(crate) fn row_selection(&self, row_ids: Option<&HashSet<Uuid>>) -> ILResult<RowSelection> {
         let ranges = self.row_ranges(row_ids)?;
         Ok(RowSelection::from_consecutive_ranges(
             ranges.into_iter(),

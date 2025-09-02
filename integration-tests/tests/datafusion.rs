@@ -47,14 +47,14 @@ async fn datafusion_full_scan(
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 1                 | Alice   | 20  |
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 20  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     Ok(())
@@ -90,15 +90,17 @@ async fn datafusion_scan_with_projection(
     .await;
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+
-| _indexlake_row_id | name    |
-+-------------------+---------+
-| 1                 | Alice   |
-| 2                 | Bob     |
-| 3                 | Charlie |
-| 4                 | David   |
-+-------------------+---------+"#,
+        r#"+---------+
+| name    |
++---------+
+| Alice   |
+| Bob     |
+| Charlie |
+| David   |
++---------+"#,
     );
+
+    // TODO fix select age, name
 
     Ok(())
 }
@@ -129,12 +131,12 @@ async fn datafusion_scan_with_filters(
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table where age > 21").await;
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     Ok(())
@@ -233,16 +235,16 @@ async fn datafusion_full_insert(
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 1                 | Alice   | 20  |
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-| 5                 | Eve     | 24  |
-| 6                 | Frank   | 25  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 20  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
+| Eve     | 24  |
+| Frank   | 25  |
++---------+-----+"#,
     );
 
     Ok(())
@@ -313,11 +315,11 @@ async fn datafusion_partial_insert(
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
     assert_eq!(
         table_str,
-        r#"+-------------------+------+-----+
-| _indexlake_row_id | name | age |
-+-------------------+------+-----+
-| 1                 | Eve  | 24  |
-+-------------------+------+-----+"#,
+        r#"+------+-----+
+| name | age |
++------+-----+
+| Eve  | 24  |
++------+-----+"#,
     );
 
     Ok(())
@@ -365,19 +367,20 @@ async fn datafusion_scan_serialization(
     );
 
     let batches = collect(new_plan, session.task_ctx()).await?;
-    let sorted_batch = sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?;
+    let mut sorted_batch = sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?;
+    sorted_batch.remove_column(0);
     let table_str = pretty_format_batches(&vec![sorted_batch])?.to_string();
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 1                 | Alice   | 20  |
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 20  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     Ok(())
@@ -440,20 +443,21 @@ async fn datafusion_insert_serialization(
 
     let df = session.sql("SELECT * FROM indexlake_table").await?;
     let batches = df.collect().await?;
-    let sorted_batch = sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?;
+    let mut sorted_batch = sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?;
+    sorted_batch.remove_column(0);
     let table_str = pretty_format_batches(&vec![sorted_batch])?.to_string();
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 1                 | Alice   | 20  |
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-| 5                 | Eve     | 24  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 20  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
+| Eve     | 24  |
++---------+-----+"#,
     );
 
     Ok(())

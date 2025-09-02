@@ -8,6 +8,7 @@ use indexlake::utils::extract_row_id_array_from_record_batch;
 use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{Euclidean, HnswIndex, HnswIndexParams};
 
@@ -15,7 +16,7 @@ pub struct HnswIndexBuilder {
     index_def: IndexDefinationRef,
     params: HnswIndexParams,
     hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
-    row_ids: Vec<i64>,
+    row_ids: Vec<Uuid>,
 }
 
 impl HnswIndexBuilder {
@@ -66,7 +67,7 @@ impl IndexBuilder for HnswIndexBuilder {
             .ok_or_else(|| ILError::index("Key column is not a list array"))?;
 
         for (row_id, vector_arr) in row_id_array.iter().zip(key_column.iter()) {
-            let row_id = row_id.expect("row id is null");
+            let row_id = Uuid::from_slice(row_id.expect("row id is null"))?;
             if let Some(arr) = vector_arr {
                 let vector = arr
                     .as_any()
@@ -132,5 +133,5 @@ impl IndexBuilder for HnswIndexBuilder {
 #[derive(Serialize, Deserialize)]
 struct HnswWithRowIds {
     hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
-    row_ids: Vec<i64>,
+    row_ids: Vec<Uuid>,
 }

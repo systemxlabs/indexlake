@@ -1,10 +1,11 @@
 use std::{collections::HashSet, hash::Hash, sync::Arc};
 
 use arrow::{
-    array::{Array, ArrayRef, Int64Array, RecordBatch, RecordBatchOptions},
+    array::{Array, ArrayRef, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions},
     datatypes::{FieldRef, Schema},
     ipc::{reader::StreamReader, writer::StreamWriter},
 };
+use uuid::Uuid;
 
 use crate::{
     ILError, ILResult,
@@ -23,7 +24,7 @@ pub fn has_duplicated_items(container: impl Iterator<Item = impl Eq + Hash>) -> 
     false
 }
 
-pub(crate) fn schema_with_row_id(schema: &Schema) -> Schema {
+pub fn schema_with_row_id(schema: &Schema) -> Schema {
     let mut fields = vec![INTERNAL_ROW_ID_FIELD_REF.clone()];
     fields.extend(schema.fields.iter().cloned());
     Schema::new_with_metadata(fields, schema.metadata().clone())
@@ -39,9 +40,9 @@ pub fn schema_without_row_id(schema: &Schema) -> Schema {
     Schema::new_with_metadata(fields, schema.metadata().clone())
 }
 
-pub(crate) fn record_batch_with_row_id(
+pub fn record_batch_with_row_id(
     record: &RecordBatch,
-    row_id_array: Int64Array,
+    row_id_array: FixedSizeBinaryArray,
 ) -> ILResult<RecordBatch> {
     let schema = schema_with_row_id(&record.schema());
     let mut arrays = vec![Arc::new(row_id_array) as ArrayRef];
@@ -54,16 +55,60 @@ pub(crate) fn record_batch_with_row_id(
     )?)
 }
 
-pub fn extract_row_id_array_from_record_batch(record_batch: &RecordBatch) -> ILResult<Int64Array> {
+pub fn extract_row_id_array_from_record_batch(
+    record_batch: &RecordBatch,
+) -> ILResult<FixedSizeBinaryArray> {
     let index = record_batch
         .schema_ref()
         .index_of(INTERNAL_ROW_ID_FIELD_NAME)?;
     let row_id_array = record_batch
         .column(index)
         .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or_else(|| ILError::internal("Row id column is not an Int64Array"))?;
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .ok_or_else(|| ILError::internal("Row id column is not an FixedSizeBinaryArray"))?;
+    if row_id_array.value_length() != 16 {
+        return Err(ILError::internal(
+            "Row id column is not an FixedSizeBinaryArray with length 16",
+        ));
+    }
     Ok(row_id_array.clone())
+}
+
+pub fn extract_row_ids_from_record_batch(record_batch: &RecordBatch) -> ILResult<Vec<Uuid>> {
+    let row_id_array = extract_row_id_array_from_record_batch(record_batch)?;
+    fixed_size_binary_array_to_uuids(&row_id_array)
+}
+
+pub fn fixed_size_binary_array_to_uuids(array: &FixedSizeBinaryArray) -> ILResult<Vec<Uuid>> {
+    if array.value_length() != 16 {
+        return Err(ILError::internal(
+            "array is not an FixedSizeBinaryArray with length 16",
+        ));
+    }
+    let mut uuids = Vec::with_capacity(array.len());
+    for i in 0..array.len() {
+        let uuid = Uuid::from_slice(array.value(i))?;
+        uuids.push(uuid);
+    }
+    Ok(uuids)
+}
+
+pub fn build_row_id_array<T, U>(iter: T, len: usize) -> ILResult<FixedSizeBinaryArray>
+where
+    T: Iterator<Item = U>,
+    U: AsRef<[u8]>,
+{
+    if len == 0 {
+        Ok(FixedSizeBinaryArray::new_null(16, 0))
+    } else {
+        let array = FixedSizeBinaryArray::try_from_iter(iter)?;
+        if array.value_length() != 16 {
+            return Err(ILError::internal(
+                "row id array is not an FixedSizeBinaryArray with length 16",
+            ));
+        }
+        Ok(array)
+    }
 }
 
 pub fn project_schema(schema: &Schema, projection: Option<&Vec<usize>>) -> ILResult<Schema> {

@@ -4,7 +4,7 @@ use std::{
 };
 
 use arrow::{
-    array::{Float64Array, Int64Array, RecordBatch},
+    array::{FixedSizeBinaryArray, Float64Array, RecordBatch},
     compute::SortOptions,
 };
 use futures::TryStreamExt;
@@ -311,10 +311,11 @@ fn sort_batches(
     let row_id_array = batch
         .column(0)
         .as_any()
-        .downcast_ref::<Int64Array>()
+        .downcast_ref::<FixedSizeBinaryArray>()
         .ok_or(ILError::index("Row id column not found in batch"))?;
     for row_id in row_id_array.iter() {
-        let row_id = row_id.ok_or(ILError::index("Row id is null"))?;
+        let row_id_bytes = row_id.ok_or(ILError::index("Row id is null"))?;
+        let row_id = Uuid::from_slice(row_id_bytes)?;
         let row_id_score = row_id_score_locations
             .iter()
             .find(|(row_id_score, _)| row_id_score.row_id == row_id)

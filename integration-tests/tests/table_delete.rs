@@ -1,4 +1,4 @@
-use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
+use indexlake::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use indexlake::expr::{col, lit};
 use indexlake::{
     Client,
@@ -8,7 +8,10 @@ use indexlake::{
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
-use indexlake_integration_tests::{data::prepare_simple_testing_table, utils::full_table_scan};
+use indexlake_integration_tests::{
+    data::prepare_simple_testing_table,
+    utils::{full_table_scan, read_first_row_id_bytes_from_table},
+};
 use std::sync::Arc;
 
 #[rstest::rstest]
@@ -38,12 +41,12 @@ async fn delete_table_by_condition(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+-------+-----+
-| _indexlake_row_id | name  | age |
-+-------------------+-------+-----+
-| 1                 | Alice | 20  |
-| 2                 | Bob   | 21  |
-+-------------------+-------+-----+"#,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| Alice | 20  |
+| Bob   | 21  |
++-------+-----+"#,
     );
 
     Ok(())
@@ -69,20 +72,24 @@ async fn delete_table_by_row_id(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let condition = col(INTERNAL_ROW_ID_FIELD_NAME).eq(lit(1i64));
+    let first_row_id_bytes = read_first_row_id_bytes_from_table(&table).await?;
+    let condition = col(INTERNAL_ROW_ID_FIELD_NAME).eq(lit(Scalar::FixedSizeBinary(
+        16,
+        Some(first_row_id_bytes.to_vec()),
+    )));
     table.delete(&condition).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     Ok(())
@@ -115,14 +122,14 @@ async fn delete_table_by_constant_condition(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 1                 | Alice   | 20  |
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 20  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     let true_condition = lit(1i32).eq(lit(1i32));
@@ -132,10 +139,10 @@ async fn delete_table_by_constant_condition(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+------+-----+
-| _indexlake_row_id | name | age |
-+-------------------+------+-----+
-+-------------------+------+-----+"#,
+        r#"+------+-----+
+| name | age |
++------+-----+
++------+-----+"#,
     );
     Ok(())
 }

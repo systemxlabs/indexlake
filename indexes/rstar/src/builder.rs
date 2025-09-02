@@ -1,8 +1,8 @@
 use std::sync::{Arc, LazyLock};
 
 use arrow::{
-    array::{Array, ArrayRef, AsArray, Float64Array, Int64Array, RecordBatch},
-    datatypes::{DataType, Field, Float64Type, Int64Type, Schema, SchemaRef},
+    array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, Float64Array, RecordBatch},
+    datatypes::{DataType, Field, Float64Type, Schema, SchemaRef},
 };
 use futures::StreamExt;
 use geo::BoundingRect;
@@ -18,12 +18,13 @@ use parquet::{
     file::properties::WriterProperties,
 };
 use rstar::{AABB, RTree};
+use uuid::Uuid;
 
 use crate::{IndexTreeObject, RStarIndex, RStarIndexParams, WkbDialect};
 
 pub static RSTAR_INDEX_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
     Arc::new(Schema::new(vec![
-        Field::new("row_id", DataType::Int64, false),
+        Field::new("row_id", DataType::FixedSizeBinary(16), false),
         Field::new("xmin", DataType::Float64, true),
         Field::new("ymin", DataType::Float64, true),
         Field::new("xmax", DataType::Float64, true),
@@ -135,7 +136,7 @@ impl IndexBuilder for RStarIndexBuilder {
             .sum();
         let mut rtree_objects = Vec::with_capacity(num_rows);
         for batch in self.index_batches.iter() {
-            let row_id_array = batch.column(0).as_primitive::<Int64Type>().clone();
+            let row_id_array = batch.column(0).as_fixed_size_binary().clone();
             let xmin_array = batch.column(1).as_primitive::<Float64Type>().clone();
             let ymin_array = batch.column(2).as_primitive::<Float64Type>().clone();
             let xmax_array = batch.column(3).as_primitive::<Float64Type>().clone();
@@ -143,7 +144,7 @@ impl IndexBuilder for RStarIndexBuilder {
 
             for i in 0..batch.num_rows() {
                 if !xmin_array.is_null(i) {
-                    let row_id = row_id_array.value(i);
+                    let row_id = Uuid::from_slice(row_id_array.value(i))?;
                     let aabb = AABB::from_corners(
                         [xmin_array.value(i), ymin_array.value(i)],
                         [xmax_array.value(i), ymax_array.value(i)],
@@ -231,7 +232,7 @@ pub(crate) fn compute_aabb(wkb: &[u8], wkb_dialect: WkbDialect) -> ILResult<AABB
 }
 
 fn build_index_record_batch(
-    row_id_array: Int64Array,
+    row_id_array: FixedSizeBinaryArray,
     aabbs: Vec<Option<AABB<geo::Coord<f64>>>>,
 ) -> ILResult<RecordBatch> {
     let xmin_array = Float64Array::from(

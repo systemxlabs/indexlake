@@ -11,15 +11,15 @@ use uuid::Uuid;
 use crate::{
     ILError, ILResult,
     catalog::{
-        CatalogDatabase, CatalogSchema, DataFileRecord, INTERNAL_FLAG_FIELD_NAME,
-        INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord, InlineIndexRecord, TransactionHelper,
-        rows_to_record_batch,
+        CatalogDatabase, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME,
+        IndexFileRecord, InlineIndexRecord, TransactionHelper, rows_to_record_batch,
     },
-    expr::{col, lit},
     index::IndexBuilder,
     storage::{DataFileFormat, build_parquet_writer},
     table::Table,
-    utils::{record_batch_with_row_id, schema_without_row_id, serialize_array},
+    utils::{
+        extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, serialize_array,
+    },
 };
 
 pub(crate) async fn process_insert_into_inline_rows(
@@ -35,21 +35,16 @@ pub(crate) async fn process_insert_into_inline_rows(
     let mut non_mergeable_index_builders =
         table.index_manager.new_non_mergeable_index_builders()?;
 
-    let flag = format!("location_{}", uuid::Uuid::new_v4());
-
     // insert inline rows
     for batch in batches {
-        let mut sql_values = record_batch_to_sql_values(batch, tx_helper.database)?;
-        let flag_values = vec![format!("'{flag}'"); batch.num_rows()];
-        sql_values.push(flag_values);
+        let sql_values = record_batch_to_sql_values(batch, tx_helper.database)?;
 
-        let mut inline_field_names = batch
+        let inline_field_names = batch
             .schema()
             .fields()
             .iter()
             .map(|field| field.name().clone())
             .collect::<Vec<_>>();
-        inline_field_names.push(INTERNAL_FLAG_FIELD_NAME.to_string());
 
         tx_helper
             .insert_inline_rows(&table.table_id, &inline_field_names, sql_values)
@@ -57,14 +52,11 @@ pub(crate) async fn process_insert_into_inline_rows(
     }
 
     // append index builders
-    append_mergeable_index_builders(
-        tx_helper,
-        &table.table_id,
-        &table.schema,
-        &flag,
-        &mut mergeable_index_builders,
-    )
-    .await?;
+    for batch in batches {
+        for builder in mergeable_index_builders.iter_mut() {
+            builder.append(batch)?;
+        }
+    }
 
     append_non_mergeable_index_builders(
         tx_helper,
@@ -125,32 +117,16 @@ pub(crate) async fn process_bypass_insert(
         table.config.preferred_data_file_format,
     );
 
-    let reserved_row_ids = reserve_row_ids(tx_helper, table, total_rows).await?;
-
     let mut index_builders = table.index_manager.new_index_builders()?;
 
-    match table.config.preferred_data_file_format {
+    let row_ids = match table.config.preferred_data_file_format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
-            write_parquet_file(
-                table,
-                &relative_path,
-                &reserved_row_ids,
-                batches,
-                &mut index_builders,
-            )
-            .await?
+            write_parquet_file(table, &relative_path, batches, &mut index_builders).await?
         }
         DataFileFormat::LanceV2_0 => {
             #[cfg(feature = "lance-format")]
             {
-                write_lance_file(
-                    table,
-                    &relative_path,
-                    &reserved_row_ids,
-                    batches,
-                    &mut index_builders,
-                )
-                .await?
+                write_lance_file(table, &relative_path, batches, &mut index_builders).await?
             }
             #[cfg(not(feature = "lance-format"))]
             return Err(ILError::not_supported(
@@ -166,7 +142,7 @@ pub(crate) async fn process_bypass_insert(
             format: table.config.preferred_data_file_format,
             relative_path: relative_path.clone(),
             record_count: total_rows as i64,
-            row_ids: reserved_row_ids,
+            row_ids,
             validity: vec![true; total_rows],
         }])
         .await?;
@@ -196,57 +172,12 @@ pub(crate) async fn process_bypass_insert(
     Ok(())
 }
 
-pub(crate) async fn reserve_row_ids(
-    tx_helper: &mut TransactionHelper,
-    table: &Table,
-    count: usize,
-) -> ILResult<Vec<i64>> {
-    let batch_schema = schema_without_row_id(&table.schema);
-    let catalog_schema = CatalogSchema::from_arrow(&batch_schema)?;
-
-    let mut inline_field_names = batch_schema
-        .fields()
-        .iter()
-        .filter(|field| field.name() != INTERNAL_ROW_ID_FIELD_NAME)
-        .map(|field| field.name().clone())
-        .collect::<Vec<_>>();
-    inline_field_names.push(INTERNAL_FLAG_FIELD_NAME.to_string());
-
-    let flag = format!("placeholder_{}", uuid::Uuid::new_v4());
-
-    let mut sql_values = catalog_schema.placeholder_row_sql_values(tx_helper.database, count);
-    let flag_values = vec![format!("'{flag}'"); count];
-    sql_values.push(flag_values);
-
-    tx_helper
-        .insert_inline_rows(&table.table_id, &inline_field_names, sql_values)
-        .await?;
-
-    let row_ids = tx_helper
-        .scan_inline_row_ids_by_flag(&table.table_id, &flag)
-        .await?;
-    if row_ids.len() != count {
-        return Err(ILError::internal(format!(
-            "Failed to reserve row ids: expected {} rows, got {}",
-            count,
-            row_ids.len()
-        )));
-    }
-
-    tx_helper
-        .delete_inline_rows_by_flag(&table.table_id, &flag)
-        .await?;
-
-    Ok(row_ids)
-}
-
 async fn write_parquet_file(
     table: &Table,
     relative_path: &str,
-    reserved_row_ids: &[i64],
     batches: &[RecordBatch],
     index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-) -> ILResult<()> {
+) -> ILResult<Vec<Uuid>> {
     let output_file = table.storage.create_file(relative_path).await?;
 
     let mut arrow_writer = build_parquet_writer(
@@ -256,33 +187,29 @@ async fn write_parquet_file(
         table.config.preferred_data_file_format,
     )?;
 
-    let mut idx = 0;
+    let mut row_ids = Vec::new();
     for batch in batches {
-        let row_ids = &reserved_row_ids[idx..idx + batch.num_rows()];
-        let row_id_array = Int64Array::from_iter(row_ids.iter().copied());
-        let batch = record_batch_with_row_id(batch, row_id_array)?;
+        let row_id_array = extract_row_id_array_from_record_batch(batch)?;
+        row_ids.extend(fixed_size_binary_array_to_uuids(&row_id_array)?);
 
-        arrow_writer.write(&batch).await?;
+        arrow_writer.write(batch).await?;
         for builder in index_builders.iter_mut() {
-            builder.append(&batch)?;
+            builder.append(batch)?;
         }
-
-        idx += batch.num_rows();
     }
 
     arrow_writer.close().await?;
 
-    Ok(())
+    Ok(row_ids)
 }
 
 #[cfg(feature = "lance-format")]
 async fn write_lance_file(
     table: &Table,
     relative_path: &str,
-    reserved_row_ids: &[i64],
     batches: &[RecordBatch],
     index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-) -> ILResult<()> {
+) -> ILResult<Vec<Uuid>> {
     let mut writer = crate::storage::build_lance_writer(
         &table.storage,
         relative_path,
@@ -291,23 +218,20 @@ async fn write_lance_file(
     )
     .await?;
 
-    let mut idx = 0;
+    let mut row_ids = Vec::new();
     for batch in batches {
-        let row_ids = &reserved_row_ids[idx..idx + batch.num_rows()];
-        let row_id_array = Int64Array::from_iter(row_ids.iter().copied());
-        let batch = record_batch_with_row_id(batch, row_id_array)?;
+        let row_id_array = extract_row_id_array_from_record_batch(batch)?;
+        row_ids.extend(fixed_size_binary_array_to_uuids(&row_id_array)?);
 
         writer.write_batch(&batch).await?;
         for builder in index_builders.iter_mut() {
             builder.append(&batch)?;
         }
-
-        idx += batch.num_rows();
     }
 
     writer.finish().await?;
 
-    Ok(())
+    Ok(row_ids)
 }
 
 macro_rules! extract_sql_values {
@@ -321,7 +245,7 @@ macro_rules! extract_sql_values {
         })?;
         for v in array.iter() {
             sql_values.push(match v {
-                Some(v) => $convert(v),
+                Some(v) => $convert(v)?,
                 None => "NULL".to_string(),
             });
         }
@@ -336,193 +260,205 @@ pub(crate) fn record_batch_to_sql_values(
     let mut column_values_list = Vec::with_capacity(record.num_columns());
     for (i, field) in record.schema().fields().iter().enumerate() {
         let array = record.column(i);
-        let column_values =
-            match field.data_type() {
-                DataType::Boolean => {
-                    extract_sql_values!(array, BooleanArray, |v: bool| v.to_string())
+        let column_values = match field.data_type() {
+            DataType::Boolean => {
+                extract_sql_values!(array, BooleanArray, |v: bool| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Int8 => {
+                extract_sql_values!(array, Int8Array, |v: i8| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::Int16 => {
+                extract_sql_values!(array, Int16Array, |v: i16| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::Int32 => {
+                extract_sql_values!(array, Int32Array, |v: i32| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::Int64 => {
+                extract_sql_values!(array, Int64Array, |v: i64| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::UInt8 => {
+                extract_sql_values!(array, UInt8Array, |v: u8| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::UInt16 => {
+                extract_sql_values!(array, UInt16Array, |v: u16| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::UInt32 => {
+                extract_sql_values!(array, UInt32Array, |v: u32| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::UInt64 => {
+                extract_sql_values!(array, UInt64Array, |v: u64| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::Float32 => {
+                extract_sql_values!(array, Float32Array, |v: f32| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Float64 => {
+                extract_sql_values!(array, Float64Array, |v: f64| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Timestamp(TimeUnit::Second, _) => {
+                extract_sql_values!(array, TimestampSecondArray, |v: i64| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Timestamp(TimeUnit::Millisecond, _) => {
+                extract_sql_values!(array, TimestampMillisecondArray, |v: i64| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Timestamp(TimeUnit::Microsecond, _) => {
+                extract_sql_values!(array, TimestampMicrosecondArray, |v: i64| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                extract_sql_values!(array, TimestampNanosecondArray, |v: i64| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Date32 => {
+                extract_sql_values!(array, Date32Array, |v: i32| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::Date64 => {
+                extract_sql_values!(array, Date64Array, |v: i64| Ok::<_, ILError>(v.to_string()))
+            }
+            DataType::Time32(TimeUnit::Second) => {
+                extract_sql_values!(array, Time32SecondArray, |v: i32| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Time32(TimeUnit::Millisecond) => {
+                extract_sql_values!(array, Time32MillisecondArray, |v: i32| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Time64(TimeUnit::Microsecond) => {
+                extract_sql_values!(array, Time64MicrosecondArray, |v: i64| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Time64(TimeUnit::Nanosecond) => {
+                extract_sql_values!(array, Time64NanosecondArray, |v: i64| Ok::<_, ILError>(
+                    v.to_string()
+                ))
+            }
+            DataType::Binary => {
+                extract_sql_values!(array, BinaryArray, |v: &[u8]| Ok::<_, ILError>(
+                    database.sql_binary_literal(v)
+                ))
+            }
+            DataType::FixedSizeBinary(_) => {
+                if field.name() == INTERNAL_ROW_ID_FIELD_NAME {
+                    extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| Ok::<_, ILError>(
+                        database.sql_uuid_literal(&Uuid::from_slice(v)?)
+                    ))
+                } else {
+                    extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| Ok::<_, ILError>(
+                        database.sql_binary_literal(v)
+                    ))
                 }
-                DataType::Int8 => {
-                    extract_sql_values!(array, Int8Array, |v: i8| v.to_string())
+            }
+            DataType::LargeBinary => {
+                extract_sql_values!(array, LargeBinaryArray, |v: &[u8]| Ok::<_, ILError>(
+                    database.sql_binary_literal(v)
+                ))
+            }
+            DataType::BinaryView => {
+                extract_sql_values!(array, BinaryViewArray, |v: &[u8]| Ok::<_, ILError>(
+                    database.sql_binary_literal(v)
+                ))
+            }
+            DataType::Utf8 => {
+                extract_sql_values!(array, StringArray, |v: &str| Ok::<_, ILError>(
+                    database.sql_string_literal(v)
+                ))
+            }
+            DataType::LargeUtf8 => {
+                extract_sql_values!(array, LargeStringArray, |v: &str| Ok::<_, ILError>(
+                    database.sql_string_literal(v)
+                ))
+            }
+            DataType::Utf8View => {
+                extract_sql_values!(array, StringViewArray, |v: &str| Ok::<_, ILError>(
+                    database.sql_string_literal(v)
+                ))
+            }
+            DataType::List(inner_field) => {
+                let mut sql_values = Vec::with_capacity(array.len());
+                let array = array
+                    .as_any()
+                    .downcast_ref::<ListArray>()
+                    .ok_or_else(|| ILError::internal("Failed to downcast array to ListArray"))?;
+                for v in array.iter() {
+                    sql_values.push(match v {
+                        Some(v) => {
+                            database.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
+                        }
+                        None => "NULL".to_string(),
+                    });
                 }
-                DataType::Int16 => {
-                    extract_sql_values!(array, Int16Array, |v: i16| v.to_string())
-                }
-                DataType::Int32 => {
-                    extract_sql_values!(array, Int32Array, |v: i32| v.to_string())
-                }
-                DataType::Int64 => {
-                    extract_sql_values!(array, Int64Array, |v: i64| v.to_string())
-                }
-                DataType::UInt8 => {
-                    extract_sql_values!(array, UInt8Array, |v: u8| v.to_string())
-                }
-                DataType::UInt16 => {
-                    extract_sql_values!(array, UInt16Array, |v: u16| v.to_string())
-                }
-                DataType::UInt32 => {
-                    extract_sql_values!(array, UInt32Array, |v: u32| v.to_string())
-                }
-                DataType::UInt64 => {
-                    extract_sql_values!(array, UInt64Array, |v: u64| v.to_string())
-                }
-                DataType::Float32 => {
-                    extract_sql_values!(array, Float32Array, |v: f32| v.to_string())
-                }
-                DataType::Float64 => {
-                    extract_sql_values!(array, Float64Array, |v: f64| v.to_string())
-                }
-                DataType::Timestamp(TimeUnit::Second, _) => {
-                    extract_sql_values!(array, TimestampSecondArray, |v: i64| v.to_string())
-                }
-                DataType::Timestamp(TimeUnit::Millisecond, _) => {
-                    extract_sql_values!(array, TimestampMillisecondArray, |v: i64| v.to_string())
-                }
-                DataType::Timestamp(TimeUnit::Microsecond, _) => {
-                    extract_sql_values!(array, TimestampMicrosecondArray, |v: i64| v.to_string())
-                }
-                DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-                    extract_sql_values!(array, TimestampNanosecondArray, |v: i64| v.to_string())
-                }
-                DataType::Date32 => {
-                    extract_sql_values!(array, Date32Array, |v: i32| v.to_string())
-                }
-                DataType::Date64 => {
-                    extract_sql_values!(array, Date64Array, |v: i64| v.to_string())
-                }
-                DataType::Time32(TimeUnit::Second) => {
-                    extract_sql_values!(array, Time32SecondArray, |v: i32| v.to_string())
-                }
-                DataType::Time32(TimeUnit::Millisecond) => {
-                    extract_sql_values!(array, Time32MillisecondArray, |v: i32| v.to_string())
-                }
-                DataType::Time64(TimeUnit::Microsecond) => {
-                    extract_sql_values!(array, Time64MicrosecondArray, |v: i64| v.to_string())
-                }
-                DataType::Time64(TimeUnit::Nanosecond) => {
-                    extract_sql_values!(array, Time64NanosecondArray, |v: i64| v.to_string())
-                }
-                DataType::Binary => {
-                    extract_sql_values!(array, BinaryArray, |v: &[u8]| database
-                        .sql_binary_literal(v))
-                }
-                DataType::FixedSizeBinary(_) => {
-                    extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| database
-                        .sql_binary_literal(v))
-                }
-                DataType::LargeBinary => {
-                    extract_sql_values!(array, LargeBinaryArray, |v: &[u8]| database
-                        .sql_binary_literal(v))
-                }
-                DataType::BinaryView => {
-                    extract_sql_values!(array, BinaryViewArray, |v: &[u8]| database
-                        .sql_binary_literal(v))
-                }
-                DataType::Utf8 => {
-                    extract_sql_values!(array, StringArray, |v: &str| database
-                        .sql_string_literal(v))
-                }
-                DataType::LargeUtf8 => {
-                    extract_sql_values!(array, LargeStringArray, |v: &str| database
-                        .sql_string_literal(v))
-                }
-                DataType::Utf8View => {
-                    extract_sql_values!(array, StringViewArray, |v: &str| database
-                        .sql_string_literal(v))
-                }
-                DataType::List(inner_field) => {
-                    let mut sql_values = Vec::with_capacity(array.len());
-                    let array = array.as_any().downcast_ref::<ListArray>().ok_or_else(|| {
-                        ILError::internal("Failed to downcast array to ListArray")
+                sql_values
+            }
+            DataType::FixedSizeList(inner_field, _len) => {
+                let mut sql_values = Vec::with_capacity(array.len());
+                let array = array
+                    .as_any()
+                    .downcast_ref::<FixedSizeListArray>()
+                    .ok_or_else(|| {
+                        ILError::internal("Failed to downcast array to FixedSizeListArray")
                     })?;
-                    for v in array.iter() {
-                        sql_values.push(match v {
-                            Some(v) => database
-                                .sql_binary_literal(&serialize_array(v, inner_field.clone())?),
-                            None => "NULL".to_string(),
-                        });
-                    }
-                    sql_values
+                for v in array.iter() {
+                    sql_values.push(match v {
+                        Some(v) => {
+                            database.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
+                        }
+                        None => "NULL".to_string(),
+                    });
                 }
-                DataType::FixedSizeList(inner_field, _len) => {
-                    let mut sql_values = Vec::with_capacity(array.len());
-                    let array = array
-                        .as_any()
-                        .downcast_ref::<FixedSizeListArray>()
-                        .ok_or_else(|| {
-                            ILError::internal("Failed to downcast array to FixedSizeListArray")
-                        })?;
-                    for v in array.iter() {
-                        sql_values.push(match v {
-                            Some(v) => database
-                                .sql_binary_literal(&serialize_array(v, inner_field.clone())?),
-                            None => "NULL".to_string(),
-                        });
-                    }
-                    sql_values
+                sql_values
+            }
+            DataType::LargeList(inner_field) => {
+                let mut sql_values = Vec::with_capacity(array.len());
+                let array = array
+                    .as_any()
+                    .downcast_ref::<LargeListArray>()
+                    .ok_or_else(|| {
+                        ILError::internal("Failed to downcast array to LargeListArray")
+                    })?;
+                for v in array.iter() {
+                    sql_values.push(match v {
+                        Some(v) => {
+                            database.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
+                        }
+                        None => "NULL".to_string(),
+                    });
                 }
-                DataType::LargeList(inner_field) => {
-                    let mut sql_values = Vec::with_capacity(array.len());
-                    let array =
-                        array
-                            .as_any()
-                            .downcast_ref::<LargeListArray>()
-                            .ok_or_else(|| {
-                                ILError::internal("Failed to downcast array to LargeListArray")
-                            })?;
-                    for v in array.iter() {
-                        sql_values.push(match v {
-                            Some(v) => database
-                                .sql_binary_literal(&serialize_array(v, inner_field.clone())?),
-                            None => "NULL".to_string(),
-                        });
-                    }
-                    sql_values
-                }
-                DataType::Decimal128(_, _) => {
-                    extract_sql_values!(array, Decimal128Array, |v: i128| format!("'{v}'"))
-                }
-                DataType::Decimal256(_, _) => {
-                    extract_sql_values!(array, Decimal256Array, |v: i256| format!("'{v}'"))
-                }
-                _ => {
-                    return Err(ILError::not_supported(format!(
-                        "Unsupported data type: {}",
-                        field.data_type()
-                    )));
-                }
-            };
+                sql_values
+            }
+            DataType::Decimal128(_, _) => {
+                extract_sql_values!(array, Decimal128Array, |v: i128| Ok::<_, ILError>(format!(
+                    "'{v}'"
+                )))
+            }
+            DataType::Decimal256(_, _) => {
+                extract_sql_values!(array, Decimal256Array, |v: i256| Ok::<_, ILError>(format!(
+                    "'{v}'"
+                )))
+            }
+            _ => {
+                return Err(ILError::not_supported(format!(
+                    "Unsupported data type: {}",
+                    field.data_type()
+                )));
+            }
+        };
         column_values_list.push(column_values);
     }
     Ok(column_values_list)
-}
-
-pub(crate) async fn append_mergeable_index_builders(
-    tx_helper: &mut TransactionHelper,
-    table_id: &Uuid,
-    table_schema: &SchemaRef,
-    flag: &str,
-    index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-) -> ILResult<()> {
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
-
-    let filter = col(INTERNAL_FLAG_FIELD_NAME).eq(lit(flag));
-    let row_stream = tx_helper
-        .scan_inline_rows(table_id, &catalog_schema, &[filter], None)
-        .await?;
-
-    let mut inline_stream = row_stream.chunks(100).map(move |rows| {
-        let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(table_schema, &rows)?;
-        Ok::<_, ILError>(batch)
-    });
-
-    while let Some(batch) = inline_stream.next().await {
-        let batch = batch?;
-        for builder in index_builders.iter_mut() {
-            builder.append(&batch)?;
-        }
-    }
-    Ok(())
 }
 
 pub(crate) async fn append_non_mergeable_index_builders(

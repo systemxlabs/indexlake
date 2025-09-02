@@ -4,8 +4,8 @@ use uuid::Uuid;
 use crate::{
     ILResult,
     catalog::{
-        CatalogDataType, CatalogDatabase, INTERNAL_FLAG_FIELD_NAME, INTERNAL_ROW_ID_FIELD_NAME,
-        TransactionHelper, inline_row_table_name,
+        CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
+        inline_row_table_name,
     },
 };
 
@@ -18,14 +18,10 @@ impl TransactionHelper {
         let mut columns = Vec::new();
         match self.database {
             CatalogDatabase::Postgres => {
-                columns.push(format!(
-                    "{INTERNAL_ROW_ID_FIELD_NAME} BIGSERIAL PRIMARY KEY"
-                ));
+                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} UUID"));
             }
             CatalogDatabase::Sqlite => {
-                columns.push(format!(
-                    "{INTERNAL_ROW_ID_FIELD_NAME} INTEGER PRIMARY KEY AUTOINCREMENT"
-                ));
+                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} BLOB"));
             }
         }
 
@@ -41,8 +37,6 @@ impl TransactionHelper {
                 },
             ));
         }
-
-        columns.push(format!("{INTERNAL_FLAG_FIELD_NAME} VARCHAR DEFAULT NULL"));
 
         self.transaction
             .execute(&format!(

@@ -41,14 +41,14 @@ async fn scan_with_projection(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+-----+
-| _indexlake_row_id | age |
-+-------------------+-----+
-| 1                 | 20  |
-| 2                 | 21  |
-| 3                 | 22  |
-| 4                 | 23  |
-+-------------------+-----+"#,
+        r#"+-----+
+| age |
++-----+
+| 20  |
+| 21  |
+| 22  |
+| 23  |
++-----+"#,
     );
 
     Ok(())
@@ -80,11 +80,11 @@ async fn scan_with_filters(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 3                 | Charlie | 22  |
-+-------------------+---------+-----+"#
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Charlie | 22  |
++---------+-----+"#
     );
 
     Ok(())
@@ -174,13 +174,13 @@ async fn partitioned_scan(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+-------+-----+
-| _indexlake_row_id | name  | age |
-+-------------------+-------+-----+
-| 1                 | Alice | 20  |
-| 2                 | Bob   | 21  |
-| 5                 | Eva   | 24  |
-+-------------------+-------+-----+"#,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| Alice | 20  |
+| Bob   | 21  |
+| Eva   | 24  |
++-------+-----+"#,
     );
 
     let scan = TableScan::default().with_partition(TableScanPartition {
@@ -191,12 +191,12 @@ async fn partitioned_scan(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     let scan = TableScan::default().with_partition(TableScanPartition {
@@ -207,10 +207,10 @@ async fn partitioned_scan(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+------+-----+
-| _indexlake_row_id | name | age |
-+-------------------+------+-----+
-+-------------------+------+-----+"#,
+        r#"+------+-----+
+| name | age |
++------+-----+
++------+-----+"#,
     );
 
     Ok(())

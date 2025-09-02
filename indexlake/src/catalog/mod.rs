@@ -28,12 +28,10 @@ pub static INTERNAL_ROW_ID_FIELD_NAME: &str = "_indexlake_row_id";
 pub static INTERNAL_ROW_ID_FIELD_REF: LazyLock<FieldRef> = LazyLock::new(|| {
     Arc::new(Field::new(
         INTERNAL_ROW_ID_FIELD_NAME,
-        DataType::Int64,
+        DataType::FixedSizeBinary(16),
         false,
     ))
 });
-
-pub static INTERNAL_FLAG_FIELD_NAME: &str = "_indexlake_flag";
 
 #[async_trait::async_trait]
 pub trait Catalog: Debug + Send + Sync {

@@ -89,7 +89,13 @@ impl CatalogDataType {
             DataType::Time32(_) => Ok(CatalogDataType::Int32),
             DataType::Time64(_) => Ok(CatalogDataType::Int64),
             DataType::Binary => Ok(CatalogDataType::Binary),
-            DataType::FixedSizeBinary(_) => Ok(CatalogDataType::Binary),
+            DataType::FixedSizeBinary(size) => {
+                if *size == 16 {
+                    Ok(CatalogDataType::Uuid)
+                } else {
+                    Ok(CatalogDataType::Binary)
+                }
+            }
             DataType::LargeBinary => Ok(CatalogDataType::Binary),
             DataType::BinaryView => Ok(CatalogDataType::Binary),
             DataType::Utf8 => Ok(CatalogDataType::Utf8),

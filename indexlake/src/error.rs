@@ -98,3 +98,10 @@ impl From<tokio::task::JoinError> for ILError {
         ILError::InternalError(format!("Tokio join error: {err}"), Location::caller())
     }
 }
+
+impl From<uuid::Error> for ILError {
+    #[track_caller]
+    fn from(err: uuid::Error) -> Self {
+        ILError::InternalError(format!("UUID error: {err}"), Location::caller())
+    }
+}

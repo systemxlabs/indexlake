@@ -3,13 +3,14 @@ mod manager;
 
 pub use defination::*;
 pub use manager::*;
+use uuid::Uuid;
 
 use crate::{
     ILResult,
     expr::Expr,
     storage::{InputFile, OutputFile},
 };
-use arrow::array::{Int64Array, RecordBatch};
+use arrow::array::{FixedSizeBinaryArray, RecordBatch};
 use std::{any::Any, fmt::Debug, sync::Arc};
 
 pub trait IndexKind: Debug + Send + Sync {
@@ -69,13 +70,13 @@ pub struct SearchIndexEntries {
 
 #[derive(Debug, Clone)]
 pub struct RowIdScore {
-    pub row_id: i64,
+    pub row_id: Uuid,
     pub score: f64,
 }
 
 #[derive(Debug, Clone)]
 pub struct FilterIndexEntries {
-    pub row_ids: Int64Array,
+    pub row_ids: FixedSizeBinaryArray,
 }
 
 #[derive(Debug, Clone, Copy)]

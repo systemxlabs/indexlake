@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     ILResult,
-    catalog::{DataFileRecord, INTERNAL_FLAG_FIELD_NAME, TransactionHelper, inline_row_table_name},
+    catalog::{DataFileRecord, TransactionHelper, inline_row_table_name},
     expr::Expr,
 };
 
@@ -26,7 +26,7 @@ impl TransactionHelper {
 
         self.transaction
             .execute(&format!(
-                "UPDATE {} SET {} WHERE {} AND {INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'",
+                "UPDATE {} SET {} WHERE {}",
                 inline_row_table_name(table_id),
                 set_strs.join(", "),
                 condition.to_sql(self.database)?
@@ -52,7 +52,7 @@ impl TransactionHelper {
     pub(crate) async fn update_data_file_rows_as_invalid(
         &mut self,
         mut data_file_record: DataFileRecord,
-        invalid_row_ids: &HashSet<i64>,
+        invalid_row_ids: &HashSet<Uuid>,
     ) -> ILResult<usize> {
         if invalid_row_ids.is_empty() {
             return Ok(1);

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use arrow::array::{Int64Array, RecordBatch};
+use arrow::array::{FixedSizeBinaryArray, RecordBatch};
 use arrow::datatypes::{DataType, Schema, SchemaRef};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -16,7 +16,7 @@ pub(crate) async fn process_delete_by_condition(
     tx_helper: &mut TransactionHelper,
     table: &Table,
     condition: &Expr,
-    matched_data_file_row_ids: HashMap<Uuid, HashSet<i64>>,
+    matched_data_file_row_ids: HashMap<Uuid, HashSet<Uuid>>,
 ) -> ILResult<()> {
     // Directly delete inline rows
     tx_helper
@@ -71,7 +71,7 @@ pub(crate) async fn process_delete_by_row_id_condition(
     for mut data_file_record in data_file_records {
         // We need row index to update validity, so we need to get all row ids
         let row_ids = data_file_record.row_ids;
-        let row_id_array = Int64Array::from(row_ids);
+        let row_id_array = FixedSizeBinaryArray::try_from_iter(row_ids.into_iter())?;
 
         let batch = RecordBatch::try_new(
             Arc::new(Schema::new(vec![INTERNAL_ROW_ID_FIELD_REF.clone()])),
@@ -99,7 +99,7 @@ pub(crate) async fn parallel_find_matched_data_file_row_ids(
     table_schema: SchemaRef,
     condition: Expr,
     data_file_records: Vec<DataFileRecord>,
-) -> ILResult<HashMap<Uuid, HashSet<i64>>> {
+) -> ILResult<HashMap<Uuid, HashSet<Uuid>>> {
     condition.check_data_type(&table_schema, &DataType::Boolean)?;
 
     let mut handles = Vec::new();
@@ -108,7 +108,7 @@ pub(crate) async fn parallel_find_matched_data_file_row_ids(
         let table_schema = table_schema.clone();
         let condition = condition.clone();
 
-        let handle: JoinHandle<ILResult<(Uuid, HashSet<i64>)>> = tokio::spawn(async move {
+        let handle: JoinHandle<ILResult<(Uuid, HashSet<Uuid>)>> = tokio::spawn(async move {
             let matched_row_ids = find_matched_row_ids_from_data_file(
                 &storage,
                 &table_schema,

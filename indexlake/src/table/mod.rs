@@ -18,18 +18,18 @@ pub(crate) use update::*;
 use uuid::Uuid;
 
 use crate::RecordBatchStream;
-use crate::catalog::{CatalogHelper, DataFileRecord, Scalar};
+use crate::catalog::{CatalogHelper, DataFileRecord, INTERNAL_ROW_ID_FIELD_REF, Scalar};
 use crate::catalog::{FieldRecord, IndexFileRecord};
 use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::DataFileFormat;
-use crate::utils::schema_without_row_id;
+use crate::utils::{build_row_id_array, schema_without_row_id};
 use crate::{
     ILError, ILResult,
     catalog::{Catalog, TransactionHelper},
     storage::Storage,
 };
-use arrow::array::RecordBatch;
+use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, SchemaRef};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -365,6 +365,14 @@ pub fn check_and_rewrite_insert_batches(
                 "Invalid batch schema: {batch_schema}, expected schema: {expected_schema}",
             )));
         }
+
+        fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
+
+        let row_ids = (0..batch.num_rows())
+            .map(|_| Uuid::now_v7().into_bytes())
+            .collect::<Vec<_>>();
+        let row_id_array = build_row_id_array(row_ids.into_iter(), batch.num_rows())?;
+        arrays.insert(0, Arc::new(row_id_array) as ArrayRef);
 
         let rewritten_batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)?;
         rewritten_batches.push(rewritten_batch);

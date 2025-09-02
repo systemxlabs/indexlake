@@ -26,6 +26,7 @@ use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
 use arrow::util::display::{ArrayFormatter, FormatOptions};
 use arrow_schema::{Field, Schema, TimeUnit};
+use uuid::Uuid;
 
 use crate::{ILError, ILResult, catalog::CatalogDatabase};
 
@@ -184,11 +185,18 @@ impl Scalar {
                 Some(value) => Ok(database.sql_string_literal(value)),
                 None => Ok("null".to_string()),
             },
-            Scalar::Binary(v)
-            | Scalar::BinaryView(v)
-            | Scalar::FixedSizeBinary(_, v)
-            | Scalar::LargeBinary(v) => match v {
+            Scalar::Binary(v) | Scalar::BinaryView(v) | Scalar::LargeBinary(v) => match v {
                 Some(value) => Ok(database.sql_binary_literal(value)),
+                None => Ok("null".to_string()),
+            },
+            Scalar::FixedSizeBinary(size, v) => match v {
+                Some(value) => {
+                    if *size == 16 {
+                        Ok(database.sql_uuid_literal(&Uuid::from_slice(value)?))
+                    } else {
+                        Ok(database.sql_binary_literal(value))
+                    }
+                }
                 None => Ok("null".to_string()),
             },
             Scalar::Decimal128(v, precision, scale) => match v {

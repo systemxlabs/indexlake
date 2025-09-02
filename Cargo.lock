@@ -3677,6 +3677,7 @@ dependencies = [
  "parquet",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -3693,6 +3694,7 @@ dependencies = [
  "serde",
  "serde_json",
  "space",
+ "uuid",
 ]
 
 [[package]]
@@ -3709,6 +3711,7 @@ dependencies = [
  "rstar",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

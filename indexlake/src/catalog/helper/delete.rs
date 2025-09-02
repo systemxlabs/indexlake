@@ -2,10 +2,7 @@ use uuid::Uuid;
 
 use crate::{
     ILResult,
-    catalog::{
-        INTERNAL_FLAG_FIELD_NAME, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
-        inline_row_table_name,
-    },
+    catalog::{INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper, inline_row_table_name},
     expr::Expr,
 };
 
@@ -14,7 +11,7 @@ impl TransactionHelper {
         &mut self,
         table_id: &Uuid,
         filters: &[Expr],
-        row_ids: Option<&[i64]>,
+        row_ids: Option<&[Uuid]>,
     ) -> ILResult<usize> {
         if let Some(row_ids) = row_ids
             && row_ids.is_empty()
@@ -26,15 +23,12 @@ impl TransactionHelper {
             .iter()
             .map(|f| f.to_sql(self.database))
             .collect::<Result<Vec<_>, _>>()?;
-        filter_strs.push(format!(
-            "{INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'"
-        ));
         if let Some(row_ids) = row_ids {
             filter_strs.push(format!(
                 "{INTERNAL_ROW_ID_FIELD_NAME} IN ({})",
                 row_ids
                     .iter()
-                    .map(|id| id.to_string())
+                    .map(|id| self.database.sql_uuid_literal(id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -45,19 +39,6 @@ impl TransactionHelper {
                 "DELETE FROM {} WHERE {}",
                 inline_row_table_name(table_id),
                 filter_strs.join(" AND ")
-            ))
-            .await
-    }
-
-    pub(crate) async fn delete_inline_rows_by_flag(
-        &mut self,
-        table_id: &Uuid,
-        flag: &str,
-    ) -> ILResult<usize> {
-        self.transaction
-            .execute(&format!(
-                "DELETE FROM {} WHERE {INTERNAL_FLAG_FIELD_NAME} = '{flag}'",
-                inline_row_table_name(table_id)
             ))
             .await
     }

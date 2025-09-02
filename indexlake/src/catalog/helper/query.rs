@@ -10,8 +10,7 @@ use crate::expr::Expr;
 use crate::{
     ILResult,
     catalog::{
-        CatalogDataType, CatalogSchema, CatalogSchemaRef, Column, INTERNAL_FLAG_FIELD_NAME,
-        INTERNAL_ROW_ID_FIELD_NAME, Row,
+        CatalogDataType, CatalogSchema, CatalogSchemaRef, Column, INTERNAL_ROW_ID_FIELD_NAME, Row,
     },
     catalog::{RowStream, TableRecord, TransactionHelper},
 };
@@ -68,13 +67,16 @@ impl TransactionHelper {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> ILResult<RowStream<'_>> {
-        let mut filter_strs = filters
+        let filter_strs = filters
             .iter()
             .map(|f| f.to_sql(self.database))
             .collect::<Result<Vec<_>, _>>()?;
-        filter_strs.push(format!(
-            "{INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'"
-        ));
+
+        let where_clause = if filter_strs.is_empty() {
+            "".to_string()
+        } else {
+            format!(" WHERE {}", filter_strs.join(" AND "))
+        };
 
         let limit_clause = limit
             .map(|limit| format!(" LIMIT {limit}"))
@@ -82,35 +84,13 @@ impl TransactionHelper {
         self.transaction
             .query(
                 &format!(
-                    "SELECT {}  FROM {} WHERE {}{limit_clause}",
+                    "SELECT {}  FROM {}{where_clause}{limit_clause}",
                     schema.select_items(self.database).join(", "),
                     inline_row_table_name(table_id),
-                    filter_strs.join(" AND ")
                 ),
                 Arc::clone(schema),
             )
             .await
-    }
-
-    pub(crate) async fn scan_inline_row_ids_by_flag(
-        &mut self,
-        table_id: &Uuid,
-        flag: &str,
-    ) -> ILResult<Vec<i64>> {
-        let schema = Arc::new(CatalogSchema::new(vec![Column::new(
-            "row_id",
-            CatalogDataType::Int64,
-            false,
-        )]));
-        let rows = self.query_rows(
-            &format!("SELECT {INTERNAL_ROW_ID_FIELD_NAME} FROM {} WHERE {INTERNAL_FLAG_FIELD_NAME} = '{flag}'", inline_row_table_name(table_id)),
-            schema,
-        ).await?;
-        let mut row_ids = Vec::with_capacity(rows.len());
-        for row in rows {
-            row_ids.push(row.int64(0)?.expect("row_id is not null"));
-        }
-        Ok(row_ids)
     }
 
     pub(crate) async fn count_inline_rows(&mut self, table_id: &Uuid) -> ILResult<i64> {
@@ -278,7 +258,7 @@ impl CatalogHelper {
         &self,
         table_id: &Uuid,
         table_schema: &CatalogSchemaRef,
-        row_ids: Option<&[i64]>,
+        row_ids: Option<&[Uuid]>,
         filters: &[Expr],
     ) -> ILResult<RowStream<'static>> {
         if let Some(row_ids) = row_ids
@@ -292,30 +272,31 @@ impl CatalogHelper {
             .map(|f| f.to_sql(self.catalog.database()))
             .collect::<Result<Vec<_>, _>>()?;
 
-        filter_strs.push(format!(
-            "{INTERNAL_FLAG_FIELD_NAME} NOT LIKE 'placeholder%'"
-        ));
-
         if let Some(row_ids) = row_ids {
             filter_strs.push(format!(
                 "{INTERNAL_ROW_ID_FIELD_NAME} IN ({})",
                 row_ids
                     .iter()
-                    .map(|id| id.to_string())
+                    .map(|id| self.catalog.database().sql_uuid_literal(id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
         }
 
+        let where_clause = if filter_strs.is_empty() {
+            "".to_string()
+        } else {
+            format!(" WHERE {}", filter_strs.join(" AND "))
+        };
+
         self.catalog
             .query(
                 &format!(
-                    "SELECT {} FROM {} WHERE {}",
+                    "SELECT {} FROM {}{where_clause}",
                     table_schema
                         .select_items(self.catalog.database())
                         .join(", "),
                     inline_row_table_name(table_id),
-                    filter_strs.join(" AND ")
                 ),
                 Arc::clone(table_schema),
             )

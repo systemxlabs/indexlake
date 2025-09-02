@@ -1,18 +1,19 @@
-use arrow::array::Int64Array;
 use indexlake::{
     ILError, ILResult,
     catalog::Scalar,
     expr::{Expr, Function},
     index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery},
+    utils::build_row_id_array,
 };
 use rstar::{AABB, RTree, RTreeObject};
+use uuid::Uuid;
 
 use crate::{RStarIndexParams, compute_aabb};
 
 #[derive(Debug)]
 pub struct IndexTreeObject {
     pub aabb: AABB<[f64; 2]>,
-    pub row_id: i64,
+    pub row_id: Uuid,
 }
 
 impl RTreeObject for IndexTreeObject {
@@ -69,8 +70,10 @@ impl Index for RStarIndex {
             .map(|object| object.row_id)
             .collect::<Vec<_>>();
 
+        let row_id_array = build_row_id_array(row_ids.iter(), row_ids.len())?;
+
         Ok(FilterIndexEntries {
-            row_ids: Int64Array::from(row_ids),
+            row_ids: row_id_array,
         })
     }
 }

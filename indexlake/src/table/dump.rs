@@ -212,7 +212,7 @@ impl DumpTask {
         row_stream: RowStream<'_>,
         relative_path: &str,
         index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-    ) -> ILResult<Vec<i64>> {
+    ) -> ILResult<Vec<Uuid>> {
         let mut row_ids = Vec::new();
 
         let output_file = self.storage.create_file(relative_path).await?;
@@ -253,7 +253,7 @@ impl DumpTask {
         row_stream: RowStream<'_>,
         relative_path: &str,
         index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-    ) -> ILResult<Vec<i64>> {
+    ) -> ILResult<Vec<Uuid>> {
         let mut row_ids = Vec::new();
 
         let mut writer = crate::storage::build_lance_writer(

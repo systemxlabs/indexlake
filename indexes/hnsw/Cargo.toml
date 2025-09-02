@@ -20,3 +20,4 @@ rand_pcg = { version = "0.3", features = ["serde1"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 space = { workspace = true }
+uuid = { workspace = true }

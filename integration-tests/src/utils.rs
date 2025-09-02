@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use arrow::{
-    array::{ArrayRef, RecordBatch, RecordBatchOptions},
+    array::{ArrayRef, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions},
     util::pretty::pretty_format_batches_with_schema,
 };
 use datafusion::{
@@ -13,7 +13,7 @@ use indexlake::{
     ILError, ILResult,
     catalog::INTERNAL_ROW_ID_FIELD_NAME,
     table::{Table, TableScan, TableSearch},
-    utils::project_schema,
+    utils::{project_schema, schema_without_row_id},
 };
 
 pub fn sort_record_batches(batches: &[RecordBatch], sort_col: &str) -> ILResult<RecordBatch> {
@@ -47,21 +47,41 @@ pub async fn full_table_scan(table: &Table) -> ILResult<String> {
 
 pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
     let batch_schema = Arc::new(project_schema(&table.schema, scan.projection.as_ref())?);
+    let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
+
     let stream = table.scan(scan).await?;
     let batches = stream.try_collect::<Vec<_>>().await?;
-    let sorted_batches = if batches.is_empty() {
+    let mut sorted_batches = if batches.is_empty() {
         vec![]
     } else {
         vec![sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?]
     };
+
+    for batch in sorted_batches.iter_mut() {
+        let Ok(idx) = batch.schema().index_of(INTERNAL_ROW_ID_FIELD_NAME) else {
+            continue;
+        };
+        batch.remove_column(idx);
+    }
+
     let table_str = pretty_format_batches_with_schema(batch_schema, &sorted_batches)?.to_string();
     Ok(table_str)
 }
 
 pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String> {
     let batch_schema = Arc::new(project_schema(&table.schema, search.projection.as_ref())?);
+    let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
+
     let stream = table.search(search).await?;
-    let batches = stream.try_collect::<Vec<_>>().await?;
+    let mut batches = stream.try_collect::<Vec<_>>().await?;
+
+    for batch in batches.iter_mut() {
+        let Ok(idx) = batch.schema().index_of(INTERNAL_ROW_ID_FIELD_NAME) else {
+            continue;
+        };
+        batch.remove_column(idx);
+    }
+
     let table_str = pretty_format_batches_with_schema(batch_schema, &batches)?.to_string();
     Ok(table_str)
 }
@@ -85,18 +105,48 @@ pub async fn datafusion_exec_and_sort(
         "plan: {}",
         DisplayableExecutionPlan::new(plan.as_ref()).indent(true)
     );
+
     let plan_schema = plan.schema();
+    let plan_schema = Arc::new(schema_without_row_id(&plan_schema));
+
     let batches = collect(plan, ctx.task_ctx()).await.unwrap();
-    let sorted_batches = if batches.is_empty() {
+    let mut sorted_batches = if batches.is_empty() {
         vec![]
     } else if let Some(sort_col) = sort_col {
         vec![sort_record_batches(&batches, sort_col).unwrap()]
     } else {
         batches
     };
+
+    for batch in sorted_batches.iter_mut() {
+        let Ok(idx) = batch.schema().index_of(INTERNAL_ROW_ID_FIELD_NAME) else {
+            continue;
+        };
+        batch.remove_column(idx);
+    }
+
     let result_str = pretty_format_batches_with_schema(plan_schema, &sorted_batches)
         .unwrap()
         .to_string();
     println!("{}", result_str);
     result_str
+}
+
+pub async fn read_first_row_id_bytes_from_table(table: &Table) -> ILResult<Vec<u8>> {
+    let stream = table.scan(TableScan::default()).await?;
+    let batches = stream.try_collect::<Vec<_>>().await?;
+    if batches.is_empty() {
+        return Err(ILError::invalid_input("batches is empty"));
+    }
+    let sorted_batch = sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?;
+    let first_row_id_bytes = sorted_batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .unwrap()
+        .value(0);
+    if first_row_id_bytes.len() != 16 {
+        return Err(ILError::invalid_input("first row id bytes is not 16 bytes"));
+    }
+    Ok(first_row_id_bytes.to_vec())
 }

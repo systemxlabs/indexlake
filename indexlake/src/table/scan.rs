@@ -18,7 +18,7 @@ use crate::{
     index::{FilterSupport, IndexManager},
     storage::read_data_file_by_record,
     table::Table,
-    utils::project_schema,
+    utils::{fixed_size_binary_array_to_uuids, project_schema},
 };
 
 #[derive(Debug, Clone, derive_with::With)]
@@ -309,18 +309,14 @@ async fn index_scan_inline_rows(
         let filter_index_entries = index.filter(&filters).await?;
         filter_index_entries_list.push(filter_index_entries);
     }
-    let mut intersected_row_ids = filter_index_entries_list[0]
-        .row_ids
-        .values()
-        .iter()
-        .cloned()
-        .collect::<HashSet<_>>();
+
+    let mut intersected_row_ids =
+        fixed_size_binary_array_to_uuids(&filter_index_entries_list[0].row_ids)?
+            .into_iter()
+            .collect::<HashSet<_>>();
     for filter_index_entries in filter_index_entries_list.iter().skip(1) {
-        let set = filter_index_entries
-            .row_ids
-            .values()
-            .iter()
-            .cloned()
+        let set = fixed_size_binary_array_to_uuids(&filter_index_entries.row_ids)?
+            .into_iter()
             .collect::<HashSet<_>>();
         intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
     }
@@ -400,7 +396,7 @@ async fn filter_index_files_row_ids(
     filters: &[Expr],
     index_file_records: &HashMap<Uuid, &IndexFileRecord>,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
-) -> ILResult<HashSet<i64>> {
+) -> ILResult<HashSet<Uuid>> {
     let mut filter_index_entries_list = Vec::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
         let index_def = table
@@ -438,18 +434,13 @@ async fn filter_index_files_row_ids(
         filter_index_entries_list.push(filter_index_entries);
     }
 
-    let mut intersected_row_ids = filter_index_entries_list[0]
-        .row_ids
-        .values()
-        .iter()
-        .cloned()
-        .collect::<HashSet<_>>();
+    let mut intersected_row_ids =
+        fixed_size_binary_array_to_uuids(&filter_index_entries_list[0].row_ids)?
+            .into_iter()
+            .collect::<HashSet<_>>();
     for filter_index_entries in filter_index_entries_list.iter().skip(1) {
-        let set = filter_index_entries
-            .row_ids
-            .values()
-            .iter()
-            .cloned()
+        let set = fixed_size_binary_array_to_uuids(&filter_index_entries.row_ids)?
+            .into_iter()
             .collect::<HashSet<_>>();
         intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
     }

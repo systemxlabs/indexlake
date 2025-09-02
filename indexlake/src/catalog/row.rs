@@ -21,11 +21,11 @@ impl Row {
         Self { schema, values }
     }
 
-    pub fn get_row_id(&self) -> ILResult<Option<i64>> {
+    pub fn get_row_id(&self) -> ILResult<Option<Uuid>> {
         let Some(idx) = self.schema.index_of(INTERNAL_ROW_ID_FIELD_NAME) else {
             return Ok(None);
         };
-        self.int64(idx)
+        self.uuid(idx)
     }
 
     pub fn int8(&self, index: usize) -> ILResult<Option<i8>> {
@@ -156,9 +156,7 @@ impl Row {
     pub fn uuid(&self, index: usize) -> ILResult<Option<Uuid>> {
         match &self.values[index] {
             Scalar::Binary(Some(v)) => {
-                let uuid = Uuid::from_slice(v).map_err(|e| {
-                    ILError::internal(format!("Failed to parse UUID from binary value: {e:?}"))
-                })?;
+                let uuid = Uuid::from_slice(v)?;
                 Ok(Some(uuid))
             }
             Scalar::Binary(None) => Ok(None),

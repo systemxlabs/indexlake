@@ -4,19 +4,20 @@ use std::{
 };
 
 use arrow::{
-    array::{AsArray, RecordBatch, RecordBatchOptions},
-    datatypes::{Int64Type, SchemaRef},
+    array::{RecordBatch, RecordBatchOptions},
+    datatypes::SchemaRef,
 };
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::{
-    ILError, ILResult, RecordBatchStream,
+    ILResult, RecordBatchStream,
     catalog::{DataFileRecord, TransactionHelper},
     expr::Expr,
     storage::{Storage, read_data_file_by_record, read_data_file_by_record_and_row_id_condition},
     table::{Table, process_insert_into_inline_rows, rebuild_inline_indexes},
+    utils::extract_row_ids_from_record_batch,
 };
 
 pub(crate) async fn process_update_by_condition(
@@ -80,16 +81,8 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
         if batch.num_rows() == 0 {
             continue;
         }
-        let row_id_array = batch
-            .column(0)
-            .as_primitive_opt::<Int64Type>()
-            .ok_or_else(|| {
-                ILError::internal(format!(
-                    "row id array should be Int64Array, but got {:?}",
-                    batch.column(0).data_type()
-                ))
-            })?;
-        updated_row_ids.extend(row_id_array.values());
+        let row_ids = extract_row_ids_from_record_batch(&batch)?;
+        updated_row_ids.extend(row_ids);
         let updated_batch = update_record_batch(&batch, set_map)?;
         process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
     }
@@ -132,17 +125,8 @@ pub(crate) async fn update_data_file_rows_by_condition(
     while let Some(batch) = stream.next().await {
         let batch = batch?;
 
-        let row_id_array = batch
-            .column(0)
-            .as_primitive_opt::<Int64Type>()
-            .ok_or_else(|| {
-                ILError::internal(format!(
-                    "row id array should be Int64Array, but got {:?}",
-                    batch.column(0).data_type()
-                ))
-            })?;
-
-        updated_row_ids.extend(row_id_array.values());
+        let row_ids = extract_row_ids_from_record_batch(&batch)?;
+        updated_row_ids.extend(row_ids);
         let updated_batch = update_record_batch(&batch, set_map)?;
         process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
     }

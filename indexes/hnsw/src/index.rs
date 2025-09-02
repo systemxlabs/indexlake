@@ -8,6 +8,7 @@ use indexlake::{
 };
 use rand_pcg::Pcg64;
 use space::Knn;
+use uuid::Uuid;
 
 use crate::Euclidean;
 
@@ -33,11 +34,11 @@ impl SearchQuery for HnswSearchQuery {
 
 pub struct HnswIndex {
     hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
-    row_ids: Vec<i64>,
+    row_ids: Vec<Uuid>,
 }
 
 impl HnswIndex {
-    pub fn new(hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>, row_ids: Vec<i64>) -> Self {
+    pub fn new(hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>, row_ids: Vec<Uuid>) -> Self {
         Self { hnsw, row_ids }
     }
 }

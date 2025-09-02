@@ -1,4 +1,5 @@
 use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
+use indexlake::catalog::Scalar;
 use indexlake::expr::{col, lit};
 use indexlake::{
     Client,
@@ -6,7 +7,7 @@ use indexlake::{
     storage::{DataFileFormat, Storage},
 };
 use indexlake_integration_tests::data::prepare_simple_testing_table;
-use indexlake_integration_tests::utils::full_table_scan;
+use indexlake_integration_tests::utils::{full_table_scan, read_first_row_id_bytes_from_table};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
@@ -41,14 +42,14 @@ async fn update_table_by_condition(
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 1                 | Alice   | 30  |
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 30  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     Ok(())
@@ -75,21 +76,27 @@ async fn update_table_by_row_id(
     let table = prepare_simple_testing_table(&client, format).await?;
 
     let set_map = HashMap::from([("age".to_string(), lit(30i32))]);
-    let condition = col(INTERNAL_ROW_ID_FIELD_NAME).eq(lit(1i64));
+
+    let first_row_id_bytes = read_first_row_id_bytes_from_table(&table).await?;
+    let condition = col(INTERNAL_ROW_ID_FIELD_NAME).eq(lit(Scalar::FixedSizeBinary(
+        16,
+        Some(first_row_id_bytes.to_vec()),
+    )));
+
     table.update(set_map, &condition).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
     assert_eq!(
         table_str,
-        r#"+-------------------+---------+-----+
-| _indexlake_row_id | name    | age |
-+-------------------+---------+-----+
-| 1                 | Alice   | 30  |
-| 2                 | Bob     | 21  |
-| 3                 | Charlie | 22  |
-| 4                 | David   | 23  |
-+-------------------+---------+-----+"#,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 30  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
     );
 
     Ok(())

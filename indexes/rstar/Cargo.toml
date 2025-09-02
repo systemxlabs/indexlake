@@ -20,3 +20,4 @@ rstar = { workspace = true }
 parquet = { workspace = true, features = ["async"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
