@@ -83,6 +83,7 @@ async fn datafusion_scan_with_projection(
     let df_table = IndexLakeTable::try_new(Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
+
     let table_str = datafusion_scan(
         &session,
         "SELECT _indexlake_row_id, name FROM indexlake_table",
@@ -100,7 +101,22 @@ async fn datafusion_scan_with_projection(
 +---------+"#,
     );
 
-    // TODO fix select age, name
+    let table_str = datafusion_scan(
+        &session,
+        "SELECT _indexlake_row_id, age, name FROM indexlake_table",
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+-----+---------+
+| age | name    |
++-----+---------+
+| 20  | Alice   |
+| 21  | Bob     |
+| 22  | Charlie |
+| 23  | David   |
++-----+---------+"#,
+    );
 
     Ok(())
 }

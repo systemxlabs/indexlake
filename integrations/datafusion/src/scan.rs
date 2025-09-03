@@ -156,7 +156,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             Ok(row_count) => Ok(Statistics {
                 num_rows: Precision::Exact(row_count),
                 total_byte_size: Precision::Absent,
-                column_statistics: vec![],
+                column_statistics: Statistics::unknown_column(&self.schema()),
             }),
             Err(e) => Err(DataFusionError::Plan(format!(
                 "Error getting indexlake table {}.{} row count: {:?}",

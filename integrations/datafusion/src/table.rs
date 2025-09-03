@@ -134,7 +134,7 @@ impl TableProvider for IndexLakeTable {
             Ok(row_count) => Some(Statistics {
                 num_rows: Precision::Exact(row_count),
                 total_byte_size: Precision::Absent,
-                column_statistics: vec![],
+                column_statistics: Statistics::unknown_column(&self.table.schema),
             }),
             Err(e) => {
                 warn!(
