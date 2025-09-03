@@ -10,9 +10,8 @@ use futures::TryStreamExt;
 use uuid::Uuid;
 
 use crate::{
-    ILResult,
-    catalog::{Catalog, CatalogDatabase, Transaction},
-    catalog::{CatalogSchemaRef, Row},
+    ILError, ILResult,
+    catalog::{Catalog, CatalogDatabase, CatalogSchemaRef, Row, Transaction},
 };
 
 pub(crate) struct TransactionHelper {
@@ -36,6 +35,25 @@ impl TransactionHelper {
     ) -> ILResult<Vec<Row>> {
         let stream = self.transaction.query(sql, schema).await?;
         stream.try_collect::<Vec<_>>().await
+    }
+
+    pub(crate) async fn query_single(
+        &mut self,
+        sql: &str,
+        schema: CatalogSchemaRef,
+    ) -> ILResult<Option<Row>> {
+        let stream = self.transaction.query(sql, schema).await?;
+        let mut rows = stream.try_collect::<Vec<_>>().await?;
+        if rows.len() > 1 {
+            return Err(ILError::internal(format!(
+                "Multiple rows found for sql {sql}"
+            )));
+        }
+        if rows.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(rows.remove(0)))
+        }
     }
 
     pub(crate) async fn commit(&mut self) -> ILResult<()> {
@@ -90,6 +108,25 @@ impl CatalogHelper {
     ) -> ILResult<Vec<Row>> {
         let stream = self.catalog.query(sql, schema).await?;
         stream.try_collect::<Vec<_>>().await
+    }
+
+    pub(crate) async fn query_single(
+        &self,
+        sql: &str,
+        schema: CatalogSchemaRef,
+    ) -> ILResult<Option<Row>> {
+        let stream = self.catalog.query(sql, schema).await?;
+        let mut rows = stream.try_collect::<Vec<_>>().await?;
+        if rows.len() > 1 {
+            return Err(ILError::internal(format!(
+                "Multiple rows found for sql {sql}"
+            )));
+        }
+        if rows.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(rows.remove(0)))
+        }
     }
 }
 

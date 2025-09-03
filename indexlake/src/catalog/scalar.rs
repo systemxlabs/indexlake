@@ -1039,7 +1039,6 @@ impl From<Option<&str>> for Scalar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::ListArray;
 
     #[test]
     fn test_scalar_new_null() {

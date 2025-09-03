@@ -25,19 +25,17 @@ impl TransactionHelper {
             CatalogDataType::Uuid,
             false,
         )]));
-        let rows = self
-            .query_rows(
+        let row = self
+            .query_single(
                 &format!(
                     "SELECT namespace_id FROM indexlake_namespace WHERE namespace_name = '{namespace_name}'"
                 ),
                 schema,
             )
             .await?;
-        if rows.is_empty() {
-            Ok(None)
-        } else {
-            let namespace_id_opt = rows[0].uuid(0)?;
-            Ok(namespace_id_opt)
+        match row {
+            Some(row) => row.uuid(0),
+            None => Ok(None),
         }
     }
 
@@ -51,12 +49,10 @@ impl TransactionHelper {
             CatalogDataType::Uuid,
             false,
         )]));
-        let rows = self.query_rows(&format!("SELECT table_id FROM indexlake_table WHERE namespace_id = {} AND table_name = '{table_name}'", self.database.sql_uuid_literal(namespace_id)), schema).await?;
-        if rows.is_empty() {
-            Ok(None)
-        } else {
-            let table_id_opt = rows[0].uuid(0)?;
-            Ok(table_id_opt)
+        let row = self.query_single(&format!("SELECT table_id FROM indexlake_table WHERE namespace_id = {} AND table_name = '{table_name}'", self.database.sql_uuid_literal(namespace_id)), schema).await?;
+        match row {
+            Some(row) => row.uuid(0),
+            None => Ok(None),
         }
     }
 
@@ -141,11 +137,10 @@ impl TransactionHelper {
             CatalogDataType::Uuid,
             false,
         )]));
-        let rows = self.query_rows(&format!("SELECT index_id FROM indexlake_index WHERE table_id = {} AND index_name = '{index_name}'", self.database.sql_uuid_literal(table_id)), schema).await?;
-        if rows.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(rows[0].uuid(0)?.expect("index_id is not null")))
+        let row = self.query_single(&format!("SELECT index_id FROM indexlake_index WHERE table_id = {} AND index_name = '{index_name}'", self.database.sql_uuid_literal(table_id)), schema).await?;
+        match row {
+            Some(row) => row.uuid(0),
+            None => Ok(None),
         }
     }
 }
@@ -157,19 +152,17 @@ impl CatalogHelper {
             CatalogDataType::Uuid,
             false,
         )]));
-        let rows = self
-            .query_rows(
+        let row = self
+            .query_single(
                 &format!(
                     "SELECT namespace_id FROM indexlake_namespace WHERE namespace_name = '{namespace_name}'"
                 ),
                 schema,
             )
             .await?;
-        if rows.is_empty() {
-            Ok(None)
-        } else {
-            let namespace_id_opt = rows[0].uuid(0)?;
-            Ok(namespace_id_opt)
+        match row {
+            Some(row) => row.uuid(0),
+            None => Ok(None),
         }
     }
 
@@ -179,8 +172,8 @@ impl CatalogHelper {
         table_name: &str,
     ) -> ILResult<Option<TableRecord>> {
         let schema = Arc::new(TableRecord::catalog_schema());
-        let mut rows = self
-            .query_rows(
+        let row = self
+            .query_single(
                 &format!(
                     "SELECT {} FROM indexlake_table WHERE namespace_id = {} AND table_name = '{table_name}'",
                     schema.select_items(self.catalog.database()).join(", "),
@@ -189,10 +182,9 @@ impl CatalogHelper {
                 schema,
             )
             .await?;
-        if rows.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(TableRecord::from_row(rows.remove(0))?))
+        match row {
+            Some(row) => Ok(Some(TableRecord::from_row(row)?)),
+            None => Ok(None),
         }
     }
 
@@ -437,8 +429,8 @@ impl CatalogHelper {
         data_file_id: &Uuid,
     ) -> ILResult<Option<IndexFileRecord>> {
         let schema = Arc::new(IndexFileRecord::catalog_schema());
-        let mut rows = self
-            .query_rows(
+        let row = self
+            .query_single(
                 &format!(
                     "SELECT {} FROM indexlake_index_file WHERE index_id = {} AND data_file_id = {}",
                     schema.select_items(self.catalog.database()).join(", "),
@@ -448,10 +440,9 @@ impl CatalogHelper {
                 schema,
             )
             .await?;
-        if rows.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(IndexFileRecord::from_row(rows.remove(0))?))
+        match row {
+            Some(row) => Ok(Some(IndexFileRecord::from_row(row)?)),
+            None => Ok(None),
         }
     }
 
