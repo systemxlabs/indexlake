@@ -7,7 +7,7 @@ use indexlake::{
     catalog::Catalog,
     index::IndexKind,
     storage::{DataFileFormat, Storage},
-    table::{TableConfig, TableCreation, TableSearch},
+    table::{TableConfig, TableCreation, TableInsertion, TableSearch},
 };
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
@@ -96,7 +96,9 @@ async fn create_hnsw_index(
             Arc::new(list_array),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     let search = TableSearch {

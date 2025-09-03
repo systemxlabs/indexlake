@@ -9,7 +9,7 @@ use indexlake::{
     Client,
     catalog::Catalog,
     storage::{DataFileFormat, Storage},
-    table::{TableConfig, TableCreation},
+    table::{TableConfig, TableCreation, TableInsertion},
 };
 use indexlake_index_rstar::{RStarIndexKind, RStarIndexParams, WkbDialect};
 use indexlake_integration_tests::data::prepare_simple_geom_table;
@@ -324,7 +324,9 @@ async fn table_data_types(
             ])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -501,7 +503,9 @@ async fn drop_table(
             Arc::new(StringArray::from(vec!["Alice", "Bob"])),
         ],
     )?;
-    table.insert(&[record_batch.clone()]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch.clone()]))
+        .await?;
     // avoid dump task failure due to inline row table dropped
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -515,7 +519,9 @@ async fn drop_table(
 
     client.create_table(table_creation).await?;
     let table = client.load_table(&namespace_name, &table_name).await?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
     assert_eq!(

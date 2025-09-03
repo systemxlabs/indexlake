@@ -56,3 +56,10 @@ CREATE TABLE indexlake_inline_index (
     index_id BLOB NOT NULL,
     index_data BLOB NOT NULL
 );
+
+CREATE TABLE indexlake_data_file_stats (
+    data_file_id BLOB NOT NULL,
+    field_id BLOB NOT NULL,
+    min_value VARCHAR,
+    max_value VARCHAR
+);

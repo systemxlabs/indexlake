@@ -9,7 +9,7 @@ use geozero::{CoordDimensions, ToWkb};
 use indexlake::{
     Client, ILResult,
     storage::DataFileFormat,
-    table::{Table, TableConfig, TableCreation},
+    table::{Table, TableConfig, TableCreation, TableInsertion},
 };
 
 pub async fn prepare_simple_testing_table(
@@ -48,7 +48,9 @@ pub async fn prepare_simple_testing_table(
             Arc::new(Int32Array::from(vec![20, 21])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     let record_batch = RecordBatch::try_new(
         table_schema.clone(),
@@ -57,7 +59,9 @@ pub async fn prepare_simple_testing_table(
             Arc::new(Int32Array::from(vec![22, 23])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     // wait for dump task to finish
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -106,7 +110,9 @@ pub async fn prepare_simple_geom_table(client: &Client, format: DataFileFormat) 
             ])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     let record_batch = RecordBatch::try_new(
         table_schema.clone(),
@@ -124,7 +130,9 @@ pub async fn prepare_simple_geom_table(client: &Client, format: DataFileFormat) 
             ])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     // wait for dump task to finish
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;

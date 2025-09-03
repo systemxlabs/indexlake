@@ -6,10 +6,10 @@ use indexlake::Client;
 use indexlake::ILError;
 use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
-use indexlake::table::IndexCreation;
 use indexlake::table::TableConfig;
 use indexlake::table::TableCreation;
 use indexlake::table::TableSearch;
+use indexlake::table::{IndexCreation, TableInsertion};
 use indexlake_benchmarks::data::{arrow_hnsw_table_schema, new_hnsw_record_batch};
 use indexlake_index_hnsw::HnswIndexKind;
 use indexlake_index_hnsw::HnswIndexParams;
@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut progress = 0;
             while progress < task_rows {
                 let batch = new_hnsw_record_batch(insert_batch_size);
-                table.insert(&[batch]).await?;
+                table.insert(TableInsertion::new(vec![batch])).await?;
                 progress += insert_batch_size;
             }
             Ok::<_, ILError>(())

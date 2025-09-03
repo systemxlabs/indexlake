@@ -18,7 +18,7 @@ use datafusion::{
 use futures::StreamExt;
 use indexlake::{
     catalog::INTERNAL_ROW_ID_FIELD_NAME,
-    table::{Table, check_and_rewrite_insert_batches},
+    table::{Table, TableInsertion, check_and_rewrite_insert_batches},
     utils::schema_without_row_id,
 };
 
@@ -128,7 +128,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
                 }
 
                 table
-                    .insert(&[batch])
+                    .insert(TableInsertion::new(vec![batch]))
                     .await
                     .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             }

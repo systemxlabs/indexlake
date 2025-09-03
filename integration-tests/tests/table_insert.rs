@@ -8,7 +8,7 @@ use indexlake::{
     Client,
     catalog::{Catalog, Scalar},
     storage::{DataFileFormat, Storage},
-    table::{TableConfig, TableCreation},
+    table::{TableConfig, TableCreation, TableInsertion},
 };
 use indexlake_integration_tests::data::prepare_simple_testing_table;
 use indexlake_integration_tests::utils::full_table_scan;
@@ -74,7 +74,9 @@ async fn parallel_insert_table(
                     table_schema.clone(),
                     vec![Arc::new(Int64Array::from(chunk.to_vec()))],
                 )?;
-                table.insert(&[record_batch]).await?;
+                table
+                    .insert(TableInsertion::new(vec![record_batch]))
+                    .await?;
             }
             Ok::<(), ILError>(())
         });
@@ -144,7 +146,7 @@ async fn bypass_insert_table(
         table_schema.clone(),
         vec![Arc::new(Int64Array::from_iter_values(0..3))],
     )?;
-    table.insert(&[batch]).await?;
+    table.insert(TableInsertion::new(vec![batch])).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{table_str}");
@@ -208,7 +210,7 @@ async fn insert_string_with_quotes(
             "'A'", "'B", "''C''", "''D'", "A'B'C", r#""E""#, r#""F"#, r#"""G"""#, r#"""H""#,
         ]))],
     )?;
-    table.insert(&[batch]).await?;
+    table.insert(TableInsertion::new(vec![batch])).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{table_str}");
@@ -280,7 +282,7 @@ async fn partial_insert_with_default_values(
         Arc::new(table_schema.project(&[0])?),
         vec![Arc::new(StringArray::from_iter_values(vec!["Tom"]))],
     )?;
-    table.insert(&[batch]).await?;
+    table.insert(TableInsertion::new(vec![batch])).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{table_str}");
@@ -323,7 +325,7 @@ async fn insert_unordered_schema(
             Arc::new(StringArray::from_iter_values(vec!["Tom"])),
         ],
     )?;
-    table.insert(&[batch]).await?;
+    table.insert(TableInsertion::new(vec![batch])).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{table_str}");

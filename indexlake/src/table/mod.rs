@@ -10,7 +10,7 @@ use arrow_schema::{Field, Schema};
 pub use create::*;
 pub(crate) use delete::*;
 pub(crate) use dump::*;
-pub(crate) use insert::*;
+pub use insert::*;
 use log::warn;
 pub use scan::*;
 pub use search::*;
@@ -61,24 +61,26 @@ impl Table {
         Ok(())
     }
 
-    pub async fn insert(&self, batches: &[RecordBatch]) -> ILResult<()> {
+    pub async fn insert(&self, insert: TableInsertion) -> ILResult<()> {
         let rewritten_batches =
-            check_and_rewrite_insert_batches(batches, &self.schema, &self.field_records)?;
+            check_and_rewrite_insert_batches(&insert.data, &self.schema, &self.field_records)?;
         let total_rows = rewritten_batches
             .iter()
             .map(|batch| batch.num_rows())
             .sum::<usize>();
 
-        if total_rows >= self.config.inline_row_count_limit {
+        if total_rows >= self.config.inline_row_count_limit && !insert.force_inline {
             let mut tx_helper = self.transaction_helper().await?;
-            process_bypass_insert(&mut tx_helper, self, &rewritten_batches, total_rows).await?;
+            process_bypass_insert(&mut tx_helper, self, &rewritten_batches).await?;
             tx_helper.commit().await?;
         } else {
             let mut tx_helper = self.transaction_helper().await?;
             process_insert_into_inline_rows(&mut tx_helper, self, &rewritten_batches).await?;
             tx_helper.commit().await?;
 
-            try_run_dump_task(self).await?;
+            if insert.try_dump {
+                try_run_dump_task(self).await?;
+            }
         }
 
         Ok(())

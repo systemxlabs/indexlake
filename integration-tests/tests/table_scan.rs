@@ -3,7 +3,7 @@ use arrow::{
     datatypes::{DataType, Field, Schema},
 };
 use indexlake::expr::{col, lit};
-use indexlake::table::{TableConfig, TableCreation, TableScan, TableScanPartition};
+use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};
 use indexlake::{
     Client,
     catalog::Catalog,
@@ -142,7 +142,9 @@ async fn partitioned_scan(
             Arc::new(Int32Array::from(vec![20, 21])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     // produce a data file
     let record_batch = RecordBatch::try_new(
@@ -152,7 +154,9 @@ async fn partitioned_scan(
             Arc::new(Int32Array::from(vec![22, 23])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     // insert a inline row
     let record_batch = RecordBatch::try_new(
@@ -162,7 +166,9 @@ async fn partitioned_scan(
             Arc::new(Int32Array::from(vec![24])),
         ],
     )?;
-    table.insert(&[record_batch]).await?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 

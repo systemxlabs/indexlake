@@ -22,6 +22,32 @@ use crate::{
     },
 };
 
+pub struct TableInsertion {
+    pub data: Vec<RecordBatch>,
+    pub force_inline: bool,
+    pub try_dump: bool,
+}
+
+impl TableInsertion {
+    pub fn new(data: Vec<RecordBatch>) -> Self {
+        Self {
+            data,
+            force_inline: false,
+            try_dump: true,
+        }
+    }
+
+    pub fn with_force_inline(mut self, force_inline: bool) -> Self {
+        self.force_inline = force_inline;
+        self
+    }
+
+    pub fn with_try_dump(mut self, try_dump: bool) -> Self {
+        self.try_dump = try_dump;
+        self
+    }
+}
+
 pub(crate) async fn process_insert_into_inline_rows(
     tx_helper: &mut TransactionHelper,
     table: &Table,
@@ -107,7 +133,6 @@ pub(crate) async fn process_bypass_insert(
     tx_helper: &mut TransactionHelper,
     table: &Table,
     batches: &[RecordBatch],
-    total_rows: usize,
 ) -> ILResult<()> {
     let data_file_id = uuid::Uuid::now_v7();
     let relative_path = DataFileRecord::build_relative_path(
@@ -134,6 +159,7 @@ pub(crate) async fn process_bypass_insert(
             ));
         }
     };
+    let record_count = row_ids.len();
 
     tx_helper
         .insert_data_files(&[DataFileRecord {
@@ -141,9 +167,9 @@ pub(crate) async fn process_bypass_insert(
             table_id: table.table_id,
             format: table.config.preferred_data_file_format,
             relative_path: relative_path.clone(),
-            record_count: total_rows as i64,
+            record_count: record_count as i64,
             row_ids,
-            validity: vec![true; total_rows],
+            validity: vec![true; record_count],
         }])
         .await?;
 

@@ -4,6 +4,7 @@ use futures::StreamExt;
 use indexlake::ILError;
 use indexlake::table::TableConfig;
 use indexlake::table::TableCreation;
+use indexlake::table::TableInsertion;
 use indexlake::table::TableScan;
 use indexlake::table::TableScanPartition;
 use indexlake::{Client, storage::DataFileFormat};
@@ -53,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut progress = 0;
             while progress < task_rows {
                 let batch = new_record_batch(insert_batch_size);
-                table.insert(&[batch]).await?;
+                table.insert(TableInsertion::new(vec![batch])).await?;
                 progress += insert_batch_size;
             }
             Ok::<_, ILError>(())
