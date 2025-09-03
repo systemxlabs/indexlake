@@ -73,8 +73,10 @@ async fn create_table(
 }
 
 #[rstest::rstest]
-#[case(async { catalog_sqlite() }, async { storage_fs() })]
-#[case(async { catalog_postgres().await }, async { storage_s3().await })]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
 #[tokio::test(flavor = "multi_thread")]
 async fn table_data_types(
     #[future(awt)]
@@ -83,6 +85,7 @@ async fn table_data_types(
     #[future(awt)]
     #[case]
     storage: Arc<Storage>,
+    #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -172,12 +175,17 @@ async fn table_data_types(
     ]));
 
     let table_name = uuid::Uuid::new_v4().to_string();
+    let table_config = TableConfig {
+        inline_row_count_limit: 2,
+        parquet_row_group_size: 1,
+        preferred_data_file_format: format,
+    };
     let table_creation = TableCreation {
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
         default_values: HashMap::new(),
-        config: TableConfig::default(),
+        config: table_config,
         if_not_exists: false,
     };
 
@@ -325,7 +333,7 @@ async fn table_data_types(
         ],
     )?;
     table
-        .insert(TableInsertion::new(vec![record_batch]))
+        .insert(TableInsertion::new(vec![record_batch]).with_force_inline(true))
         .await?;
 
     let table_str = full_table_scan(&table).await?;
