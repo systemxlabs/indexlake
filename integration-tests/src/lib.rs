@@ -2,15 +2,11 @@ pub mod data;
 mod docker;
 pub mod utils;
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, OnceLock},
-};
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
-use indexlake::{
-    catalog::{Catalog, CatalogDataType, CatalogSchema, Column},
-    storage::Storage,
-};
+use indexlake::catalog::{Catalog, CatalogDataType, CatalogSchema, Column};
+use indexlake::storage::Storage;
 use indexlake_catalog_postgres::PostgresCatalogBuilder;
 use indexlake_catalog_sqlite::SqliteCatalog;
 use opendal::services::S3Config;

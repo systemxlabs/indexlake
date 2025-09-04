@@ -21,12 +21,16 @@ indexlake-index-hnsw = { workspace = true }
 indexlake-integration-tests = { workspace = true }
 
 arrow = { workspace = true }
-delta_kernel = { version = "0.13.0", features = ["arrow-conversion"], optional = true }
+delta_kernel = { version = "0.13.0", features = [
+  "arrow-conversion",
+], optional = true }
 deltalake = { version = "0.27.0", features = ["datafusion"], optional = true }
 deltalake-aws = { version = "0.10.0", default-features = false, optional = true }
 futures = { workspace = true }
 lance = { version = "0.31.1", optional = true }
-lance-index = { version = "0.31.1", features = ["tokenizer-jieba"], optional = true }
+lance-index = { version = "0.31.1", features = [
+  "tokenizer-jieba",
+], optional = true }
 rand = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4"] }

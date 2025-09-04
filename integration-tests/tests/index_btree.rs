@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use indexlake::Client;
-use indexlake::catalog::Catalog;
-use indexlake::catalog::Scalar;
+use indexlake::catalog::{Catalog, Scalar};
 use indexlake::expr::{col, lit};
 use indexlake::index::IndexKind;
 use indexlake::storage::{DataFileFormat, Storage};

@@ -10,19 +10,16 @@ pub use opendal::services::S3Config;
 pub(crate) use parquet::*;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult, RecordBatchStream,
-    catalog::DataFileRecord,
-    expr::Expr,
-    storage::{fs::FsStorage, s3::S3Storage},
-};
+use crate::catalog::DataFileRecord;
+use crate::expr::Expr;
+use crate::storage::fs::FsStorage;
+use crate::storage::s3::S3Storage;
+use crate::{ILError, ILResult, RecordBatchStream};
 use arrow_schema::Schema;
 use opendal::Operator;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum Storage {

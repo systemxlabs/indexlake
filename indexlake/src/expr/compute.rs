@@ -1,10 +1,11 @@
-use arrow::{
-    array::{Array, ArrayRef, BooleanArray, Datum, MutableArrayData, make_array, make_comparator},
-    buffer::NullBuffer,
-    compute::{SlicesIterator, SortOptions, and_kleene, is_not_null},
+use arrow::array::{
+    Array, ArrayRef, BooleanArray, Datum, MutableArrayData, make_array, make_comparator,
 };
+use arrow::buffer::NullBuffer;
+use arrow::compute::{SlicesIterator, SortOptions, and_kleene, is_not_null};
 
-use crate::{ILError, ILResult, expr::BinaryOp};
+use crate::expr::BinaryOp;
+use crate::{ILError, ILResult};
 
 /// Compare with eq with either nested or non-nested
 pub fn compare_with_eq(
@@ -44,7 +45,8 @@ pub fn compare_op_for_nested(
         return Ok(BooleanArray::new_null(len));
     }
 
-    // we choose the default behaviour from arrow-rs which has null-first that follow spark's behaviour
+    // we choose the default behaviour from arrow-rs which has null-first that
+    // follow spark's behaviour
     let cmp = make_comparator(l, r, SortOptions::default())?;
 
     let cmp_with_op = |i, j| match op {
@@ -70,12 +72,14 @@ pub fn compare_op_for_nested(
     Ok(BooleanArray::new(values, nulls))
 }
 
-/// Scatter `truthy` array by boolean mask. When the mask evaluates `true`, next values of `truthy`
-/// are taken, when the mask evaluates `false` values null values are filled.
+/// Scatter `truthy` array by boolean mask. When the mask evaluates `true`, next
+/// values of `truthy` are taken, when the mask evaluates `false` values null
+/// values are filled.
 ///
 /// # Arguments
 /// * `mask` - Boolean values used to determine where to put the `truthy` values
-/// * `truthy` - All values of this array are to scatter according to `mask` into final result.
+/// * `truthy` - All values of this array are to scatter according to `mask`
+///   into final result.
 pub fn scatter(mask: &BooleanArray, truthy: &dyn Array) -> ILResult<ArrayRef> {
     let truthy = truthy.to_data();
 
@@ -85,8 +89,8 @@ pub fn scatter(mask: &BooleanArray, truthy: &dyn Array) -> ILResult<ArrayRef> {
 
     let mut mutable = MutableArrayData::new(vec![&truthy], true, mask.len());
 
-    // the SlicesIterator slices only the true values. So the gaps left by this iterator we need to
-    // fill with falsy values
+    // the SlicesIterator slices only the true values. So the gaps left by this
+    // iterator we need to fill with falsy values
 
     // keep track of how much is filled
     let mut filled = 0;

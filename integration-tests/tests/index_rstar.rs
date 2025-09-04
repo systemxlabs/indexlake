@@ -1,5 +1,9 @@
 use arrow::datatypes::DataType;
-use indexlake::{Client, catalog::Catalog, index::IndexKind, storage::Storage, table::TableScan};
+use indexlake::Client;
+use indexlake::catalog::Catalog;
+use indexlake::index::IndexKind;
+use indexlake::storage::Storage;
+use indexlake::table::TableScan;
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };

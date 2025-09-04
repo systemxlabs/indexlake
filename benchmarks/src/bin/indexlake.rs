@@ -1,16 +1,12 @@
-use std::{collections::HashMap, time::Instant};
+use std::collections::HashMap;
+use std::time::Instant;
 
 use futures::StreamExt;
-use indexlake::ILError;
-use indexlake::table::TableConfig;
-use indexlake::table::TableCreation;
-use indexlake::table::TableInsertion;
-use indexlake::table::TableScan;
-use indexlake::table::TableScanPartition;
-use indexlake::{Client, storage::DataFileFormat};
+use indexlake::storage::DataFileFormat;
+use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};
+use indexlake::{Client, ILError};
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
-use indexlake_integration_tests::init_env_logger;
-use indexlake_integration_tests::{catalog_postgres, storage_s3};
+use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

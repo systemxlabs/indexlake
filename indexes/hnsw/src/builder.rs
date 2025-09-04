@@ -1,8 +1,7 @@
 use arrow::array::{Float32Array, ListArray};
 use arrow::record_batch::RecordBatch;
 use hnsw::{Hnsw, Params, Searcher};
-use indexlake::index::IndexDefinationRef;
-use indexlake::index::{Index, IndexBuilder};
+use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
 use indexlake::storage::{InputFile, OutputFile};
 use indexlake::utils::extract_row_id_array_from_record_batch;
 use indexlake::{ILError, ILResult};
@@ -13,14 +12,14 @@ use uuid::Uuid;
 use crate::{Euclidean, HnswIndex, HnswIndexParams};
 
 pub struct HnswIndexBuilder {
-    index_def: IndexDefinationRef,
+    index_def: IndexDefinitionRef,
     params: HnswIndexParams,
     hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
     row_ids: Vec<Uuid>,
 }
 
 impl HnswIndexBuilder {
-    pub fn try_new(index_def: IndexDefinationRef) -> ILResult<Self> {
+    pub fn try_new(index_def: IndexDefinitionRef) -> ILResult<Self> {
         let params = index_def.downcast_params::<HnswIndexParams>()?.clone();
 
         let hnsw_params = Params::new().ef_construction(params.ef_construction);
@@ -50,7 +49,7 @@ impl IndexBuilder for HnswIndexBuilder {
         false
     }
 
-    fn index_def(&self) -> &IndexDefinationRef {
+    fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }
 

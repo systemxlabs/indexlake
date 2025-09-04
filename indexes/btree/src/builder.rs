@@ -7,7 +7,7 @@ use arrow::ipc::writer::StreamWriter;
 use futures::StreamExt;
 use indexlake::ILResult;
 use indexlake::catalog::Scalar;
-use indexlake::index::{Index, IndexBuilder, IndexDefinationRef};
+use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
 use indexlake::storage::{InputFile, OutputFile};
 use indexlake::utils::extract_row_id_array_from_record_batch;
 use parquet::arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder};
@@ -18,13 +18,13 @@ use crate::{BTreeIndex, OrderedScalar};
 
 #[derive(Debug)]
 pub struct BTreeIndexBuilder {
-    index_def: IndexDefinationRef,
+    index_def: IndexDefinitionRef,
     index_schema: SchemaRef,
     index_batches: Vec<RecordBatch>,
 }
 
 impl BTreeIndexBuilder {
-    pub fn try_new(index_def: IndexDefinationRef) -> ILResult<Self> {
+    pub fn try_new(index_def: IndexDefinitionRef) -> ILResult<Self> {
         let key_column_name = &index_def.key_columns[0];
         let key_column_index = index_def.table_schema.index_of(key_column_name)?;
         let key_column_field = index_def.table_schema.fields[key_column_index].clone();
@@ -47,7 +47,7 @@ impl IndexBuilder for BTreeIndexBuilder {
         true
     }
 
-    fn index_def(&self) -> &IndexDefinationRef {
+    fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }
 

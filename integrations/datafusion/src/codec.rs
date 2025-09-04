@@ -1,34 +1,29 @@
 use std::sync::Arc;
 
-use datafusion::{
-    arrow::{
-        array::RecordBatch,
-        datatypes::Schema,
-        ipc::{reader::StreamReader, writer::StreamWriter},
-    },
-    catalog::memory::{DataSourceExec, MemorySourceConfig},
-    datasource::source::DataSource,
-    error::DataFusionError,
-    execution::FunctionRegistry,
-    logical_expr::dml::InsertOp,
-    physical_plan::ExecutionPlan,
-};
-use datafusion_proto::{
-    logical_plan::{
-        DefaultLogicalExtensionCodec, from_proto::parse_exprs, to_proto::serialize_exprs,
-    },
-    physical_plan::{
-        PhysicalExtensionCodec, from_proto::parse_physical_sort_exprs,
-        to_proto::serialize_physical_sort_exprs,
-    },
-};
-use indexlake::{Client, table::Table};
+use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::Schema;
+use datafusion::arrow::ipc::reader::StreamReader;
+use datafusion::arrow::ipc::writer::StreamWriter;
+use datafusion::catalog::memory::{DataSourceExec, MemorySourceConfig};
+use datafusion::datasource::source::DataSource;
+use datafusion::error::DataFusionError;
+use datafusion::execution::FunctionRegistry;
+use datafusion::logical_expr::dml::InsertOp;
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
+use datafusion_proto::logical_plan::from_proto::parse_exprs;
+use datafusion_proto::logical_plan::to_proto::serialize_exprs;
+use datafusion_proto::physical_plan::PhysicalExtensionCodec;
+use datafusion_proto::physical_plan::from_proto::parse_physical_sort_exprs;
+use datafusion_proto::physical_plan::to_proto::serialize_physical_sort_exprs;
+use indexlake::Client;
+use indexlake::table::Table;
 use prost::Message;
 
+use crate::index_lake_physical_plan_node::IndexLakePhysicalPlanType;
 use crate::{
     IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode, IndexLakeScanExec,
     IndexLakeScanExecNode, MemoryDatasourceNode,
-    index_lake_physical_plan_node::IndexLakePhysicalPlanType,
 };
 
 #[derive(Debug)]

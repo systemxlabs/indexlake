@@ -1,24 +1,20 @@
 use arrow::array::*;
 use arrow::datatypes::*;
 use futures::TryStreamExt;
-use indexlake::catalog::INTERNAL_ROW_ID_FIELD_REF;
+use indexlake::Client;
+use indexlake::catalog::{Catalog, INTERNAL_ROW_ID_FIELD_REF};
 use indexlake::index::IndexKind;
-use indexlake::table::IndexCreation;
-use indexlake::table::TableScan;
-use indexlake::{
-    Client,
-    catalog::Catalog,
-    storage::{DataFileFormat, Storage},
-    table::{TableConfig, TableCreation, TableInsertion},
-};
+use indexlake::storage::{DataFileFormat, Storage};
+use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableScan};
 use indexlake_index_rstar::{RStarIndexKind, RStarIndexParams, WkbDialect};
-use indexlake_integration_tests::data::prepare_simple_geom_table;
-use indexlake_integration_tests::data::prepare_simple_testing_table;
+use indexlake_integration_tests::data::{prepare_simple_geom_table, prepare_simple_testing_table};
 use indexlake_integration_tests::utils::full_table_scan;
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
-use std::{collections::HashMap, i128, sync::Arc};
+use std::collections::HashMap;
+use std::i128;
+use std::sync::Arc;
 
 #[rstest::rstest]
 #[case(async { catalog_sqlite() }, async { storage_fs() })]

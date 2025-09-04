@@ -21,7 +21,7 @@ indexlake-index-btree = { workspace = true }
 indexlake-index-hnsw = { workspace = true }
 indexlake-index-rstar = { workspace = true }
 
-arrow = { workspace = true, features = ["prettyprint"]}
+arrow = { workspace = true, features = ["prettyprint"] }
 bytes = { workspace = true }
 datafusion = { workspace = true }
 datafusion-proto = { workspace = true }

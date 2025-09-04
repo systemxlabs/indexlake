@@ -1,23 +1,18 @@
 use std::sync::{Arc, LazyLock};
 
-use arrow::{
-    array::{ArrayRef, AsArray, FixedSizeBinaryArray, ListArray, ListBuilder, PrimitiveBuilder},
-    datatypes::{DataType, Field, FieldRef, Float32Type, Schema, SchemaRef, UInt32Type},
-    record_batch::RecordBatch,
+use arrow::array::{
+    ArrayRef, AsArray, FixedSizeBinaryArray, ListArray, ListBuilder, PrimitiveBuilder,
 };
+use arrow::datatypes::{DataType, Field, FieldRef, Float32Type, Schema, SchemaRef, UInt32Type};
+use arrow::record_batch::RecordBatch;
 use bm25::{Embedder, EmbedderBuilder, Embedding};
 use futures::StreamExt;
-use indexlake::ILResult;
-use indexlake::{
-    ILError,
-    index::{Index, IndexBuilder, IndexDefinationRef},
-    storage::{InputFile, OutputFile},
-    utils::extract_row_id_array_from_record_batch,
-};
-use parquet::{
-    arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder},
-    file::properties::WriterProperties,
-};
+use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
+use indexlake::storage::{InputFile, OutputFile};
+use indexlake::utils::extract_row_id_array_from_record_batch;
+use indexlake::{ILError, ILResult};
+use parquet::arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder};
+use parquet::file::properties::WriterProperties;
 
 use crate::{ArrowScorer, BM25Index, BM25IndexParams, JiebaTokenizer};
 
@@ -45,14 +40,14 @@ static BM25_INDEX_SCHEMA_EMBEDDING_VALUES_INNER_FIELD: LazyLock<FieldRef> =
 
 #[derive(Debug)]
 pub struct Bm25IndexBuilder {
-    index_def: IndexDefinationRef,
+    index_def: IndexDefinitionRef,
     params: BM25IndexParams,
     embedder: Embedder<u32, JiebaTokenizer>,
     embeddings: Vec<(FixedSizeBinaryArray, ListArray, ListArray)>,
 }
 
 impl Bm25IndexBuilder {
-    pub fn try_new(index_def: IndexDefinationRef) -> ILResult<Self> {
+    pub fn try_new(index_def: IndexDefinitionRef) -> ILResult<Self> {
         let params = index_def.downcast_params::<BM25IndexParams>()?.clone();
         let embedder = new_embedder(&params);
         Ok(Self {
@@ -70,7 +65,7 @@ impl IndexBuilder for Bm25IndexBuilder {
         true
     }
 
-    fn index_def(&self) -> &IndexDefinationRef {
+    fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }
 

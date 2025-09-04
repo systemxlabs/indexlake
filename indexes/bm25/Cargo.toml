@@ -16,7 +16,7 @@ async-trait = { workspace = true }
 bm25 = { workspace = true }
 futures = { workspace = true }
 jieba-rs = { workspace = true }
+parquet = { workspace = true, features = ["async"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-parquet = { workspace = true, features = ["async"] }
 uuid = { workspace = true }

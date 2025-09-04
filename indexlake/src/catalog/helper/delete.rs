@@ -1,10 +1,8 @@
 use uuid::Uuid;
 
-use crate::{
-    ILResult,
-    catalog::{INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper, inline_row_table_name},
-    expr::Expr,
-};
+use crate::ILResult;
+use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper, inline_row_table_name};
+use crate::expr::Expr;
 
 impl TransactionHelper {
     pub(crate) async fn delete_inline_rows(

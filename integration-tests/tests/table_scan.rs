@@ -1,20 +1,17 @@
-use arrow::{
-    array::{Int32Array, RecordBatch, StringArray},
-    datatypes::{DataType, Field, Schema},
-};
+use arrow::array::{Int32Array, RecordBatch, StringArray};
+use arrow::datatypes::{DataType, Field, Schema};
+use indexlake::Client;
+use indexlake::catalog::Catalog;
 use indexlake::expr::{col, lit};
+use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};
-use indexlake::{
-    Client,
-    catalog::Catalog,
-    storage::{DataFileFormat, Storage},
-};
 use indexlake_integration_tests::data::prepare_simple_testing_table;
 use indexlake_integration_tests::utils::table_scan;
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[rstest::rstest]
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]

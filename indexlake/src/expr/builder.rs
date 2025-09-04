@@ -1,11 +1,11 @@
-use arrow::{compute::can_cast_types, datatypes::DataType};
+use arrow::compute::can_cast_types;
+use arrow::datatypes::DataType;
 use arrow_schema::Schema;
 
-use crate::{
-    ILError, ILResult,
-    catalog::Scalar,
-    expr::{BinaryExpr, BinaryOp, Case, Cast, Expr, Function, Literal, TryCast, like::Like},
-};
+use crate::catalog::Scalar;
+use crate::expr::like::Like;
+use crate::expr::{BinaryExpr, BinaryOp, Case, Cast, Expr, Function, Literal, TryCast};
+use crate::{ILError, ILResult};
 
 impl Expr {
     pub fn eq(self, other: Expr) -> Expr {

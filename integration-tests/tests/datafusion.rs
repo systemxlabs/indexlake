@@ -1,18 +1,15 @@
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::util::pretty::pretty_format_batches;
-use datafusion::physical_plan::collect;
-use datafusion::physical_plan::{ExecutionPlan, display::DisplayableExecutionPlan};
+use datafusion::physical_plan::display::DisplayableExecutionPlan;
+use datafusion::physical_plan::{ExecutionPlan, collect};
 use datafusion::prelude::SessionContext;
-use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
-use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
-use indexlake::storage::DataFileFormat;
-use indexlake::{Client, catalog::Catalog, storage::Storage};
-use indexlake::{
-    catalog::Scalar,
-    table::{TableConfig, TableCreation},
-};
-use indexlake_datafusion::IndexLakePhysicalCodec;
-use indexlake_datafusion::IndexLakeTable;
+use datafusion_proto::physical_plan::AsExecutionPlan;
+use datafusion_proto::protobuf::PhysicalPlanNode;
+use indexlake::Client;
+use indexlake::catalog::{Catalog, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
+use indexlake::storage::{DataFileFormat, Storage};
+use indexlake::table::{TableConfig, TableCreation};
+use indexlake_datafusion::{IndexLakePhysicalCodec, IndexLakeTable};
 use indexlake_integration_tests::data::prepare_simple_testing_table;
 use indexlake_integration_tests::utils::{datafusion_insert, datafusion_scan, sort_record_batches};
 use indexlake_integration_tests::{

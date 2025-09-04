@@ -2,11 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
-use crate::{
-    ILResult,
-    catalog::{DataFileRecord, TransactionHelper, inline_row_table_name},
-    expr::Expr,
-};
+use crate::ILResult;
+use crate::catalog::{DataFileRecord, TransactionHelper, inline_row_table_name};
+use crate::expr::Expr;
 
 impl TransactionHelper {
     pub(crate) async fn update_inline_rows(

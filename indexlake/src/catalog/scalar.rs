@@ -28,7 +28,8 @@ use arrow::util::display::{ArrayFormatter, FormatOptions};
 use arrow_schema::{Field, Schema, TimeUnit};
 use uuid::Uuid;
 
-use crate::{ILError, ILResult, catalog::CatalogDatabase};
+use crate::catalog::CatalogDatabase;
+use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone)]
 pub enum Scalar {
@@ -122,6 +123,7 @@ impl Scalar {
             }
         })
     }
+
     pub fn is_null(&self) -> bool {
         match self {
             Scalar::Boolean(v) => v.is_none(),
@@ -151,8 +153,8 @@ impl Scalar {
             Scalar::List(v) => v.len() == v.null_count(),
             Scalar::FixedSizeList(v) => v.len() == v.null_count(),
             Scalar::LargeList(v) => v.len() == v.null_count(),
-            Scalar::Decimal128(v, _, _) => v.is_none(),
-            Scalar::Decimal256(v, _, _) => v.is_none(),
+            Scalar::Decimal128(v, ..) => v.is_none(),
+            Scalar::Decimal256(v, ..) => v.is_none(),
         }
     }
 
@@ -207,10 +209,10 @@ impl Scalar {
                 Some(value) => Ok(Decimal256Type::format_decimal(*value, *precision, *scale)),
                 None => Ok("null".to_string()),
             },
-            Scalar::TimestampSecond(_, _)
-            | Scalar::TimestampMillisecond(_, _)
-            | Scalar::TimestampMicrosecond(_, _)
-            | Scalar::TimestampNanosecond(_, _)
+            Scalar::TimestampSecond(..)
+            | Scalar::TimestampMillisecond(..)
+            | Scalar::TimestampMicrosecond(..)
+            | Scalar::TimestampNanosecond(..)
             | Scalar::Date32(_)
             | Scalar::Date64(_)
             | Scalar::Time32Second(_)
@@ -726,17 +728,17 @@ impl PartialEq for Scalar {
             (Scalar::BinaryView(v1), Scalar::BinaryView(v2)) => v1.eq(v2),
             (Scalar::BinaryView(_), _) => false,
             (Scalar::FixedSizeBinary(_, v1), Scalar::FixedSizeBinary(_, v2)) => v1.eq(v2),
-            (Scalar::FixedSizeBinary(_, _), _) => false,
+            (Scalar::FixedSizeBinary(..), _) => false,
             (Scalar::LargeBinary(v1), Scalar::LargeBinary(v2)) => v1.eq(v2),
             (Scalar::LargeBinary(_), _) => false,
             (Scalar::TimestampSecond(v1, _), Scalar::TimestampSecond(v2, _)) => v1.eq(v2),
-            (Scalar::TimestampSecond(_, _), _) => false,
+            (Scalar::TimestampSecond(..), _) => false,
             (Scalar::TimestampMillisecond(v1, _), Scalar::TimestampMillisecond(v2, _)) => v1.eq(v2),
-            (Scalar::TimestampMillisecond(_, _), _) => false,
+            (Scalar::TimestampMillisecond(..), _) => false,
             (Scalar::TimestampMicrosecond(v1, _), Scalar::TimestampMicrosecond(v2, _)) => v1.eq(v2),
-            (Scalar::TimestampMicrosecond(_, _), _) => false,
+            (Scalar::TimestampMicrosecond(..), _) => false,
             (Scalar::TimestampNanosecond(v1, _), Scalar::TimestampNanosecond(v2, _)) => v1.eq(v2),
-            (Scalar::TimestampNanosecond(_, _), _) => false,
+            (Scalar::TimestampNanosecond(..), _) => false,
             (Scalar::Date32(v1), Scalar::Date32(v2)) => v1.eq(v2),
             (Scalar::Date32(_), _) => false,
             (Scalar::Date64(v1), Scalar::Date64(v2)) => v1.eq(v2),
@@ -758,11 +760,11 @@ impl PartialEq for Scalar {
             (Scalar::Decimal128(v1, p1, s1), Scalar::Decimal128(v2, p2, s2)) => {
                 v1.eq(v2) && p1 == p2 && s1 == s2
             }
-            (Scalar::Decimal128(_, _, _), _) => false,
+            (Scalar::Decimal128(..), _) => false,
             (Scalar::Decimal256(v1, p1, s1), Scalar::Decimal256(v2, p2, s2)) => {
                 v1.eq(v2) && p1 == p2 && s1 == s2
             }
-            (Scalar::Decimal256(_, _, _), _) => false,
+            (Scalar::Decimal256(..), _) => false,
         }
     }
 }
@@ -811,23 +813,23 @@ impl PartialOrd for Scalar {
             (Scalar::BinaryView(v1), Scalar::BinaryView(v2)) => v1.partial_cmp(v2),
             (Scalar::BinaryView(_), _) => None,
             (Scalar::FixedSizeBinary(_, v1), Scalar::FixedSizeBinary(_, v2)) => v1.partial_cmp(v2),
-            (Scalar::FixedSizeBinary(_, _), _) => None,
+            (Scalar::FixedSizeBinary(..), _) => None,
             (Scalar::LargeBinary(v1), Scalar::LargeBinary(v2)) => v1.partial_cmp(v2),
             (Scalar::LargeBinary(_), _) => None,
             (Scalar::TimestampSecond(v1, _), Scalar::TimestampSecond(v2, _)) => v1.partial_cmp(v2),
-            (Scalar::TimestampSecond(_, _), _) => None,
+            (Scalar::TimestampSecond(..), _) => None,
             (Scalar::TimestampMillisecond(v1, _), Scalar::TimestampMillisecond(v2, _)) => {
                 v1.partial_cmp(v2)
             }
-            (Scalar::TimestampMillisecond(_, _), _) => None,
+            (Scalar::TimestampMillisecond(..), _) => None,
             (Scalar::TimestampMicrosecond(v1, _), Scalar::TimestampMicrosecond(v2, _)) => {
                 v1.partial_cmp(v2)
             }
-            (Scalar::TimestampMicrosecond(_, _), _) => None,
+            (Scalar::TimestampMicrosecond(..), _) => None,
             (Scalar::TimestampNanosecond(v1, _), Scalar::TimestampNanosecond(v2, _)) => {
                 v1.partial_cmp(v2)
             }
-            (Scalar::TimestampNanosecond(_, _), _) => None,
+            (Scalar::TimestampNanosecond(..), _) => None,
             (Scalar::Date32(v1), Scalar::Date32(v2)) => v1.partial_cmp(v2),
             (Scalar::Date32(_), _) => None,
             (Scalar::Date64(v1), Scalar::Date64(v2)) => v1.partial_cmp(v2),
@@ -860,7 +862,7 @@ impl PartialOrd for Scalar {
                     None
                 }
             }
-            (Scalar::Decimal128(_, _, _), _) => None,
+            (Scalar::Decimal128(..), _) => None,
             (Scalar::Decimal256(v1, p1, s1), Scalar::Decimal256(v2, p2, s2)) => {
                 if p1.eq(p2) && s1.eq(s2) {
                     v1.partial_cmp(v2)
@@ -869,7 +871,7 @@ impl PartialOrd for Scalar {
                     None
                 }
             }
-            (Scalar::Decimal256(_, _, _), _) => None,
+            (Scalar::Decimal256(..), _) => None,
         }
     }
 }
@@ -890,13 +892,14 @@ fn partial_cmp_list(arr1: &dyn Array, arr2: &dyn Array) -> Option<Ordering> {
     let eq_res = arrow::compute::kernels::cmp::eq(&arr1_trimmed, &arr2_trimmed).ok()?;
 
     for j in 0..lt_res.len() {
-        // In Postgres, NULL values in lists are always considered to be greater than non-NULL values:
+        // In Postgres, NULL values in lists are always considered to be greater than
+        // non-NULL values:
         //
         // $ SELECT ARRAY[NULL]::integer[] > ARRAY[1]
         // true
         //
-        // These next two if statements are introduced for replicating Postgres behavior, as
-        // arrow::compute does not account for this.
+        // These next two if statements are introduced for replicating Postgres
+        // behavior, as arrow::compute does not account for this.
         if arr1_trimmed.is_null(j) && !arr2_trimmed.is_null(j) {
             return Some(Ordering::Greater);
         }
@@ -987,7 +990,8 @@ impl Display for Scalar {
 }
 
 fn fmt_list(arr: ArrayRef, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    // ScalarValue List, LargeList, FixedSizeList should always have a single element
+    // ScalarValue List, LargeList, FixedSizeList should always have a single
+    // element
     assert_eq!(arr.len(), 1);
     let options = FormatOptions::default().with_display_error(true);
     let formatter = ArrayFormatter::try_new(arr.as_ref() as &dyn Array, &options).unwrap();

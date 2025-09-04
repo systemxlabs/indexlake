@@ -1,11 +1,9 @@
 use arrow::array::RecordBatch;
 use derive_visitor::{Drive, DriveMut};
 
-use crate::{
-    ILResult,
-    catalog::CatalogDatabase,
-    expr::{ColumnarValue, Expr, apply_cmp},
-};
+use crate::ILResult;
+use crate::catalog::CatalogDatabase;
+use crate::expr::{ColumnarValue, Expr, apply_cmp};
 
 #[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
 pub struct Like {
@@ -24,6 +22,7 @@ impl Like {
             pattern,
         }
     }
+
     pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
         let expr = self.expr.to_sql(database)?;
         let pattern = self.pattern.to_sql(database)?;
@@ -119,7 +118,8 @@ mod tests {
             &BooleanArray::from(vec![true, false, false, false])
         );
 
-        // Test NOT LIKE: c1 NOT LIKE 'h%' -> ['world', 'HELLO', 'WORLD'] -> [false, true, true, true]
+        // Test NOT LIKE: c1 NOT LIKE 'h%' -> ['world', 'HELLO', 'WORLD'] -> [false,
+        // true, true, true]
         let not_like_expr_h = Like::new(
             true,
             Box::new(expr.clone()),
@@ -156,7 +156,8 @@ mod tests {
             &BooleanArray::from(vec![true, false, true, false])
         );
 
-        // Test NOT ILIKE: c1 NOT ILIKE 'h%' -> ['world', 'WORLD'] -> [false, true, false, true]
+        // Test NOT ILIKE: c1 NOT ILIKE 'h%' -> ['world', 'WORLD'] -> [false, true,
+        // false, true]
         let not_ilike_expr_h = Like::new(
             true,
             Box::new(expr.clone()),
@@ -175,7 +176,8 @@ mod tests {
         );
 
         // === More wildcards ===
-        // Test with wildcard '%' at the start: c1 LIKE '%d' -> ['world'] -> [false, true, false, false]
+        // Test with wildcard '%' at the start: c1 LIKE '%d' -> ['world'] -> [false,
+        // true, false, false]
         let pattern_d = lit("%d");
         let like_expr_d = Like::new(
             false,
@@ -194,7 +196,8 @@ mod tests {
             &BooleanArray::from(vec![false, true, false, false])
         );
 
-        // Test with wildcard '%' at the start (case-insensitive): c1 ILIKE '%d' -> ['world', 'WORLD'] -> [false, true, false, true]
+        // Test with wildcard '%' at the start (case-insensitive): c1 ILIKE '%d' ->
+        // ['world', 'WORLD'] -> [false, true, false, true]
         let ilike_expr_d = Like::new(
             false,
             Box::new(expr.clone()),
@@ -212,7 +215,8 @@ mod tests {
             &BooleanArray::from(vec![false, true, false, true])
         );
 
-        // Test with wildcard '_': c1 LIKE 'w_rld' -> ['world'] -> [false, true, false, false]
+        // Test with wildcard '_': c1 LIKE 'w_rld' -> ['world'] -> [false, true, false,
+        // false]
         let pattern_w = lit("w_rld");
         let like_expr_w = Like::new(
             false,
@@ -231,7 +235,8 @@ mod tests {
             &BooleanArray::from(vec![false, true, false, false])
         );
 
-        // Test with wildcard '_' (case-insensitive): c1 ILIKE 'W_RLD' -> ['world', 'WORLD'] -> [false, true, false, true]
+        // Test with wildcard '_' (case-insensitive): c1 ILIKE 'W_RLD' -> ['world',
+        // 'WORLD'] -> [false, true, false, true]
         let pattern_w = lit("W_RLD");
         let ilike_expr_w = Like::new(
             false,

@@ -1,16 +1,16 @@
 [workspace]
 members = [
-    "benchmarks",
-    "catalogs/postgres",
-    "catalogs/sqlite",
-    "indexes/bm25",
-    "indexes/btree",
-    "indexes/hnsw",
-    "indexes/rstar",
-    "indexlake",
-    "integration-tests",
-    "integrations/datafusion",
-    "integrations/datafusion/gen",
+  "benchmarks",
+  "catalogs/postgres",
+  "catalogs/sqlite",
+  "indexes/bm25",
+  "indexes/btree",
+  "indexes/hnsw",
+  "indexes/rstar",
+  "indexlake",
+  "integration-tests",
+  "integrations/datafusion",
+  "integrations/datafusion/gen",
 ]
 resolver = "3"
 

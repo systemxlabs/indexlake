@@ -9,10 +9,8 @@ use std::sync::Arc;
 use futures::TryStreamExt;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{Catalog, CatalogDatabase, CatalogSchemaRef, Row, Transaction},
-};
+use crate::catalog::{Catalog, CatalogDatabase, CatalogSchemaRef, Row, Transaction};
+use crate::{ILError, ILResult};
 
 pub(crate) struct TransactionHelper {
     pub(crate) transaction: Box<dyn Transaction>,

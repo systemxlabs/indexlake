@@ -1,34 +1,27 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use arrow::array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow_schema::Schema;
 use futures::StreamExt;
 use lance_core::cache::LanceCache;
 use lance_encoding::decoder::{DecoderPlugins, FilterExpression};
-use lance_file::{
-    v2::{
-        reader::{FileReader, FileReaderOptions, ReaderProjection},
-        writer::{FileWriter, FileWriterOptions},
-    },
-    version::LanceFileVersion,
-};
-use lance_io::{
-    object_store::{ObjectStore, ObjectStoreParams, ObjectStoreRegistry},
-    scheduler::{ScanScheduler, SchedulerConfig},
-    utils::CachedFileSize,
-};
+use lance_file::v2::reader::{FileReader, FileReaderOptions, ReaderProjection};
+use lance_file::v2::writer::{FileWriter, FileWriterOptions};
+use lance_file::version::LanceFileVersion;
+use lance_io::object_store::{ObjectStore, ObjectStoreParams, ObjectStoreRegistry};
+use lance_io::scheduler::{ScanScheduler, SchedulerConfig};
+use lance_io::utils::CachedFileSize;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult, RecordBatchStream,
-    catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_REF},
-    expr::{Expr, merge_filters},
-    storage::{DataFileFormat, Storage},
-    utils::{
-        array_to_uuids, build_projection_from_condition, build_row_id_array,
-        extract_row_ids_from_record_batch,
-    },
+use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_REF};
+use crate::expr::{Expr, merge_filters};
+use crate::storage::{DataFileFormat, Storage};
+use crate::utils::{
+    array_to_uuids, build_projection_from_condition, build_row_id_array,
+    extract_row_ids_from_record_batch,
 };
+use crate::{ILError, ILResult, RecordBatchStream};
 
 // TODO fix local fs
 pub(crate) async fn build_lance_writer(

@@ -102,7 +102,7 @@ impl ArrowScorer {
             .get(token_index)
             .map_or(0, |documents| documents.len()) as f32;
         let mut total_documents = 0;
-        for (row_id_array, _, _) in self.embeddings.iter() {
+        for (row_id_array, ..) in self.embeddings.iter() {
             total_documents += row_id_array.len();
         }
         let numerator = total_documents as f32 - token_frequency + 0.5;

@@ -1,14 +1,11 @@
 use arrow::datatypes::Schema;
 use uuid::Uuid;
 
-use crate::catalog::CatalogHelper;
-use crate::catalog::INTERNAL_ROW_ID_FIELD_REF;
-use crate::catalog::TransactionHelper;
-use crate::index::IndexDefination;
-use crate::index::IndexKind;
-use crate::index::IndexManager;
+use crate::catalog::{Catalog, CatalogHelper, INTERNAL_ROW_ID_FIELD_REF, TransactionHelper};
+use crate::index::{IndexDefinition, IndexKind, IndexManager};
+use crate::storage::Storage;
 use crate::table::{Table, TableCreation, process_create_table};
-use crate::{ILError, ILResult, catalog::Catalog, storage::Storage};
+use crate::{ILError, ILResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -117,7 +114,7 @@ impl Client {
             .await?;
         let mut indexes = Vec::new();
         for index_record in index_records {
-            let index = IndexDefination::from_index_record(
+            let index = IndexDefinition::from_index_record(
                 &index_record,
                 &field_records,
                 table_name,

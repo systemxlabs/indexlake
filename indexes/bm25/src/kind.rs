@@ -1,14 +1,13 @@
-use std::{any::Any, sync::Arc};
+use std::any::Any;
+use std::sync::Arc;
 
 use arrow::datatypes::DataType;
-use indexlake::{
-    ILError, ILResult,
-    expr::Expr,
-    index::{
-        FilterSupport, IndexBuilder, IndexDefination, IndexDefinationRef, IndexKind, IndexParams,
-        SearchQuery,
-    },
+use indexlake::expr::Expr;
+use indexlake::index::{
+    FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
+    SearchQuery,
 };
+use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{BM25SearchQuery, Bm25IndexBuilder};
@@ -27,7 +26,7 @@ impl IndexKind for BM25IndexKind {
         Ok(Arc::new(params))
     }
 
-    fn supports(&self, index_def: &IndexDefination) -> ILResult<()> {
+    fn supports(&self, index_def: &IndexDefinition) -> ILResult<()> {
         if index_def.key_columns.len() != 1 {
             return Err(ILError::index("BM25 index requires exactly one key column"));
         }
@@ -44,11 +43,11 @@ impl IndexKind for BM25IndexKind {
         Ok(())
     }
 
-    fn builder(&self, index_def: &IndexDefinationRef) -> ILResult<Box<dyn IndexBuilder>> {
+    fn builder(&self, index_def: &IndexDefinitionRef) -> ILResult<Box<dyn IndexBuilder>> {
         Ok(Box::new(Bm25IndexBuilder::try_new(index_def.clone())?))
     }
 
-    fn supports_search(&self, _: &IndexDefination, query: &dyn SearchQuery) -> ILResult<bool> {
+    fn supports_search(&self, _: &IndexDefinition, query: &dyn SearchQuery) -> ILResult<bool> {
         if query.as_any().downcast_ref::<BM25SearchQuery>().is_some() {
             Ok(true)
         } else {
@@ -56,7 +55,7 @@ impl IndexKind for BM25IndexKind {
         }
     }
 
-    fn supports_filter(&self, _: &IndexDefination, _: &Expr) -> ILResult<FilterSupport> {
+    fn supports_filter(&self, _: &IndexDefinition, _: &Expr) -> ILResult<FilterSupport> {
         Ok(FilterSupport::Unsupported)
     }
 }

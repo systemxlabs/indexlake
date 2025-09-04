@@ -3,7 +3,8 @@ use std::sync::Arc;
 use arrow::datatypes::{DataType, Schema};
 use uuid::Uuid;
 
-use crate::{ILError, ILResult, catalog::CatalogDatabase};
+use crate::catalog::CatalogDatabase;
+use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatalogDataType {
@@ -83,7 +84,7 @@ impl CatalogDataType {
             DataType::UInt64 => Ok(CatalogDataType::UInt64),
             DataType::Float32 => Ok(CatalogDataType::Float32),
             DataType::Float64 => Ok(CatalogDataType::Float64),
-            DataType::Timestamp(_, _) => Ok(CatalogDataType::Int64),
+            DataType::Timestamp(..) => Ok(CatalogDataType::Int64),
             DataType::Date32 => Ok(CatalogDataType::Int32),
             DataType::Date64 => Ok(CatalogDataType::Int64),
             DataType::Time32(_) => Ok(CatalogDataType::Int32),
@@ -103,11 +104,11 @@ impl CatalogDataType {
             DataType::Utf8View => Ok(CatalogDataType::Utf8),
             DataType::List(_) => Ok(CatalogDataType::Binary),
             DataType::ListView(_) => Ok(CatalogDataType::Binary),
-            DataType::FixedSizeList(_, _) => Ok(CatalogDataType::Binary),
+            DataType::FixedSizeList(..) => Ok(CatalogDataType::Binary),
             DataType::LargeList(_) => Ok(CatalogDataType::Binary),
             DataType::LargeListView(_) => Ok(CatalogDataType::Binary),
-            DataType::Decimal128(_, _) => Ok(CatalogDataType::Utf8),
-            DataType::Decimal256(_, _) => Ok(CatalogDataType::Utf8),
+            DataType::Decimal128(..) => Ok(CatalogDataType::Utf8),
+            DataType::Decimal256(..) => Ok(CatalogDataType::Utf8),
             _ => Err(ILError::not_supported(format!(
                 "Unsupported datatype: {datatype}"
             ))),

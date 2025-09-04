@@ -1,17 +1,14 @@
 use std::borrow::Cow;
 
-use arrow::{
-    array::{Array, BooleanArray, RecordBatch, new_null_array},
-    compute::{and, and_not, kernels::zip::zip, prep_null_mask_filter},
-};
+use arrow::array::{Array, BooleanArray, RecordBatch, new_null_array};
+use arrow::compute::kernels::zip::zip;
+use arrow::compute::{and, and_not, prep_null_mask_filter};
 use arrow_schema::{DataType, Schema};
 use derive_visitor::{Drive, DriveMut};
 
-use crate::{
-    ILError, ILResult,
-    catalog::CatalogDatabase,
-    expr::{ColumnarValue, Expr, try_cast},
-};
+use crate::catalog::CatalogDatabase;
+use crate::expr::{ColumnarValue, Expr, try_cast};
+use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
 pub struct Case {
@@ -30,7 +27,8 @@ impl Case {
                 break;
             }
         }
-        // if all then results are null, we use data type of else expr instead if possible.
+        // if all then results are null, we use data type of else expr instead if
+        // possible.
         if data_type.equals_datatype(&DataType::Null)
             && let Some(e) = &self.else_expr
         {

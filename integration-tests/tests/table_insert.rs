@@ -1,15 +1,10 @@
-use arrow::array::StringArray;
-use arrow::array::{AsArray, Int32Array, Int64Array, RecordBatch};
+use arrow::array::{AsArray, Int32Array, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Int64Type, Schema};
 use futures::TryStreamExt;
-use indexlake::ILError;
-use indexlake::table::TableScan;
-use indexlake::{
-    Client,
-    catalog::{Catalog, Scalar},
-    storage::{DataFileFormat, Storage},
-    table::{TableConfig, TableCreation, TableInsertion},
-};
+use indexlake::catalog::{Catalog, Scalar};
+use indexlake::storage::{DataFileFormat, Storage};
+use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan};
+use indexlake::{Client, ILError};
 use indexlake_integration_tests::data::prepare_simple_testing_table;
 use indexlake_integration_tests::utils::full_table_scan;
 use indexlake_integration_tests::{

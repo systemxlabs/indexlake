@@ -1,17 +1,13 @@
 use std::sync::Arc;
 
-use arrow::{
-    array::{ArrayRef, AsArray, BooleanArray, Datum, RecordBatch},
-    datatypes::{DataType, Schema},
-    error::ArrowError,
-};
+use arrow::array::{ArrayRef, AsArray, BooleanArray, Datum, RecordBatch};
+use arrow::datatypes::{DataType, Schema};
+use arrow::error::ArrowError;
 use derive_visitor::{Drive, DriveMut};
 
-use crate::{
-    ILError, ILResult,
-    catalog::{CatalogDatabase, Scalar},
-    expr::{ColumnarValue, Expr},
-};
+use crate::catalog::{CatalogDatabase, Scalar};
+use crate::expr::{ColumnarValue, Expr};
+use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone, Copy, Drive, DriveMut, PartialEq, Eq)]
 pub enum BinaryOp {

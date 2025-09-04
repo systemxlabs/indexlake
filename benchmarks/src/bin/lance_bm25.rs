@@ -1,7 +1,8 @@
 use std::time::Instant;
 
+use arrow::array::RecordBatchIterator;
+use arrow::record_batch::RecordBatch;
 use arrow::util::pretty::pretty_format_batches;
-use arrow::{array::RecordBatchIterator, record_batch::RecordBatch};
 use futures::StreamExt;
 use indexlake_benchmarks::data::{arrow_bm25_table_schema, new_bm25_record_batch};
 use indexlake_benchmarks::{set_lance_language_model_home, setup_s3_env};

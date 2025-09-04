@@ -1,16 +1,11 @@
-use indexlake::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
+use indexlake::Client;
+use indexlake::catalog::{Catalog, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use indexlake::expr::{col, lit};
-use indexlake::{
-    Client,
-    catalog::Catalog,
-    storage::{DataFileFormat, Storage},
-};
+use indexlake::storage::{DataFileFormat, Storage};
+use indexlake_integration_tests::data::prepare_simple_testing_table;
+use indexlake_integration_tests::utils::{full_table_scan, read_first_row_id_bytes_from_table};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
-};
-use indexlake_integration_tests::{
-    data::prepare_simple_testing_table,
-    utils::{full_table_scan, read_first_row_id_bytes_from_table},
 };
 use std::sync::Arc;
 

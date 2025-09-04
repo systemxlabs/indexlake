@@ -1,13 +1,11 @@
 use std::any::Any;
 
 use bm25::Embedder;
-use indexlake::{
-    ILError, ILResult,
-    expr::Expr,
-    index::{
-        FilterIndexEntries, Index, IndexDefinationRef, RowIdScore, SearchIndexEntries, SearchQuery,
-    },
+use indexlake::expr::Expr;
+use indexlake::index::{
+    FilterIndexEntries, Index, IndexDefinitionRef, RowIdScore, SearchIndexEntries, SearchQuery,
 };
+use indexlake::{ILError, ILResult};
 
 use crate::{ArrowScorer, BM25IndexParams, JiebaTokenizer};
 
@@ -32,7 +30,7 @@ impl SearchQuery for BM25SearchQuery {
 }
 
 pub struct BM25Index {
-    pub index_def: IndexDefinationRef,
+    pub index_def: IndexDefinitionRef,
     pub params: BM25IndexParams,
     pub embedder: Embedder<u32, JiebaTokenizer>,
     pub scorer: ArrowScorer,

@@ -64,8 +64,9 @@ impl DockerCompose {
         match result {
             Ok(value) => value.trim().to_string(),
             Err(_err) => {
-                // docker/podman do not consistently place OSArch info in the same json path across OS and versions
-                // Below tries an alternative path if the above path fails
+                // docker/podman do not consistently place OSArch info in the same json path
+                // across OS and versions Below tries an alternative path if the
+                // above path fails
                 let mut alt_cmd = Command::new("docker");
                 alt_cmd
                     .arg("info")

@@ -1,21 +1,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::{
-    ILError, ILResult,
-    expr::Expr,
-    index::{FilterSupport, IndexBuilder, IndexDefinationRef, IndexKind},
-};
+use crate::expr::Expr;
+use crate::index::{FilterSupport, IndexBuilder, IndexDefinitionRef, IndexKind};
+use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone)]
 pub struct IndexManager {
-    indexes: Vec<IndexDefinationRef>,
+    indexes: Vec<IndexDefinitionRef>,
     kinds: HashMap<String, Arc<dyn IndexKind>>,
 }
 
 impl IndexManager {
     pub(crate) fn try_new(
-        indexes: Vec<IndexDefinationRef>,
+        indexes: Vec<IndexDefinitionRef>,
         kinds: HashMap<String, Arc<dyn IndexKind>>,
     ) -> ILResult<Self> {
         for index_def in &indexes {
@@ -29,7 +27,7 @@ impl IndexManager {
         Ok(Self { indexes, kinds })
     }
 
-    pub(crate) fn get_index(&self, index_name: &str) -> Option<&IndexDefinationRef> {
+    pub(crate) fn get_index(&self, index_name: &str) -> Option<&IndexDefinitionRef> {
         self.indexes.iter().find(|index| index.name == index_name)
     }
 
@@ -55,7 +53,7 @@ impl IndexManager {
 
     pub(crate) fn iter_index_and_kind(
         &self,
-    ) -> impl Iterator<Item = (&IndexDefinationRef, &Arc<dyn IndexKind>)> {
+    ) -> impl Iterator<Item = (&IndexDefinitionRef, &Arc<dyn IndexKind>)> {
         self.indexes.iter().map(|index_def| {
             let index_kind = self
                 .kinds

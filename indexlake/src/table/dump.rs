@@ -1,20 +1,19 @@
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
+use std::time::Instant;
 
 use arrow::datatypes::SchemaRef;
 use futures::StreamExt;
 use log::{debug, error};
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{
-        Catalog, CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-        RowStream, TransactionHelper, rows_to_record_batch,
-    },
-    index::{IndexBuilder, IndexManager},
-    storage::{DataFileFormat, Storage, build_parquet_writer},
-    table::{Table, TableConfig},
+use crate::catalog::{
+    Catalog, CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
+    RowStream, TransactionHelper, rows_to_record_batch,
 };
+use crate::index::{IndexBuilder, IndexManager};
+use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
+use crate::table::{Table, TableConfig};
+use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
     let namespace_id = table.namespace_id;

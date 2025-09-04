@@ -1,22 +1,16 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
-use std::{collections::HashMap, sync::Arc};
 
 use arrow::util::pretty::pretty_format_batches;
 use futures::StreamExt;
-use indexlake::Client;
-use indexlake::ILError;
 use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
-use indexlake::table::TableConfig;
-use indexlake::table::TableCreation;
-use indexlake::table::TableSearch;
-use indexlake::table::{IndexCreation, TableInsertion};
+use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
+use indexlake::{Client, ILError};
 use indexlake_benchmarks::data::{arrow_bm25_table_schema, new_bm25_record_batch};
-use indexlake_index_bm25::BM25IndexKind;
-use indexlake_index_bm25::BM25IndexParams;
-use indexlake_index_bm25::BM25SearchQuery;
-use indexlake_integration_tests::init_env_logger;
-use indexlake_integration_tests::{catalog_postgres, storage_s3};
+use indexlake_index_bm25::{BM25IndexKind, BM25IndexParams, BM25SearchQuery};
+use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

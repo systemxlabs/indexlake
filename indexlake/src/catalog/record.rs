@@ -1,21 +1,17 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use arrow::datatypes::{DataType, Field};
 use parquet::arrow::arrow_reader::RowSelection;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{
-        CatalogDataType, CatalogDatabase, CatalogSchema, Column, Row, Scalar, deserialize_scalar,
-        serialize_scalar,
-    },
-    storage::DataFileFormat,
-    table::TableConfig,
+use crate::catalog::{
+    CatalogDataType, CatalogDatabase, CatalogSchema, Column, Row, Scalar, deserialize_scalar,
+    serialize_scalar,
 };
+use crate::storage::DataFileFormat;
+use crate::table::TableConfig;
+use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TableRecord {

@@ -1,17 +1,17 @@
-mod defination;
+mod definition;
 mod manager;
 
-pub use defination::*;
+pub use definition::*;
 pub use manager::*;
 use uuid::Uuid;
 
-use crate::{
-    ILResult,
-    expr::Expr,
-    storage::{InputFile, OutputFile},
-};
+use crate::ILResult;
+use crate::expr::Expr;
+use crate::storage::{InputFile, OutputFile};
 use arrow::array::{FixedSizeBinaryArray, RecordBatch};
-use std::{any::Any, fmt::Debug, sync::Arc};
+use std::any::Any;
+use std::fmt::Debug;
+use std::sync::Arc;
 
 pub trait IndexKind: Debug + Send + Sync {
     // The kind of the index.
@@ -19,19 +19,19 @@ pub trait IndexKind: Debug + Send + Sync {
 
     fn decode_params(&self, value: &str) -> ILResult<Arc<dyn IndexParams>>;
 
-    fn supports(&self, index_def: &IndexDefination) -> ILResult<()>;
+    fn supports(&self, index_def: &IndexDefinition) -> ILResult<()>;
 
-    fn builder(&self, index_def: &IndexDefinationRef) -> ILResult<Box<dyn IndexBuilder>>;
+    fn builder(&self, index_def: &IndexDefinitionRef) -> ILResult<Box<dyn IndexBuilder>>;
 
     fn supports_search(
         &self,
-        index_def: &IndexDefination,
+        index_def: &IndexDefinition,
         query: &dyn SearchQuery,
     ) -> ILResult<bool>;
 
     fn supports_filter(
         &self,
-        index_def: &IndexDefination,
+        index_def: &IndexDefinition,
         filter: &Expr,
     ) -> ILResult<FilterSupport>;
 }
@@ -40,7 +40,7 @@ pub trait IndexKind: Debug + Send + Sync {
 pub trait IndexBuilder: Debug + Send + Sync {
     fn mergeable(&self) -> bool;
 
-    fn index_def(&self) -> &IndexDefinationRef;
+    fn index_def(&self) -> &IndexDefinitionRef;
 
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()>;
 

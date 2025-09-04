@@ -1,19 +1,18 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use datafusion::{
-    arrow::datatypes::SchemaRef,
-    catalog::{Session, TableProvider},
-    common::{DFSchema, Statistics, stats::Precision},
-    datasource::TableType,
-    error::DataFusionError,
-    logical_expr::{TableProviderFilterPushDown, dml::InsertOp},
-    physical_plan::ExecutionPlan,
-    prelude::Expr,
-};
-use indexlake::{
-    index::FilterSupport,
-    table::{Table, TableScanPartition},
-};
+use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::catalog::{Session, TableProvider};
+use datafusion::common::stats::Precision;
+use datafusion::common::{DFSchema, Statistics};
+use datafusion::datasource::TableType;
+use datafusion::error::DataFusionError;
+use datafusion::logical_expr::TableProviderFilterPushDown;
+use datafusion::logical_expr::dml::InsertOp;
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::prelude::Expr;
+use indexlake::index::FilterSupport;
+use indexlake::table::{Table, TableScanPartition};
 use log::warn;
 
 use crate::{

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use arrow::datatypes::DataType;
 use indexlake::expr::{BinaryOp, Expr};
 use indexlake::index::{
-    FilterSupport, IndexBuilder, IndexDefination, IndexDefinationRef, IndexKind, IndexParams,
+    FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
     SearchQuery,
 };
 use indexlake::{ILError, ILResult};
@@ -26,7 +26,7 @@ impl IndexKind for BTreeIndexKind {
         Ok(Arc::new(params))
     }
 
-    fn supports(&self, index_def: &IndexDefination) -> ILResult<()> {
+    fn supports(&self, index_def: &IndexDefinition) -> ILResult<()> {
         if index_def.key_columns.len() != 1 {
             return Err(ILError::index(
                 "B-tree index requires exactly one key column",
@@ -58,13 +58,13 @@ impl IndexKind for BTreeIndexKind {
         }
     }
 
-    fn builder(&self, index_def: &IndexDefinationRef) -> ILResult<Box<dyn IndexBuilder>> {
+    fn builder(&self, index_def: &IndexDefinitionRef) -> ILResult<Box<dyn IndexBuilder>> {
         Ok(Box::new(BTreeIndexBuilder::try_new(index_def.clone())?))
     }
 
     fn supports_search(
         &self,
-        _index_def: &IndexDefination,
+        _index_def: &IndexDefinition,
         _query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(false)
@@ -72,7 +72,7 @@ impl IndexKind for BTreeIndexKind {
 
     fn supports_filter(
         &self,
-        index_def: &IndexDefination,
+        index_def: &IndexDefinition,
         filter: &Expr,
     ) -> ILResult<FilterSupport> {
         match filter {

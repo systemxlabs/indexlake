@@ -1,22 +1,16 @@
 use std::sync::{Arc, LazyLock};
 
-use arrow::{
-    array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, Float64Array, RecordBatch},
-    datatypes::{DataType, Field, Float64Type, Schema, SchemaRef},
-};
+use arrow::array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, Float64Array, RecordBatch};
+use arrow::datatypes::{DataType, Field, Float64Type, Schema, SchemaRef};
 use futures::StreamExt;
 use geo::BoundingRect;
 use geozero::wkb::FromWkb;
-use indexlake::{
-    ILError, ILResult,
-    index::{Index, IndexBuilder, IndexDefinationRef},
-    storage::{InputFile, OutputFile},
-    utils::extract_row_id_array_from_record_batch,
-};
-use parquet::{
-    arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder},
-    file::properties::WriterProperties,
-};
+use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
+use indexlake::storage::{InputFile, OutputFile};
+use indexlake::utils::extract_row_id_array_from_record_batch;
+use indexlake::{ILError, ILResult};
+use parquet::arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder};
+use parquet::file::properties::WriterProperties;
 use rstar::{AABB, RTree};
 use uuid::Uuid;
 
@@ -34,13 +28,13 @@ pub static RSTAR_INDEX_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
 
 #[derive(Debug)]
 pub struct RStarIndexBuilder {
-    index_def: IndexDefinationRef,
+    index_def: IndexDefinitionRef,
     params: RStarIndexParams,
     index_batches: Vec<RecordBatch>,
 }
 
 impl RStarIndexBuilder {
-    pub fn try_new(index_def: IndexDefinationRef) -> ILResult<Self> {
+    pub fn try_new(index_def: IndexDefinitionRef) -> ILResult<Self> {
         let params = index_def.downcast_params::<RStarIndexParams>()?.clone();
         Ok(Self {
             index_def,
@@ -56,7 +50,7 @@ impl IndexBuilder for RStarIndexBuilder {
         true
     }
 
-    fn index_def(&self) -> &IndexDefinationRef {
+    fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }
 

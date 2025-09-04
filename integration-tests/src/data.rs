@@ -1,16 +1,13 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use arrow::{
-    array::{BinaryArray, Int32Array, RecordBatch, StringArray},
-    datatypes::{DataType, Field, Schema},
-};
+use arrow::array::{BinaryArray, Int32Array, RecordBatch, StringArray};
+use arrow::datatypes::{DataType, Field, Schema};
 use geo::{Geometry, Point};
 use geozero::{CoordDimensions, ToWkb};
-use indexlake::{
-    Client, ILResult,
-    storage::DataFileFormat,
-    table::{Table, TableConfig, TableCreation, TableInsertion},
-};
+use indexlake::storage::DataFileFormat;
+use indexlake::table::{Table, TableConfig, TableCreation, TableInsertion};
+use indexlake::{Client, ILResult};
 
 pub async fn prepare_simple_testing_table(
     client: &Client,
