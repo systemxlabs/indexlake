@@ -16,11 +16,9 @@ use futures::Stream;
 
 use crate::ILResult;
 use arrow::datatypes::{DataType, Field, FieldRef};
-use std::{
-    fmt::Debug,
-    pin::Pin,
-    sync::{Arc, LazyLock},
-};
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::sync::{Arc, LazyLock};
 
 pub type RowStream<'a> = Pin<Box<dyn Stream<Item = ILResult<Row>> + Send + 'a>>;
 

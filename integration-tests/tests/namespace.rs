@@ -1,4 +1,6 @@
-use indexlake::{Client, catalog::Catalog, storage::Storage};
+use indexlake::Client;
+use indexlake::catalog::Catalog;
+use indexlake::storage::Storage;
 use indexlake_integration_tests::{catalog_postgres, catalog_sqlite, storage_fs, storage_s3};
 use std::sync::Arc;
 

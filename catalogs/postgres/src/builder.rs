@@ -1,5 +1,6 @@
 use bb8::Pool;
-use bb8_postgres::{PostgresConnectionManager, tokio_postgres::NoTls};
+use bb8_postgres::PostgresConnectionManager;
+use bb8_postgres::tokio_postgres::NoTls;
 use indexlake::{ILError, ILResult};
 
 use crate::PostgresCatalog;

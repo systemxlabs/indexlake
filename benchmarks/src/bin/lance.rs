@@ -1,11 +1,10 @@
 use std::time::Instant;
 
-use arrow::{array::RecordBatchIterator, record_batch::RecordBatch};
+use arrow::array::RecordBatchIterator;
+use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
-use indexlake_benchmarks::{
-    data::{arrow_table_schema, new_record_batch},
-    setup_s3_env,
-};
+use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
+use indexlake_benchmarks::setup_s3_env;
 use indexlake_integration_tests::setup_minio;
 use lance::Dataset;
 

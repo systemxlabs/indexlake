@@ -1,16 +1,15 @@
-use crate::{
-    ILError, ILResult,
-    catalog::{FieldRecord, IndexRecord},
-    index::{IndexKind, IndexParams},
-};
+use crate::catalog::{FieldRecord, IndexRecord};
+use crate::index::{IndexKind, IndexParams};
+use crate::{ILError, ILResult};
 use arrow::datatypes::{FieldRef, SchemaRef};
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
-pub type IndexDefinationRef = Arc<IndexDefination>;
+pub type IndexDefinitionRef = Arc<IndexDefinition>;
 
 #[derive(Debug, Clone)]
-pub struct IndexDefination {
+pub struct IndexDefinition {
     pub index_id: Uuid,
     pub name: String,
     pub kind: String,
@@ -21,7 +20,7 @@ pub struct IndexDefination {
     pub params: Arc<dyn IndexParams>,
 }
 
-impl IndexDefination {
+impl IndexDefinition {
     pub fn key_fields(&self) -> ILResult<Vec<FieldRef>> {
         let mut key_fields = Vec::new();
         for name in self.key_columns.iter() {

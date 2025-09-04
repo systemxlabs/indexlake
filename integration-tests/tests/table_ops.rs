@@ -1,24 +1,19 @@
 use arrow::array::*;
 use arrow::datatypes::*;
 use futures::TryStreamExt;
-use indexlake::catalog::INTERNAL_ROW_ID_FIELD_REF;
+use indexlake::Client;
+use indexlake::catalog::{Catalog, INTERNAL_ROW_ID_FIELD_REF};
 use indexlake::index::IndexKind;
-use indexlake::table::IndexCreation;
-use indexlake::table::TableScan;
-use indexlake::{
-    Client,
-    catalog::Catalog,
-    storage::{DataFileFormat, Storage},
-    table::{TableConfig, TableCreation, TableInsertion},
-};
+use indexlake::storage::{DataFileFormat, Storage};
+use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableScan};
 use indexlake_index_rstar::{RStarIndexKind, RStarIndexParams, WkbDialect};
-use indexlake_integration_tests::data::prepare_simple_geom_table;
-use indexlake_integration_tests::data::prepare_simple_testing_table;
+use indexlake_integration_tests::data::{prepare_simple_geom_table, prepare_simple_testing_table};
 use indexlake_integration_tests::utils::full_table_scan;
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
-use std::{collections::HashMap, i128, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[rstest::rstest]
 #[case(async { catalog_sqlite() }, async { storage_fs() })]
@@ -64,7 +59,7 @@ async fn create_table(
     assert_eq!(table.table_name, table_name);
 
     let mut fields = vec![INTERNAL_ROW_ID_FIELD_REF.clone()];
-    fields.extend(expected_schema.fields.iter().map(|f| f.clone()));
+    fields.extend(expected_schema.fields.iter().cloned());
     let expected_schema = Schema::new(fields);
 
     assert_eq!(table.schema.as_ref(), &expected_schema);
@@ -270,8 +265,8 @@ async fn table_data_types(
                 None,
             ])),
             Arc::new(BinaryArray::from_opt_vec(vec![
-                Some(&vec![0u8, 1u8]),
-                Some(&vec![0u8, 1u8]),
+                Some(&[0u8, 1u8]),
+                Some(&[0u8, 1u8]),
                 None,
             ])),
             Arc::new(FixedSizeBinaryArray::try_from_sparse_iter_with_size(
@@ -279,8 +274,8 @@ async fn table_data_types(
                 2,
             )?),
             Arc::new(LargeBinaryArray::from_opt_vec(vec![
-                Some(&vec![0u8, 1u8]),
-                Some(&vec![0u8, 1u8]),
+                Some(&[0u8, 1u8]),
+                Some(&[0u8, 1u8]),
                 None,
             ])),
             Arc::new(BinaryViewArray::from_iter(vec![

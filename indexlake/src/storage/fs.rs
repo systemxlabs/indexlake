@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use opendal::{Operator, layers::RetryLayer, services::FsConfig};
+use opendal::Operator;
+use opendal::layers::RetryLayer;
+use opendal::services::FsConfig;
 
 use crate::ILResult;
 

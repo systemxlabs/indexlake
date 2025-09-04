@@ -1,4 +1,6 @@
-use opendal::{Configurator, Operator, layers::RetryLayer, services::S3Config};
+use opendal::layers::RetryLayer;
+use opendal::services::S3Config;
+use opendal::{Configurator, Operator};
 
 use crate::ILResult;
 

@@ -1,19 +1,18 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
 use futures::StreamExt;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{
-        CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, Scalar,
-        TableRecord, TransactionHelper, rows_to_record_batch,
-    },
-    index::{IndexDefination, IndexParams},
-    storage::read_data_file_by_record,
-    table::{Table, TableConfig},
+use crate::catalog::{
+    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, Scalar,
+    TableRecord, TransactionHelper, rows_to_record_batch,
 };
+use crate::index::{IndexDefinition, IndexParams};
+use crate::storage::read_data_file_by_record;
+use crate::table::{Table, TableConfig};
+use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone)]
 pub struct TableCreation {
@@ -119,7 +118,7 @@ pub(crate) async fn process_create_index(
     creation: IndexCreation,
 ) -> ILResult<Uuid> {
     let index_id = Uuid::now_v7();
-    let index_def = Arc::new(IndexDefination {
+    let index_def = Arc::new(IndexDefinition {
         index_id,
         name: creation.name.clone(),
         kind: creation.kind.clone(),

@@ -1,10 +1,10 @@
-use std::{collections::HashMap, time::Instant};
+use std::collections::HashMap;
+use std::time::Instant;
 
 use delta_kernel::engine::arrow_conversion::TryFromArrow;
-use deltalake::{
-    DeltaOps, StructField, open_table_with_storage_options, operations::create::CreateBuilder,
-    protocol::SaveMode,
-};
+use deltalake::operations::create::CreateBuilder;
+use deltalake::protocol::SaveMode;
+use deltalake::{DeltaOps, StructField, open_table_with_storage_options};
 use futures::StreamExt;
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
 use indexlake_integration_tests::setup_minio;

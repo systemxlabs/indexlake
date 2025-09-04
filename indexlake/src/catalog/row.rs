@@ -1,12 +1,10 @@
 use std::fmt::Display;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{CatalogSchemaRef, INTERNAL_ROW_ID_FIELD_NAME, Scalar},
-    utils::deserialize_array,
-};
-use arrow::datatypes::{DataType, SchemaRef, TimeUnit};
-use arrow::{array::*, datatypes::i256};
+use crate::catalog::{CatalogSchemaRef, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
+use crate::utils::deserialize_array;
+use crate::{ILError, ILResult};
+use arrow::array::*;
+use arrow::datatypes::{DataType, SchemaRef, TimeUnit, i256};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -45,6 +43,7 @@ impl Row {
             ))),
         }
     }
+
     pub fn int32(&self, index: usize) -> ILResult<Option<i32>> {
         match self.values[index] {
             Scalar::Int32(v) => Ok(v),
@@ -210,7 +209,15 @@ pub fn pretty_print_rows(schema_opt: Option<CatalogSchemaRef>, rows: &[Row]) -> 
 }
 
 macro_rules! builder_append {
-    ($builder:expr, $builder_ty:ty, $field:expr, $row:expr, $row_method:ident, $index:expr, $convert:expr) => {{
+    (
+        $builder:expr,
+        $builder_ty:ty,
+        $field:expr,
+        $row:expr,
+        $row_method:ident,
+        $index:expr,
+        $convert:expr
+    ) => {{
         let builder = $builder
             .as_any_mut()
             .downcast_mut::<$builder_ty>()
@@ -387,7 +394,7 @@ macro_rules! list_builder_append {
                             LargeStringArray
                         );
                     }
-                    DataType::Decimal128(_, _) => {
+                    DataType::Decimal128(..) => {
                         values_builder_append!(
                             values_builder,
                             Decimal128Builder,
@@ -395,7 +402,7 @@ macro_rules! list_builder_append {
                             Decimal128Array
                         );
                     }
-                    DataType::Decimal256(_, _) => {
+                    DataType::Decimal256(..) => {
                         values_builder_append!(
                             values_builder,
                             Decimal256Builder,
@@ -440,7 +447,14 @@ macro_rules! values_builder_append {
 }
 
 macro_rules! fixed_size_list_values_builder_append {
-    ($data:expr, $builder:expr, $values_builder_ty:ty, $inner_field:expr, $array_ty:ty, $len:expr) => {{
+    (
+        $data:expr,
+        $builder:expr,
+        $values_builder_ty:ty,
+        $inner_field:expr,
+        $array_ty:ty,
+        $len:expr
+    ) => {{
         match $data {
             Some(v) => {
                 let array = deserialize_array(&v, $inner_field.clone())?;
@@ -947,7 +961,7 @@ pub fn rows_to_record_batch(schema: &SchemaRef, rows: &[Row]) -> ILResult<Record
                         i
                     );
                 }
-                DataType::Decimal128(_, _) => {
+                DataType::Decimal128(..) => {
                     builder_append!(
                         array_builders[i],
                         Decimal128Builder,
@@ -965,7 +979,7 @@ pub fn rows_to_record_batch(schema: &SchemaRef, rows: &[Row]) -> ILResult<Record
                         }
                     );
                 }
-                DataType::Decimal256(_, _) => {
+                DataType::Decimal256(..) => {
                     builder_append!(
                         array_builders[i],
                         Decimal256Builder,

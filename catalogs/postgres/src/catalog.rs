@@ -1,11 +1,12 @@
 use bb8::Pool;
-use bb8_postgres::{PostgresConnectionManager, tokio_postgres::NoTls};
+use bb8_postgres::PostgresConnectionManager;
+use bb8_postgres::tokio_postgres::NoTls;
 use futures::StreamExt;
-use indexlake::{
-    ILError, ILResult,
-    catalog::{Catalog, CatalogDatabase, RowStream, Transaction},
-    catalog::{CatalogDataType, CatalogSchemaRef, Row, Scalar},
+use indexlake::catalog::{
+    Catalog, CatalogDataType, CatalogDatabase, CatalogSchemaRef, Row, RowStream, Scalar,
+    Transaction,
 };
+use indexlake::{ILError, ILResult};
 use log::{error, trace};
 
 #[derive(Debug, Clone)]

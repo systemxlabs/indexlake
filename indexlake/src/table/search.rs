@@ -1,25 +1,19 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use arrow::{
-    array::{FixedSizeBinaryArray, Float64Array, RecordBatch},
-    compute::SortOptions,
-};
+use arrow::array::{FixedSizeBinaryArray, Float64Array, RecordBatch};
+use arrow::compute::SortOptions;
 use futures::TryStreamExt;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult, RecordBatchStream,
-    catalog::{
-        CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, Row, rows_to_record_batch,
-    },
-    index::{IndexDefinationRef, IndexKind, RowIdScore, SearchIndexEntries, SearchQuery},
-    storage::{Storage, read_data_file_by_record},
-    table::Table,
-    utils::project_schema,
+use crate::catalog::{
+    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, Row, rows_to_record_batch,
 };
+use crate::index::{IndexDefinitionRef, IndexKind, RowIdScore, SearchIndexEntries, SearchQuery};
+use crate::storage::{Storage, read_data_file_by_record};
+use crate::table::Table;
+use crate::utils::project_schema;
+use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, Clone)]
 pub struct TableSearch {
@@ -141,7 +135,7 @@ pub(crate) async fn process_search(
 async fn search_inline_rows(
     catalog_helper: &CatalogHelper,
     index_kind: &dyn IndexKind,
-    index_def: &IndexDefinationRef,
+    index_def: &IndexDefinitionRef,
     search: &TableSearch,
 ) -> ILResult<SearchIndexEntries> {
     let mut index_builder = index_kind.builder(index_def)?;
@@ -170,7 +164,7 @@ async fn search_inline_rows(
 async fn search_index_file(
     storage: &Storage,
     index_kind: &dyn IndexKind,
-    index_def: &IndexDefinationRef,
+    index_def: &IndexDefinitionRef,
     search_query: &dyn SearchQuery,
     index_file_record: &IndexFileRecord,
 ) -> ILResult<SearchIndexEntries> {

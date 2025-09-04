@@ -1,17 +1,18 @@
-use std::{collections::HashSet, hash::Hash, sync::Arc};
+use std::collections::HashSet;
+use std::hash::Hash;
+use std::sync::Arc;
 
-use arrow::{
-    array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions},
-    datatypes::{FieldRef, Schema},
-    ipc::{reader::StreamReader, writer::StreamWriter},
+use arrow::array::{
+    Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions,
 };
+use arrow::datatypes::{FieldRef, Schema};
+use arrow::ipc::reader::StreamReader;
+use arrow::ipc::writer::StreamWriter;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{INTERNAL_ROW_ID_FIELD_NAME, INTERNAL_ROW_ID_FIELD_REF},
-    expr::{Expr, visited_columns},
-};
+use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, INTERNAL_ROW_ID_FIELD_REF};
+use crate::expr::{Expr, visited_columns};
+use crate::{ILError, ILResult};
 
 pub fn has_duplicated_items(container: impl Iterator<Item = impl Eq + Hash>) -> bool {
     let mut set = HashSet::new();
@@ -185,10 +186,10 @@ mod tests {
 
     #[test]
     fn test_has_duplicated_items() {
-        let items = vec![1, 2, 3, 4, 5];
+        let items = [1, 2, 3, 4, 5];
         assert!(!has_duplicated_items(items.iter()));
 
-        let items_with_duplicates = vec![1, 2, 3, 4, 5, 3];
+        let items_with_duplicates = [1, 2, 3, 4, 5, 3];
         assert!(has_duplicated_items(items_with_duplicates.iter()));
     }
 }

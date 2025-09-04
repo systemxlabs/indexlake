@@ -1,12 +1,13 @@
-use std::{any::Any, sync::Arc};
+use std::any::Any;
+use std::sync::Arc;
 
 use arrow::datatypes::DataType;
-use indexlake::ILError;
+use indexlake::expr::Expr;
 use indexlake::index::{
-    FilterSupport, IndexBuilder, IndexDefination, IndexDefinationRef, IndexKind, IndexParams,
+    FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
     SearchQuery,
 };
-use indexlake::{ILResult, expr::Expr};
+use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{HnswIndexBuilder, HnswSearchQuery};
@@ -25,7 +26,7 @@ impl IndexKind for HnswIndexKind {
         Ok(Arc::new(params))
     }
 
-    fn supports(&self, index_def: &IndexDefination) -> ILResult<()> {
+    fn supports(&self, index_def: &IndexDefinition) -> ILResult<()> {
         if index_def.key_columns.len() != 1 {
             return Err(ILError::index("Hnsw index requires exactly one key column"));
         }
@@ -48,13 +49,13 @@ impl IndexKind for HnswIndexKind {
         Ok(())
     }
 
-    fn builder(&self, index_def: &IndexDefinationRef) -> ILResult<Box<dyn IndexBuilder>> {
+    fn builder(&self, index_def: &IndexDefinitionRef) -> ILResult<Box<dyn IndexBuilder>> {
         Ok(Box::new(HnswIndexBuilder::try_new(index_def.clone())?))
     }
 
     fn supports_search(
         &self,
-        _index_def: &IndexDefination,
+        _index_def: &IndexDefinition,
         query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         let Some(_query) = query.as_any().downcast_ref::<HnswSearchQuery>() else {
@@ -65,7 +66,7 @@ impl IndexKind for HnswIndexKind {
 
     fn supports_filter(
         &self,
-        _index_def: &IndexDefination,
+        _index_def: &IndexDefinition,
         _filter: &Expr,
     ) -> ILResult<FilterSupport> {
         Ok(FilterSupport::Unsupported)

@@ -1,25 +1,21 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
 use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult, RecordBatchStream,
-    catalog::{
-        CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-        rows_to_record_batch,
-    },
-    expr::{Expr, split_conjunction_filters},
-    index::{FilterSupport, IndexManager},
-    storage::read_data_file_by_record,
-    table::Table,
-    utils::{fixed_size_binary_array_to_uuids, project_schema},
+use crate::catalog::{
+    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
+    rows_to_record_batch,
 };
+use crate::expr::{Expr, split_conjunction_filters};
+use crate::index::{FilterSupport, IndexManager};
+use crate::storage::read_data_file_by_record;
+use crate::table::Table;
+use crate::utils::{fixed_size_binary_array_to_uuids, project_schema};
+use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, Clone, derive_with::With)]
 pub struct TableScan {

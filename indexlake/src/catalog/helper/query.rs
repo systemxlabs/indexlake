@@ -2,18 +2,13 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
+use crate::ILResult;
 use crate::catalog::{
-    CatalogHelper, DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord,
-    inline_row_table_name,
+    CatalogDataType, CatalogHelper, CatalogSchema, CatalogSchemaRef, Column, DataFileRecord,
+    FieldRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord, IndexRecord, InlineIndexRecord, Row,
+    RowStream, TableRecord, TransactionHelper, inline_row_table_name,
 };
 use crate::expr::Expr;
-use crate::{
-    ILResult,
-    catalog::{
-        CatalogDataType, CatalogSchema, CatalogSchemaRef, Column, INTERNAL_ROW_ID_FIELD_NAME, Row,
-    },
-    catalog::{RowStream, TableRecord, TransactionHelper},
-};
 
 impl TransactionHelper {
     pub(crate) async fn get_namespace_id(

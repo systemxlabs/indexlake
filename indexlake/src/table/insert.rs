@@ -1,26 +1,22 @@
 use std::sync::Arc;
 
-use arrow::{
-    array::*,
-    datatypes::{DataType, TimeUnit, i256},
-};
+use arrow::array::*;
+use arrow::datatypes::{DataType, TimeUnit, i256};
 use arrow_schema::SchemaRef;
 use futures::StreamExt;
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{
-        CatalogDatabase, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME,
-        IndexFileRecord, InlineIndexRecord, TransactionHelper, rows_to_record_batch,
-    },
-    index::IndexBuilder,
-    storage::{DataFileFormat, build_parquet_writer},
-    table::Table,
-    utils::{
-        extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, serialize_array,
-    },
+use crate::catalog::{
+    CatalogDatabase, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord,
+    InlineIndexRecord, TransactionHelper, rows_to_record_batch,
 };
+use crate::index::IndexBuilder;
+use crate::storage::{DataFileFormat, build_parquet_writer};
+use crate::table::Table;
+use crate::utils::{
+    extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, serialize_array,
+};
+use crate::{ILError, ILResult};
 
 pub struct TableInsertion {
     pub data: Vec<RecordBatch>,
@@ -288,9 +284,9 @@ pub(crate) fn record_batch_to_sql_values(
         let array = record.column(i);
         let column_values = match field.data_type() {
             DataType::Boolean => {
-                extract_sql_values!(array, BooleanArray, |v: bool| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, BooleanArray, |v: bool| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Int8 => {
                 extract_sql_values!(array, Int8Array, |v: i8| Ok::<_, ILError>(v.to_string()))
@@ -317,34 +313,34 @@ pub(crate) fn record_batch_to_sql_values(
                 extract_sql_values!(array, UInt64Array, |v: u64| Ok::<_, ILError>(v.to_string()))
             }
             DataType::Float32 => {
-                extract_sql_values!(array, Float32Array, |v: f32| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, Float32Array, |v: f32| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Float64 => {
-                extract_sql_values!(array, Float64Array, |v: f64| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, Float64Array, |v: f64| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Timestamp(TimeUnit::Second, _) => {
-                extract_sql_values!(array, TimestampSecondArray, |v: i64| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, TimestampSecondArray, |v: i64| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Timestamp(TimeUnit::Millisecond, _) => {
-                extract_sql_values!(array, TimestampMillisecondArray, |v: i64| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, TimestampMillisecondArray, |v: i64| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Timestamp(TimeUnit::Microsecond, _) => {
-                extract_sql_values!(array, TimestampMicrosecondArray, |v: i64| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, TimestampMicrosecondArray, |v: i64| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-                extract_sql_values!(array, TimestampNanosecondArray, |v: i64| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, TimestampNanosecondArray, |v: i64| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Date32 => {
                 extract_sql_values!(array, Date32Array, |v: i32| Ok::<_, ILError>(v.to_string()))
@@ -353,65 +349,65 @@ pub(crate) fn record_batch_to_sql_values(
                 extract_sql_values!(array, Date64Array, |v: i64| Ok::<_, ILError>(v.to_string()))
             }
             DataType::Time32(TimeUnit::Second) => {
-                extract_sql_values!(array, Time32SecondArray, |v: i32| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, Time32SecondArray, |v: i32| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Time32(TimeUnit::Millisecond) => {
-                extract_sql_values!(array, Time32MillisecondArray, |v: i32| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, Time32MillisecondArray, |v: i32| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Time64(TimeUnit::Microsecond) => {
-                extract_sql_values!(array, Time64MicrosecondArray, |v: i64| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, Time64MicrosecondArray, |v: i64| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Time64(TimeUnit::Nanosecond) => {
-                extract_sql_values!(array, Time64NanosecondArray, |v: i64| Ok::<_, ILError>(
-                    v.to_string()
-                ))
+                extract_sql_values!(array, Time64NanosecondArray, |v: i64| {
+                    Ok::<_, ILError>(v.to_string())
+                })
             }
             DataType::Binary => {
-                extract_sql_values!(array, BinaryArray, |v: &[u8]| Ok::<_, ILError>(
-                    database.sql_binary_literal(v)
-                ))
+                extract_sql_values!(array, BinaryArray, |v: &[u8]| {
+                    Ok::<_, ILError>(database.sql_binary_literal(v))
+                })
             }
             DataType::FixedSizeBinary(_) => {
                 if field.name() == INTERNAL_ROW_ID_FIELD_NAME {
-                    extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| Ok::<_, ILError>(
-                        database.sql_uuid_literal(&Uuid::from_slice(v)?)
-                    ))
+                    extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| {
+                        Ok::<_, ILError>(database.sql_uuid_literal(&Uuid::from_slice(v)?))
+                    })
                 } else {
-                    extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| Ok::<_, ILError>(
-                        database.sql_binary_literal(v)
-                    ))
+                    extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| {
+                        Ok::<_, ILError>(database.sql_binary_literal(v))
+                    })
                 }
             }
             DataType::LargeBinary => {
-                extract_sql_values!(array, LargeBinaryArray, |v: &[u8]| Ok::<_, ILError>(
-                    database.sql_binary_literal(v)
-                ))
+                extract_sql_values!(array, LargeBinaryArray, |v: &[u8]| {
+                    Ok::<_, ILError>(database.sql_binary_literal(v))
+                })
             }
             DataType::BinaryView => {
-                extract_sql_values!(array, BinaryViewArray, |v: &[u8]| Ok::<_, ILError>(
-                    database.sql_binary_literal(v)
-                ))
+                extract_sql_values!(array, BinaryViewArray, |v: &[u8]| {
+                    Ok::<_, ILError>(database.sql_binary_literal(v))
+                })
             }
             DataType::Utf8 => {
-                extract_sql_values!(array, StringArray, |v: &str| Ok::<_, ILError>(
-                    database.sql_string_literal(v)
-                ))
+                extract_sql_values!(array, StringArray, |v: &str| {
+                    Ok::<_, ILError>(database.sql_string_literal(v))
+                })
             }
             DataType::LargeUtf8 => {
-                extract_sql_values!(array, LargeStringArray, |v: &str| Ok::<_, ILError>(
-                    database.sql_string_literal(v)
-                ))
+                extract_sql_values!(array, LargeStringArray, |v: &str| {
+                    Ok::<_, ILError>(database.sql_string_literal(v))
+                })
             }
             DataType::Utf8View => {
-                extract_sql_values!(array, StringViewArray, |v: &str| Ok::<_, ILError>(
-                    database.sql_string_literal(v)
-                ))
+                extract_sql_values!(array, StringViewArray, |v: &str| {
+                    Ok::<_, ILError>(database.sql_string_literal(v))
+                })
             }
             DataType::List(inner_field) => {
                 let mut sql_values = Vec::with_capacity(array.len());
@@ -465,15 +461,15 @@ pub(crate) fn record_batch_to_sql_values(
                 }
                 sql_values
             }
-            DataType::Decimal128(_, _) => {
-                extract_sql_values!(array, Decimal128Array, |v: i128| Ok::<_, ILError>(format!(
-                    "'{v}'"
-                )))
+            DataType::Decimal128(..) => {
+                extract_sql_values!(array, Decimal128Array, |v: i128| {
+                    Ok::<_, ILError>(format!("'{v}'"))
+                })
             }
-            DataType::Decimal256(_, _) => {
-                extract_sql_values!(array, Decimal256Array, |v: i256| Ok::<_, ILError>(format!(
-                    "'{v}'"
-                )))
+            DataType::Decimal256(..) => {
+                extract_sql_values!(array, Decimal256Array, |v: i256| {
+                    Ok::<_, ILError>(format!("'{v}'"))
+                })
             }
             _ => {
                 return Err(ILError::not_supported(format!(

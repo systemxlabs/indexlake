@@ -1,18 +1,15 @@
-use arrow::{
-    array::StringArray,
-    datatypes::{DataType, Field, Schema},
-};
-use indexlake::{
-    Client,
-    catalog::Catalog,
-    index::IndexKind,
-    storage::Storage,
-    table::{TableConfig, TableCreation, TableInsertion, TableSearch},
-};
+use arrow::array::StringArray;
+use arrow::datatypes::{DataType, Field, Schema};
+use indexlake::Client;
+use indexlake::catalog::Catalog;
+use indexlake::index::IndexKind;
+use indexlake::storage::Storage;
+use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use arrow::array::RecordBatch;
 use indexlake::storage::DataFileFormat;

@@ -1,10 +1,8 @@
-use indexlake::{
-    ILError, ILResult,
-    catalog::Scalar,
-    expr::{Expr, Function},
-    index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery},
-    utils::build_row_id_array,
-};
+use indexlake::catalog::Scalar;
+use indexlake::expr::{Expr, Function};
+use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::utils::build_row_id_array;
+use indexlake::{ILError, ILResult};
 use rstar::{AABB, RTree, RTreeObject};
 use uuid::Uuid;
 

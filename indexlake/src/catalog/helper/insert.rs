@@ -1,12 +1,10 @@
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult,
-    catalog::{
-        DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
-        TransactionHelper, inline_row_table_name,
-    },
+use crate::catalog::{
+    DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
+    TransactionHelper, inline_row_table_name,
 };
+use crate::{ILError, ILResult};
 
 impl TransactionHelper {
     pub(crate) async fn insert_namespace(

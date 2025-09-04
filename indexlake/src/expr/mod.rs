@@ -16,22 +16,19 @@ pub use visitor::*;
 
 use std::sync::{Arc, LazyLock};
 
-use arrow::{
-    array::{ArrayRef, AsArray, BooleanArray, RecordBatch},
-    buffer::BooleanBuffer,
-    compute::CastOptions,
-    datatypes::{DataType, Schema},
-    error::ArrowError,
-    util::display::{DurationFormat, FormatOptions},
-};
-use parquet::arrow::{ProjectionMask, arrow_reader::ArrowPredicate};
+use arrow::array::{ArrayRef, AsArray, BooleanArray, RecordBatch};
+use arrow::buffer::BooleanBuffer;
+use arrow::compute::CastOptions;
+use arrow::datatypes::{DataType, Schema};
+use arrow::error::ArrowError;
+use arrow::util::display::{DurationFormat, FormatOptions};
+use parquet::arrow::ProjectionMask;
+use parquet::arrow::arrow_reader::ArrowPredicate;
 
 use derive_visitor::{Drive, DriveMut};
 
-use crate::{
-    ILError, ILResult,
-    catalog::{CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, Scalar},
-};
+use crate::catalog::{CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
+use crate::{ILError, ILResult};
 
 pub const DEFAULT_CAST_OPTIONS: CastOptions<'static> = CastOptions {
     safe: false,
@@ -50,7 +47,8 @@ pub enum Expr {
     Literal(Literal),
     /// A binary expression such as "age > 21"
     BinaryExpr(BinaryExpr),
-    /// Negation of an expression. The expression's type must be a boolean to make sense
+    /// Negation of an expression. The expression's type must be a boolean to
+    /// make sense
     Not(Box<Expr>),
     /// True if argument is NULL, false otherwise
     IsNull(Box<Expr>),
@@ -305,28 +303,32 @@ impl std::fmt::Display for Expr {
             Expr::Not(expr) => write!(f, "NOT {expr}"),
             Expr::IsNull(expr) => write!(f, "{expr} IS NULL"),
             Expr::IsNotNull(expr) => write!(f, "{expr} IS NOT NULL"),
-            Expr::InList(in_list) => write!(
-                f,
-                "{} IN ({})",
-                in_list.expr,
-                in_list
-                    .list
-                    .iter()
-                    .map(|expr| expr.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Expr::Function(function) => write!(
-                f,
-                "{}({})",
-                function.name,
-                function
-                    .args
-                    .iter()
-                    .map(|expr| expr.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            Expr::InList(in_list) => {
+                write!(
+                    f,
+                    "{} IN ({})",
+                    in_list.expr,
+                    in_list
+                        .list
+                        .iter()
+                        .map(|expr| expr.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Expr::Function(function) => {
+                write!(
+                    f,
+                    "{}({})",
+                    function.name,
+                    function
+                        .args
+                        .iter()
+                        .map(|expr| expr.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
             Expr::Like(like) => write!(f, "{like}"),
             Expr::Cast(cast) => write!(f, "CAST({} AS {})", cast.expr, cast.cast_type),
             Expr::TryCast(try_cast) => {

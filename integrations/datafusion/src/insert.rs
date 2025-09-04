@@ -1,26 +1,21 @@
 use std::sync::Arc;
 
-use datafusion::{
-    arrow::{
-        array::{ArrayRef, RecordBatch, UInt64Array},
-        datatypes::{DataType, Field, Schema, SchemaRef},
-    },
-    common::stats::Precision,
-    error::DataFusionError,
-    execution::{SendableRecordBatchStream, TaskContext},
-    logical_expr::dml::InsertOp,
-    physical_expr::EquivalenceProperties,
-    physical_plan::{
-        DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
-        PlanProperties, stream::RecordBatchStreamAdapter,
-    },
+use datafusion::arrow::array::{ArrayRef, RecordBatch, UInt64Array};
+use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use datafusion::common::stats::Precision;
+use datafusion::error::DataFusionError;
+use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::logical_expr::dml::InsertOp;
+use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+use datafusion::physical_plan::{
+    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
+    PlanProperties,
 };
 use futures::StreamExt;
-use indexlake::{
-    catalog::INTERNAL_ROW_ID_FIELD_NAME,
-    table::{Table, TableInsertion, check_and_rewrite_insert_batches},
-    utils::schema_without_row_id,
-};
+use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
+use indexlake::table::{Table, TableInsertion, check_and_rewrite_insert_batches};
+use indexlake::utils::schema_without_row_id;
 
 #[derive(Debug)]
 pub struct IndexLakeInsertExec {

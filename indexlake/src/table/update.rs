@@ -1,24 +1,20 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use arrow::{
-    array::{RecordBatch, RecordBatchOptions},
-    datatypes::SchemaRef,
-};
+use arrow::array::{RecordBatch, RecordBatchOptions};
+use arrow::datatypes::SchemaRef;
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::{
-    ILResult, RecordBatchStream,
-    catalog::{DataFileRecord, TransactionHelper},
-    expr::Expr,
-    storage::{Storage, read_data_file_by_record, read_data_file_by_record_and_row_id_condition},
-    table::{Table, process_insert_into_inline_rows, rebuild_inline_indexes},
-    utils::extract_row_ids_from_record_batch,
+use crate::catalog::{DataFileRecord, TransactionHelper};
+use crate::expr::Expr;
+use crate::storage::{
+    Storage, read_data_file_by_record, read_data_file_by_record_and_row_id_condition,
 };
+use crate::table::{Table, process_insert_into_inline_rows, rebuild_inline_indexes};
+use crate::utils::extract_row_ids_from_record_batch;
+use crate::{ILResult, RecordBatchStream};
 
 pub(crate) async fn process_update_by_condition(
     tx_helper: &mut TransactionHelper,

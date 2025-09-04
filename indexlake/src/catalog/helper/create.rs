@@ -1,12 +1,10 @@
 use arrow::datatypes::Fields;
 use uuid::Uuid;
 
-use crate::{
-    ILResult,
-    catalog::{
-        CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
-        inline_row_table_name,
-    },
+use crate::ILResult;
+use crate::catalog::{
+    CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
+    inline_row_table_name,
 };
 
 impl TransactionHelper {

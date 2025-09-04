@@ -1,13 +1,12 @@
 use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::common::DFSchema;
 use datafusion::common::tree_node::TreeNode;
+use datafusion::common::{DFSchema, ScalarValue};
+use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{ExprSchemable, Operator};
 use datafusion::optimizer::analyzer::type_coercion::TypeCoercionRewriter;
-use datafusion::prelude::SessionContext;
-use datafusion::{common::ScalarValue, error::DataFusionError, prelude::Expr};
+use datafusion::prelude::{Expr, SessionContext};
 use indexlake::catalog::Scalar as ILScalar;
-use indexlake::expr::BinaryOp as ILOperator;
-use indexlake::expr::Expr as ILExpr;
+use indexlake::expr::{BinaryOp as ILOperator, Expr as ILExpr};
 
 pub fn datafusion_expr_to_indexlake_expr(
     expr: &Expr,

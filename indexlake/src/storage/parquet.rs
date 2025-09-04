@@ -1,34 +1,29 @@
-use std::{collections::HashSet, ops::Range, sync::Arc};
+use std::collections::HashSet;
+use std::ops::Range;
+use std::sync::Arc;
 
-use arrow::{
-    array::{ArrayRef, RecordBatch, UInt64Array},
-    datatypes::{Schema, SchemaRef},
+use arrow::array::{ArrayRef, RecordBatch, UInt64Array};
+use arrow::datatypes::{Schema, SchemaRef};
+use futures::future::BoxFuture;
+use futures::{StreamExt, TryStreamExt};
+use parquet::arrow::arrow_reader::{ArrowReaderOptions, RowFilter};
+use parquet::arrow::async_reader::AsyncFileReader;
+use parquet::arrow::async_writer::AsyncFileWriter;
+use parquet::arrow::{
+    ArrowSchemaConverter, AsyncArrowWriter, ParquetRecordBatchStreamBuilder, ProjectionMask,
 };
-use futures::{StreamExt, TryStreamExt, future::BoxFuture};
-use parquet::{
-    arrow::{
-        ArrowSchemaConverter, AsyncArrowWriter, ParquetRecordBatchStreamBuilder, ProjectionMask,
-        arrow_reader::{ArrowReaderOptions, RowFilter},
-        async_reader::AsyncFileReader,
-        async_writer::AsyncFileWriter,
-    },
-    file::{
-        metadata::{ParquetMetaData, ParquetMetaDataReader},
-        properties::{WriterProperties, WriterVersion},
-    },
-};
+use parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader};
+use parquet::file::properties::{WriterProperties, WriterVersion};
 use uuid::Uuid;
 
-use crate::{
-    ILError, ILResult, RecordBatchStream,
-    catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_REF},
-    expr::{Expr, ExprPredicate},
-    storage::{DataFileFormat, InputFile, OutputFile, Storage},
-    utils::{
-        array_to_uuids, build_projection_from_condition, build_row_id_array,
-        extract_row_ids_from_record_batch,
-    },
+use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_REF};
+use crate::expr::{Expr, ExprPredicate};
+use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
+use crate::utils::{
+    array_to_uuids, build_projection_from_condition, build_row_id_array,
+    extract_row_ids_from_record_batch,
 };
+use crate::{ILError, ILResult, RecordBatchStream};
 
 impl AsyncFileReader for InputFile {
     fn get_bytes(

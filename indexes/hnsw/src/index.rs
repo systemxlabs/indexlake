@@ -1,11 +1,9 @@
 use std::any::Any;
 
 use hnsw::Hnsw;
-use indexlake::{
-    ILError, ILResult,
-    expr::Expr,
-    index::{FilterIndexEntries, Index, RowIdScore, SearchIndexEntries, SearchQuery},
-};
+use indexlake::expr::Expr;
+use indexlake::index::{FilterIndexEntries, Index, RowIdScore, SearchIndexEntries, SearchQuery};
+use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
 use space::Knn;
 use uuid::Uuid;

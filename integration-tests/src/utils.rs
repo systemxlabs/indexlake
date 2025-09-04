@@ -1,20 +1,15 @@
 use std::sync::Arc;
 
-use arrow::{
-    array::{ArrayRef, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions},
-    util::pretty::pretty_format_batches_with_schema,
-};
-use datafusion::{
-    physical_plan::{collect, display::DisplayableExecutionPlan},
-    prelude::SessionContext,
-};
+use arrow::array::{ArrayRef, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions};
+use arrow::util::pretty::pretty_format_batches_with_schema;
+use datafusion::physical_plan::collect;
+use datafusion::physical_plan::display::DisplayableExecutionPlan;
+use datafusion::prelude::SessionContext;
 use futures::TryStreamExt;
-use indexlake::{
-    ILError, ILResult,
-    catalog::INTERNAL_ROW_ID_FIELD_NAME,
-    table::{Table, TableScan, TableSearch},
-    utils::{project_schema, schema_without_row_id},
-};
+use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
+use indexlake::table::{Table, TableScan, TableSearch};
+use indexlake::utils::{project_schema, schema_without_row_id};
+use indexlake::{ILError, ILResult};
 
 pub fn sort_record_batches(batches: &[RecordBatch], sort_col: &str) -> ILResult<RecordBatch> {
     if batches.is_empty() {

@@ -17,18 +17,15 @@ pub use search::*;
 pub(crate) use update::*;
 use uuid::Uuid;
 
-use crate::RecordBatchStream;
-use crate::catalog::{CatalogHelper, DataFileRecord, INTERNAL_ROW_ID_FIELD_REF, Scalar};
-use crate::catalog::{FieldRecord, IndexFileRecord};
+use crate::catalog::{
+    Catalog, CatalogHelper, DataFileRecord, FieldRecord, INTERNAL_ROW_ID_FIELD_REF,
+    IndexFileRecord, Scalar, TransactionHelper,
+};
 use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
-use crate::storage::DataFileFormat;
+use crate::storage::{DataFileFormat, Storage};
 use crate::utils::{build_row_id_array, schema_without_row_id};
-use crate::{
-    ILError, ILResult,
-    catalog::{Catalog, TransactionHelper},
-    storage::Storage,
-};
+use crate::{ILError, ILResult, RecordBatchStream};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, SchemaRef};
 use serde::{Deserialize, Serialize};
