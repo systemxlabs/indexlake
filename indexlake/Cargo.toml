@@ -30,9 +30,7 @@ log = { workspace = true }
 num_cpus = { workspace = true }
 opendal = { workspace = true, features = ["services-fs", "services-s3"] }
 parquet = { workspace = true, features = ["async"] }
-rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"]}
-url = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }

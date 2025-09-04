@@ -17,6 +17,7 @@ indexlake-catalog-postgres = { workspace = true }
 indexlake-catalog-sqlite = { workspace = true }
 indexlake-datafusion = { workspace = true }
 indexlake-index-bm25 = { workspace = true }
+indexlake-index-btree = { workspace = true }
 indexlake-index-hnsw = { workspace = true }
 indexlake-index-rstar = { workspace = true }
 
@@ -28,7 +29,6 @@ env_logger = { workspace = true }
 futures = { workspace = true }
 geo = { workspace = true }
 geozero = { workspace = true, features = ["with-wkb"] }
-log = { workspace = true }
 opendal = { workspace = true, features = ["services-fs", "services-s3"] }
 rstest = { workspace = true }
 rusqlite = { workspace = true, features = ["bundled"] }
