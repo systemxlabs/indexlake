@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
-use indexlake::ILResult;
 use indexlake::catalog::Scalar;
 use indexlake::expr::{BinaryOp, Expr};
 use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
 use indexlake::utils::build_row_id_array;
+use indexlake::{ILError, ILResult};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +25,7 @@ impl Ord for OrderedScalar {
                 } else if other.0.is_null() {
                     Ordering::Greater
                 } else {
-                    panic!("Scalar::cmp: not the same type scalar");
+                    panic!("Can not cmp scalar: {} and {}", self.0, other.0);
                 }
             }
         }
@@ -61,11 +61,11 @@ impl BTreeIndex {
         Ok(())
     }
 
-    fn search_point(&self, point: &OrderedScalar) -> Vec<Uuid> {
+    fn point_query(&self, point: &OrderedScalar) -> Vec<Uuid> {
         self.btree.get(point).cloned().unwrap_or_default()
     }
 
-    fn search_range(&self, range: (Bound<&OrderedScalar>, Bound<&OrderedScalar>)) -> Vec<Uuid> {
+    fn range_query(&self, range: (Bound<&OrderedScalar>, Bound<&OrderedScalar>)) -> Vec<Uuid> {
         let mut results = Vec::new();
 
         for (_, row_ids) in self.btree.range(range) {
@@ -80,29 +80,29 @@ impl BTreeIndex {
             // TODO: add between expr && combine expr && is null expr / is not null expr?
             Expr::BinaryExpr(binary_expr) => {
                 let Expr::Column(_) = binary_expr.left.as_ref() else {
-                    return Err(indexlake::ILError::index(
+                    return Err(ILError::index(
                         "Left side of binary expression must be a column",
                     ));
                 };
                 let Expr::Literal(literal) = binary_expr.right.as_ref() else {
-                    return Err(indexlake::ILError::index(
+                    return Err(ILError::index(
                         "Right side of binary expression must be a literal",
                     ));
                 };
 
                 let value = &OrderedScalar(literal.value.clone());
                 match binary_expr.op {
-                    BinaryOp::Eq => Ok(self.search_point(value)),
-                    BinaryOp::Lt => Ok(self.search_range((Unbounded, Excluded(value)))),
-                    BinaryOp::LtEq => Ok(self.search_range((Unbounded, Included(value)))),
-                    BinaryOp::Gt => Ok(self.search_range((Excluded(value), Unbounded))),
-                    BinaryOp::GtEq => Ok(self.search_range((Included(value), Unbounded))),
-                    _ => Err(indexlake::ILError::index(
+                    BinaryOp::Eq => Ok(self.point_query(value)),
+                    BinaryOp::Lt => Ok(self.range_query((Unbounded, Excluded(value)))),
+                    BinaryOp::LtEq => Ok(self.range_query((Unbounded, Included(value)))),
+                    BinaryOp::Gt => Ok(self.range_query((Excluded(value), Unbounded))),
+                    BinaryOp::GtEq => Ok(self.range_query((Included(value), Unbounded))),
+                    _ => Err(ILError::index(
                         "Unsupported binary operation for B-tree index",
                     )),
                 }
             }
-            _ => Err(indexlake::ILError::index(
+            _ => Err(ILError::index(
                 "Unsupported filter expression for B-tree index",
             )),
         }
@@ -112,8 +112,8 @@ impl BTreeIndex {
 #[async_trait::async_trait]
 impl Index for BTreeIndex {
     async fn search(&self, _query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
-        Err(indexlake::ILError::not_supported(
-            "B-tree index no longer supports search operations. Use filter operations instead.",
+        Err(ILError::not_supported(
+            "B-tree index does not support search",
         ))
     }
 

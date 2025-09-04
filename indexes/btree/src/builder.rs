@@ -14,21 +14,17 @@ use parquet::arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder};
 use parquet::file::properties::WriterProperties;
 use uuid::Uuid;
 
-use crate::{BTreeIndex, BTreeIndexParams, OrderedScalar};
+use crate::{BTreeIndex, OrderedScalar};
 
 #[derive(Debug)]
 pub struct BTreeIndexBuilder {
     index_def: IndexDefinationRef,
-    #[allow(dead_code)]
-    params: BTreeIndexParams,
     index_schema: SchemaRef,
     index_batches: Vec<RecordBatch>,
 }
 
 impl BTreeIndexBuilder {
     pub fn try_new(index_def: IndexDefinationRef) -> ILResult<Self> {
-        let params = index_def.downcast_params::<BTreeIndexParams>()?.clone();
-
         let key_column_name = &index_def.key_columns[0];
         let key_column_index = index_def.table_schema.index_of(key_column_name)?;
         let key_column_field = index_def.table_schema.fields[key_column_index].clone();
@@ -39,7 +35,6 @@ impl BTreeIndexBuilder {
 
         Ok(Self {
             index_def,
-            params,
             index_schema,
             index_batches: Vec::new(),
         })

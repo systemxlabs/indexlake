@@ -309,8 +309,8 @@ async fn run_data_type_comparison() -> Result<(), Box<dyn std::error::Error>> {
     let int_result = context.benchmark_btree_integer(100000).await?;
     int_result.print_summary();
 
-    println!("running string benchmark (10,000 rows)...");
-    let string_result = context.benchmark_btree_string(10000).await?;
+    println!("running string benchmark (100,000 rows)...");
+    let string_result = context.benchmark_btree_string(100000).await?;
     string_result.print_summary();
 
     print_data_type_comparison_summary(&int_result, &string_result);

@@ -44,8 +44,6 @@ impl IndexKind for BTreeIndexKind {
             | DataType::UInt16
             | DataType::UInt32
             | DataType::UInt64
-            | DataType::Float32
-            | DataType::Float64
             | DataType::Utf8
             | DataType::LargeUtf8
             | DataType::Utf8View
@@ -55,7 +53,7 @@ impl IndexKind for BTreeIndexKind {
             | DataType::Time32(_)
             | DataType::Time64(_) => Ok(()),
             _ => Err(ILError::index(
-                "B-tree index key column must be a comparable data type (integers, floats, strings, timestamps, dates)",
+                "B-tree index key column must be a comparable data type (integers, strings, timestamps, dates)",
             )),
         }
     }
