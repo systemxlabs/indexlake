@@ -13,7 +13,6 @@ use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
 use std::collections::HashMap;
-use std::i128;
 use std::sync::Arc;
 
 #[rstest::rstest]
@@ -60,7 +59,7 @@ async fn create_table(
     assert_eq!(table.table_name, table_name);
 
     let mut fields = vec![INTERNAL_ROW_ID_FIELD_REF.clone()];
-    fields.extend(expected_schema.fields.iter().map(|f| f.clone()));
+    fields.extend(expected_schema.fields.iter().cloned());
     let expected_schema = Schema::new(fields);
 
     assert_eq!(table.schema.as_ref(), &expected_schema);
@@ -266,8 +265,8 @@ async fn table_data_types(
                 None,
             ])),
             Arc::new(BinaryArray::from_opt_vec(vec![
-                Some(&vec![0u8, 1u8]),
-                Some(&vec![0u8, 1u8]),
+                Some(&[0u8, 1u8]),
+                Some(&[0u8, 1u8]),
                 None,
             ])),
             Arc::new(FixedSizeBinaryArray::try_from_sparse_iter_with_size(
@@ -275,8 +274,8 @@ async fn table_data_types(
                 2,
             )?),
             Arc::new(LargeBinaryArray::from_opt_vec(vec![
-                Some(&vec![0u8, 1u8]),
-                Some(&vec![0u8, 1u8]),
+                Some(&[0u8, 1u8]),
+                Some(&[0u8, 1u8]),
                 None,
             ])),
             Arc::new(BinaryViewArray::from_iter(vec![

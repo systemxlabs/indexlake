@@ -186,10 +186,10 @@ mod tests {
 
     #[test]
     fn test_has_duplicated_items() {
-        let items = vec![1, 2, 3, 4, 5];
+        let items = [1, 2, 3, 4, 5];
         assert!(!has_duplicated_items(items.iter()));
 
-        let items_with_duplicates = vec![1, 2, 3, 4, 5, 3];
+        let items_with_duplicates = [1, 2, 3, 4, 5, 3];
         assert!(has_duplicated_items(items_with_duplicates.iter()));
     }
 }

@@ -382,7 +382,7 @@ async fn datafusion_scan_serialization(
     let batches = collect(new_plan, session.task_ctx()).await?;
     let mut sorted_batch = sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?;
     sorted_batch.remove_column(0);
-    let table_str = pretty_format_batches(&vec![sorted_batch])?.to_string();
+    let table_str = pretty_format_batches(&[sorted_batch])?.to_string();
     println!("{}", table_str);
     assert_eq!(
         table_str,
@@ -458,7 +458,7 @@ async fn datafusion_insert_serialization(
     let batches = df.collect().await?;
     let mut sorted_batch = sort_record_batches(&batches, INTERNAL_ROW_ID_FIELD_NAME)?;
     sorted_batch.remove_column(0);
-    let table_str = pretty_format_batches(&vec![sorted_batch])?.to_string();
+    let table_str = pretty_format_batches(&[sorted_batch])?.to_string();
     println!("{}", table_str);
     assert_eq!(
         table_str,
