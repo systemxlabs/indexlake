@@ -4,6 +4,7 @@ members = [
     "catalogs/postgres",
     "catalogs/sqlite",
     "indexes/bm25",
+    "indexes/btree",
     "indexes/hnsw",
     "indexes/rstar",
     "indexlake",
@@ -27,6 +28,7 @@ indexlake-catalog-postgres = { path = "catalogs/postgres", version = "0.1.0" }
 indexlake-catalog-sqlite = { path = "catalogs/sqlite", version = "0.1.0" }
 indexlake-datafusion = { path = "integrations/datafusion", version = "0.1.0" }
 indexlake-index-bm25 = { path = "indexes/bm25", version = "0.1.0" }
+indexlake-index-btree = { path = "indexes/btree", version = "0.1.0" }
 indexlake-index-hnsw = { path = "indexes/hnsw", version = "0.1.0" }
 indexlake-index-rstar = { path = "indexes/rstar", version = "0.1.0" }
 indexlake-integration-tests = { path = "integration-tests", version = "0.1.0" }
@@ -47,29 +49,29 @@ derive-visitor = "0.4"
 derive-with = "0.6"
 env_logger = "0.11"
 futures = "0.3"
-geo = "0.30"
+geo = "0.31"
 geozero = "0.14"
 hex = "0.4"
 hnsw = "0.11"
-jieba-rs = "0.7"
-lance-core = "0.32"
-lance-encoding = "0.32"
-lance-file = "0.32"
-lance-io = "0.32"
+jieba-rs = "0.8"
+lance-core = "0.34"
+lance-encoding = "0.34"
+lance-file = "0.34"
+lance-io = "0.34"
 log = "0.4"
-num_cpus = "1.14"
-opendal = "0.53"
-parquet = "55.1"
+num_cpus = "1.17"
+opendal = "0.54"
+parquet = "55"
 prost = "0.13"
 prost-build = "0.13"
 rand = "0.9"
 rand_pcg = "0.9"
 rstar = "0.12"
-rstest = "0.25"
-rusqlite = "0.36"
+rstest = "0.26"
+rusqlite = "0.37"
 serde = "1.0"
 serde_json = "1.0"
 space = "0.17"
 tokio = "1"
 url = "2.5"
-uuid = "1.17"
+uuid = "1.18"

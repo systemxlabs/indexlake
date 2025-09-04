@@ -103,3 +103,41 @@ pub fn new_hnsw_record_batch(num_rows: usize) -> RecordBatch {
     )
     .unwrap()
 }
+
+pub fn arrow_btree_integer_table_schema() -> SchemaRef {
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int32, false),
+        Field::new("integer", DataType::Int32, false),
+    ]);
+    Arc::new(schema)
+}
+
+pub fn new_btree_integer_record_batch(num_rows: usize) -> RecordBatch {
+    let schema = arrow_btree_integer_table_schema();
+    let id_array = Int32Array::from_iter_values(0..num_rows as i32);
+    let integer_array =
+        Int32Array::from_iter_values((0..num_rows).map(|_| rand::random_range(0..10000)));
+
+    RecordBatch::try_new(schema, vec![Arc::new(id_array), Arc::new(integer_array)]).unwrap()
+}
+
+pub fn arrow_btree_string_table_schema() -> SchemaRef {
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int32, false),
+        Field::new("string", DataType::Utf8, false),
+    ]);
+    Arc::new(schema)
+}
+
+pub fn new_btree_string_record_batch(num_rows: usize) -> RecordBatch {
+    let schema = arrow_btree_string_table_schema();
+    let id_array = Int32Array::from_iter_values(0..num_rows as i32);
+    let strings = [
+        "Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Henry",
+    ];
+    let string_array = StringArray::from_iter_values(
+        (0..num_rows).map(|i| format!("{}{:06}", strings[i % strings.len()], i)),
+    );
+
+    RecordBatch::try_new(schema, vec![Arc::new(id_array), Arc::new(string_array)]).unwrap()
+}

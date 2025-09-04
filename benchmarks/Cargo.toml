@@ -15,15 +15,12 @@ lance = ["dep:lance", "dep:lance-index"]
 
 [dependencies]
 indexlake = { workspace = true }
-indexlake-catalog-postgres = { workspace = true }
-indexlake-catalog-sqlite = { workspace = true }
 indexlake-index-bm25 = { workspace = true }
+indexlake-index-btree = { workspace = true }
 indexlake-index-hnsw = { workspace = true }
-indexlake-index-rstar = { workspace = true }
 indexlake-integration-tests = { workspace = true }
 
 arrow = { workspace = true }
-bytes = { workspace = true }
 delta_kernel = { version = "0.13.0", features = ["arrow-conversion"], optional = true }
 deltalake = { version = "0.27.0", features = ["datafusion"], optional = true }
 deltalake-aws = { version = "0.10.0", default-features = false, optional = true }
@@ -32,7 +29,6 @@ lance = { version = "0.31.1", optional = true }
 lance-index = { version = "0.31.1", features = ["tokenizer-jieba"], optional = true }
 rand = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-num_cpus = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [[bin]]
@@ -49,3 +45,7 @@ required-features = ["lance"]
 name = "lance_bm25"
 path = "src/bin/lance_bm25.rs"
 required-features = ["lance"]
+
+[[bin]]
+name = "indexlake_btree"
+path = "src/bin/indexlake_btree.rs"
