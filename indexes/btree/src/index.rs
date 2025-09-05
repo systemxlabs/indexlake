@@ -120,7 +120,7 @@ impl Index for BTreeIndex {
     async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
-                row_ids: build_row_id_array(std::iter::empty::<&[u8]>(), 0)?,
+                row_ids: build_row_id_array(std::iter::empty::<&[u8]>())?,
             });
         }
 
@@ -131,10 +131,7 @@ impl Index for BTreeIndex {
             result_row_ids.retain(|id| filter_row_ids.contains(id));
         }
 
-        let row_id_array = build_row_id_array(
-            result_row_ids.iter().map(|id| id.as_bytes()),
-            result_row_ids.len(),
-        )?;
+        let row_id_array = build_row_id_array(result_row_ids.iter().map(|id| id.as_bytes()))?;
 
         Ok(FilterIndexEntries {
             row_ids: row_id_array,

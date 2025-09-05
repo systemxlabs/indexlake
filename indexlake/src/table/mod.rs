@@ -370,7 +370,7 @@ pub fn check_and_rewrite_insert_batches(
         let row_ids = (0..batch.num_rows())
             .map(|_| Uuid::now_v7().into_bytes())
             .collect::<Vec<_>>();
-        let row_id_array = build_row_id_array(row_ids.into_iter(), batch.num_rows())?;
+        let row_id_array = build_row_id_array(row_ids.into_iter())?;
         arrays.insert(0, Arc::new(row_id_array) as ArrayRef);
 
         let rewritten_batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)?;

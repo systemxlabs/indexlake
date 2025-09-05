@@ -157,9 +157,7 @@ pub(crate) async fn read_parquet_file_by_record_and_row_id_condition(
     row_id_condition: &Expr,
 ) -> ILResult<RecordBatchStream> {
     let valid_row_ids = data_file_record.valid_row_ids();
-    let valid_row_count = data_file_record.valid_row_count();
-    let valid_row_ids_array =
-        Arc::new(build_row_id_array(valid_row_ids, valid_row_count)?) as ArrayRef;
+    let valid_row_ids_array = Arc::new(build_row_id_array(valid_row_ids)?) as ArrayRef;
 
     let schema = Arc::new(Schema::new(vec![INTERNAL_ROW_ID_FIELD_REF.clone()]));
     let batch = RecordBatch::try_new(schema, vec![valid_row_ids_array.clone()])?;

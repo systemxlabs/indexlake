@@ -102,22 +102,14 @@ pub fn fixed_size_binary_array_to_uuids(array: &FixedSizeBinaryArray) -> ILResul
     Ok(uuids)
 }
 
-pub fn build_row_id_array<T, U>(iter: T, len: usize) -> ILResult<FixedSizeBinaryArray>
+pub fn build_row_id_array<T, U>(iter: T) -> ILResult<FixedSizeBinaryArray>
 where
     T: Iterator<Item = U>,
     U: AsRef<[u8]>,
 {
-    if len == 0 {
-        Ok(FixedSizeBinaryArray::new_null(16, 0))
-    } else {
-        let array = FixedSizeBinaryArray::try_from_iter(iter)?;
-        if array.value_length() != 16 {
-            return Err(ILError::internal(
-                "row id array is not an FixedSizeBinaryArray with length 16",
-            ));
-        }
-        Ok(array)
-    }
+    let array =
+        FixedSizeBinaryArray::try_from_sparse_iter_with_size(iter.map(|item| Some(item)), 16)?;
+    Ok(array)
 }
 
 pub fn project_schema(schema: &Schema, projection: Option<&Vec<usize>>) -> ILResult<Schema> {

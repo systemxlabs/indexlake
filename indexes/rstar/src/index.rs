@@ -68,7 +68,7 @@ impl Index for RStarIndex {
             .map(|object| object.row_id)
             .collect::<Vec<_>>();
 
-        let row_id_array = build_row_id_array(row_ids.iter(), row_ids.len())?;
+        let row_id_array = build_row_id_array(row_ids.iter())?;
 
         Ok(FilterIndexEntries {
             row_ids: row_id_array,
