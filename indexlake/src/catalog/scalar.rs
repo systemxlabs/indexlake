@@ -16,9 +16,9 @@ use arrow::array::{
 use arrow::buffer::OffsetBuffer;
 use arrow::compute::CastOptions;
 use arrow::datatypes::{
-    DataType, Date32Type, Date64Type, Decimal128Type, Decimal256Type, DecimalType, Float32Type,
-    Float64Type, Int8Type, Int16Type, Int32Type, Int64Type, Time32MillisecondType,
-    Time32SecondType, Time64MicrosecondType, Time64NanosecondType, TimestampMicrosecondType,
+    DataType, Date32Type, Date64Type, Decimal128Type, Decimal256Type, Float32Type, Float64Type,
+    Int8Type, Int16Type, Int32Type, Int64Type, Time32MillisecondType, Time32SecondType,
+    Time64MicrosecondType, Time64NanosecondType, TimestampMicrosecondType,
     TimestampMillisecondType, TimestampNanosecondType, TimestampSecondType, UInt8Type, UInt16Type,
     UInt32Type, UInt64Type, i256,
 };
@@ -26,9 +26,9 @@ use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
 use arrow::util::display::{ArrayFormatter, FormatOptions};
 use arrow_schema::{Field, Schema, TimeUnit};
-use uuid::Uuid;
 
 use crate::catalog::CatalogDatabase;
+use crate::table::array_to_sql_literals;
 use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone)]
@@ -168,63 +168,9 @@ impl Scalar {
     }
 
     pub fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
-        if self.is_null() {
-            return Ok("null".to_string());
-        }
-        match self {
-            Scalar::Boolean(_)
-            | Scalar::Int8(_)
-            | Scalar::Int16(_)
-            | Scalar::Int32(_)
-            | Scalar::Int64(_)
-            | Scalar::UInt8(_)
-            | Scalar::UInt16(_)
-            | Scalar::UInt32(_)
-            | Scalar::UInt64(_)
-            | Scalar::Float32(_)
-            | Scalar::Float64(_) => Ok(self.to_string()),
-            Scalar::Utf8(v) | Scalar::Utf8View(v) | Scalar::LargeUtf8(v) => match v {
-                Some(value) => Ok(database.sql_string_literal(value)),
-                None => Ok("null".to_string()),
-            },
-            Scalar::Binary(v) | Scalar::BinaryView(v) | Scalar::LargeBinary(v) => match v {
-                Some(value) => Ok(database.sql_binary_literal(value)),
-                None => Ok("null".to_string()),
-            },
-            Scalar::FixedSizeBinary(size, v) => match v {
-                Some(value) => {
-                    if *size == 16 {
-                        Ok(database.sql_uuid_literal(&Uuid::from_slice(value)?))
-                    } else {
-                        Ok(database.sql_binary_literal(value))
-                    }
-                }
-                None => Ok("null".to_string()),
-            },
-            Scalar::Decimal128(v, precision, scale) => match v {
-                Some(value) => Ok(Decimal128Type::format_decimal(*value, *precision, *scale)),
-                None => Ok("null".to_string()),
-            },
-            Scalar::Decimal256(v, precision, scale) => match v {
-                Some(value) => Ok(Decimal256Type::format_decimal(*value, *precision, *scale)),
-                None => Ok("null".to_string()),
-            },
-            Scalar::TimestampSecond(..)
-            | Scalar::TimestampMillisecond(..)
-            | Scalar::TimestampMicrosecond(..)
-            | Scalar::TimestampNanosecond(..)
-            | Scalar::Date32(_)
-            | Scalar::Date64(_)
-            | Scalar::Time32Second(_)
-            | Scalar::Time32Millisecond(_)
-            | Scalar::Time64Microsecond(_)
-            | Scalar::Time64Nanosecond(_)
-            | Scalar::List(_)
-            | Scalar::FixedSizeList(_)
-            | Scalar::LargeList(_) => Err(ILError::not_supported(
-                "Not supported to convert scalar {self:?} to sql",
-            )),
-        }
+        let array = self.to_array_of_size(1)?;
+        let mut literals = array_to_sql_literals(&array, database)?;
+        Ok(literals.remove(0))
     }
 
     pub fn to_arrow_scalar(&self) -> ILResult<arrow::array::Scalar<ArrayRef>> {
