@@ -1,7 +1,11 @@
 use arrow_schema::Schema;
 use uuid::Uuid;
 
-use crate::{ILResult, expr::Expr};
+use crate::{
+    ILResult,
+    catalog::Scalar,
+    expr::{BinaryExpr, Expr},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CatalogDatabase {
@@ -43,6 +47,21 @@ impl CatalogDatabase {
     pub fn supports_filter(&self, filter: &Expr, _schema: &Schema) -> ILResult<bool> {
         match filter {
             Expr::Function(_) => Ok(false),
+            Expr::BinaryExpr(BinaryExpr { left, right, .. }) => {
+                if let Expr::Column(_) = left.as_ref()
+                    && let Expr::Literal(lit) = right.as_ref()
+                    && matches!(lit.value, Scalar::List(_))
+                {
+                    Ok(false)
+                } else if let Expr::Literal(lit) = left.as_ref()
+                    && let Expr::Column(_) = right.as_ref()
+                    && matches!(lit.value, Scalar::List(_))
+                {
+                    Ok(false)
+                } else {
+                    Ok(true)
+                }
+            }
             _ => Ok(true),
         }
     }

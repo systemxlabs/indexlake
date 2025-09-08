@@ -1,11 +1,13 @@
-use arrow::array::{Int32Array, RecordBatch, StringArray};
+use arrow::array::{Float32Builder, Int32Array, ListBuilder, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use indexlake::Client;
-use indexlake::catalog::Catalog;
+use indexlake::catalog::{Catalog, Scalar};
 use indexlake::expr::{col, lit};
 use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};
-use indexlake_integration_tests::data::prepare_simple_testing_table;
+use indexlake_integration_tests::data::{
+    prepare_simple_testing_table, prepare_simple_vector_table,
+};
 use indexlake_integration_tests::utils::table_scan;
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
@@ -214,6 +216,50 @@ async fn partitioned_scan(
 | name | age |
 +------+-----+
 +------+-----+"#,
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_with_catalog_unsupported_filter(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_vector_table(&client, format).await?;
+
+    let list_inner_field = Arc::new(Field::new("item", DataType::Float32, false));
+    let mut list_builder =
+        ListBuilder::new(Float32Builder::new()).with_field(list_inner_field.clone());
+    list_builder.values().append_slice(&[20.0, 20.0, 20.0]);
+    list_builder.append(true);
+    let list_array = list_builder.finish();
+    let scalar = Scalar::List(Arc::new(list_array));
+
+    let scan = TableScan::default().with_filters(vec![col("vector").gt(lit(scalar))]);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+----+--------------------+
+| id | vector             |
++----+--------------------+
+| 3  | [30.0, 30.0, 30.0] |
+| 4  | [40.0, 40.0, 40.0] |
++----+--------------------+"#,
     );
 
     Ok(())

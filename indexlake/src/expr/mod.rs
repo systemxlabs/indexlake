@@ -430,6 +430,13 @@ pub enum ColumnarValue {
 }
 
 impl ColumnarValue {
+    pub fn data_type(&self) -> DataType {
+        match self {
+            ColumnarValue::Array(array_value) => array_value.data_type().clone(),
+            ColumnarValue::Scalar(scalar_value) => scalar_value.data_type(),
+        }
+    }
+
     pub fn into_array(self, num_rows: usize) -> ILResult<ArrayRef> {
         Ok(match self {
             ColumnarValue::Array(array) => array,
