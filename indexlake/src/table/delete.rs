@@ -3,11 +3,15 @@ use std::sync::Arc;
 
 use arrow::array::{FixedSizeBinaryArray, RecordBatch};
 use arrow::datatypes::{DataType, Schema, SchemaRef};
+use futures::StreamExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::ILResult;
-use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_REF, TransactionHelper};
+use crate::catalog::{
+    CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_REF, TransactionHelper,
+    rows_to_record_batch,
+};
 use crate::expr::Expr;
 use crate::storage::{Storage, find_matched_row_ids_from_data_file};
 use crate::table::Table;
@@ -19,9 +23,7 @@ pub(crate) async fn process_delete_by_condition(
     matched_data_file_row_ids: HashMap<Uuid, HashSet<Uuid>>,
 ) -> ILResult<()> {
     // Directly delete inline rows
-    tx_helper
-        .delete_inline_rows(&table.table_id, std::slice::from_ref(condition), None)
-        .await?;
+    delete_inline_rows(tx_helper, &table.table_id, &table.schema, condition).await?;
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
     for data_file_record in data_file_records {
@@ -35,6 +37,48 @@ pub(crate) async fn process_delete_by_condition(
                 .await?;
         }
     }
+    Ok(())
+}
+
+pub(crate) async fn delete_inline_rows(
+    tx_helper: &mut TransactionHelper,
+    table_id: &Uuid,
+    table_schema: &SchemaRef,
+    condition: &Expr,
+) -> ILResult<()> {
+    // TODO improve performance through projection
+    if tx_helper
+        .database
+        .supports_filter(condition, table_schema)?
+    {
+        tx_helper
+            .delete_inline_rows(table_id, std::slice::from_ref(condition), None)
+            .await?;
+    } else {
+        let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
+        let row_stream = tx_helper
+            .scan_inline_rows(table_id, &catalog_schema, &[], None)
+            .await?;
+        let mut chunk_stream = row_stream.chunks(100);
+        let mut matched_row_ids = Vec::new();
+        while let Some(row_chunk) = chunk_stream.next().await {
+            let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+            let record_batch = rows_to_record_batch(table_schema, &rows)?;
+            let bool_array = condition.condition_eval(&record_batch)?;
+            for (i, v) in bool_array.iter().enumerate() {
+                if let Some(v) = v
+                    && v
+                {
+                    matched_row_ids.push(rows[i].uuid(0)?.expect("row_id is not null"));
+                }
+            }
+        }
+        drop(chunk_stream);
+        tx_helper
+            .delete_inline_rows(table_id, &[], Some(matched_row_ids.as_slice()))
+            .await?;
+    }
+
     Ok(())
 }
 
@@ -61,11 +105,10 @@ pub(crate) async fn delete_data_file_rows_by_condition(
 pub(crate) async fn process_delete_by_row_id_condition(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
+    table_schema: &SchemaRef,
     row_id_condition: &Expr,
 ) -> ILResult<()> {
-    tx_helper
-        .delete_inline_rows(table_id, std::slice::from_ref(row_id_condition), None)
-        .await?;
+    delete_inline_rows(tx_helper, table_id, table_schema, row_id_condition).await?;
 
     let data_file_records = tx_helper.get_data_files(table_id).await?;
     for mut data_file_record in data_file_records {

@@ -161,7 +161,13 @@ impl Table {
 
         if condition.only_visit_row_id_column() {
             let mut tx_helper = self.transaction_helper().await?;
-            process_delete_by_row_id_condition(&mut tx_helper, &self.table_id, condition).await?;
+            process_delete_by_row_id_condition(
+                &mut tx_helper,
+                &self.table_id,
+                &self.schema,
+                condition,
+            )
+            .await?;
             tx_helper.commit().await?;
         } else {
             let catalog_helper = CatalogHelper::new(self.catalog.clone());
