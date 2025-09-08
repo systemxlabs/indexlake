@@ -17,7 +17,6 @@ use std::sync::Arc;
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
-#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_table_by_condition(
     #[future(awt)]
@@ -55,7 +54,6 @@ async fn delete_table_by_condition(
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
-#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_table_by_row_id(
     #[future(awt)]
@@ -98,7 +96,6 @@ async fn delete_table_by_row_id(
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
-#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_table_by_constant_condition(
     #[future(awt)]
@@ -150,7 +147,6 @@ async fn delete_table_by_constant_condition(
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
-#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_table_by_catalog_unsupported_condition(
     #[future(awt)]

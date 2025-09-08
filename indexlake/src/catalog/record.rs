@@ -233,7 +233,6 @@ impl DataFileRecord {
             "{namespace_id}/{table_id}/{data_file_id}.{}",
             match format {
                 DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => "parquet",
-                DataFileFormat::LanceV2_0 => "lance",
             }
         )
     }

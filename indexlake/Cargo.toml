@@ -8,14 +8,6 @@ repository.workspace = true
 rust-version.workspace = true
 description = "An experimental table format with extensible index support."
 
-[features]
-lance-format = [
-  "dep:lance-core",
-  "dep:lance-encoding",
-  "dep:lance-file",
-  "dep:lance-io",
-]
-
 [dependencies]
 arrow = { workspace = true }
 arrow-schema = { workspace = true, features = ["serde"] }
@@ -27,10 +19,6 @@ derive-visitor = { workspace = true, features = ["std-types-drive"] }
 derive-with = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
-lance-core = { workspace = true, optional = true }
-lance-encoding = { workspace = true, optional = true }
-lance-file = { workspace = true, optional = true }
-lance-io = { workspace = true, optional = true }
 log = { workspace = true }
 num_cpus = { workspace = true }
 opendal = { workspace = true, features = ["services-fs", "services-s3"] }

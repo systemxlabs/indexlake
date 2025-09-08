@@ -17,7 +17,6 @@ use indexlake_integration_tests::{
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
-#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
 #[tokio::test(flavor = "multi_thread")]
 async fn create_btree_index_integer(
     #[future(awt)]
@@ -93,7 +92,6 @@ async fn create_btree_index_integer(
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
-#[cfg_attr(feature = "lance-format", case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::LanceV2_0))]
 #[tokio::test(flavor = "multi_thread")]
 async fn create_btree_index_string(
     #[future(awt)]

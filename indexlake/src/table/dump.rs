@@ -119,16 +119,6 @@ impl DumpTask {
                 self.write_parquet_file(row_stream, &relative_path, &mut index_builders)
                     .await?
             }
-            DataFileFormat::LanceV2_0 => {
-                #[cfg(not(feature = "lance-format"))]
-                return Err(ILError::not_supported(
-                    "Lance format feature is not enabled",
-                ));
-
-                #[cfg(feature = "lance-format")]
-                self.write_lance_file(row_stream, &relative_path, &mut index_builders)
-                    .await?
-            }
         };
 
         if row_ids.len() != self.table_config.inline_row_count_limit {
@@ -242,47 +232,6 @@ impl DumpTask {
         }
 
         arrow_writer.close().await?;
-
-        Ok(row_ids)
-    }
-
-    #[cfg(feature = "lance-format")]
-    async fn write_lance_file(
-        &self,
-        row_stream: RowStream<'_>,
-        relative_path: &str,
-        index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-    ) -> ILResult<Vec<Uuid>> {
-        let mut row_ids = Vec::new();
-
-        let mut writer = crate::storage::build_lance_writer(
-            &self.storage,
-            relative_path,
-            &self.table_schema,
-            self.table_config.preferred_data_file_format,
-        )
-        .await?;
-
-        let mut chunk_stream = row_stream.chunks(1024);
-
-        while let Some(row_chunk) = chunk_stream.next().await {
-            let mut rows = Vec::with_capacity(row_chunk.len());
-            for row in row_chunk.into_iter() {
-                let row = row?;
-                let row_id = row.get_row_id()?.expect("row_id is not null");
-                row_ids.push(row_id);
-                rows.push(row);
-            }
-            let record_batch = rows_to_record_batch(&self.table_schema, &rows)?;
-
-            for index_builder in index_builders.iter_mut() {
-                index_builder.append(&record_batch)?;
-            }
-
-            writer.write_batch(&record_batch).await?;
-        }
-
-        writer.finish().await?;
 
         Ok(row_ids)
     }

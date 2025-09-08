@@ -144,16 +144,6 @@ pub(crate) async fn process_bypass_insert(
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
             write_parquet_file(table, &relative_path, batches, &mut index_builders).await?
         }
-        DataFileFormat::LanceV2_0 => {
-            #[cfg(feature = "lance-format")]
-            {
-                write_lance_file(table, &relative_path, batches, &mut index_builders).await?
-            }
-            #[cfg(not(feature = "lance-format"))]
-            return Err(ILError::not_supported(
-                "Lance format feature is not enabled",
-            ));
-        }
     };
     let record_count = row_ids.len();
 
@@ -221,37 +211,6 @@ async fn write_parquet_file(
     }
 
     arrow_writer.close().await?;
-
-    Ok(row_ids)
-}
-
-#[cfg(feature = "lance-format")]
-async fn write_lance_file(
-    table: &Table,
-    relative_path: &str,
-    batches: &[RecordBatch],
-    index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-) -> ILResult<Vec<Uuid>> {
-    let mut writer = crate::storage::build_lance_writer(
-        &table.storage,
-        relative_path,
-        &table.schema,
-        table.config.preferred_data_file_format,
-    )
-    .await?;
-
-    let mut row_ids = Vec::new();
-    for batch in batches {
-        let row_id_array = extract_row_id_array_from_record_batch(batch)?;
-        row_ids.extend(fixed_size_binary_array_to_uuids(&row_id_array)?);
-
-        writer.write_batch(batch).await?;
-        for builder in index_builders.iter_mut() {
-            builder.append(batch)?;
-        }
-    }
-
-    writer.finish().await?;
 
     Ok(row_ids)
 }

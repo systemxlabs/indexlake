@@ -8,9 +8,6 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
-[features]
-lance-format = ["indexlake/lance-format"]
-
 [dependencies]
 indexlake = { workspace = true }
 indexlake-catalog-postgres = { workspace = true }

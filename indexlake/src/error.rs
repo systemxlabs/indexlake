@@ -77,14 +77,6 @@ impl From<parquet::errors::ParquetError> for ILError {
     }
 }
 
-#[cfg(feature = "lance-format")]
-impl From<lance_core::Error> for ILError {
-    #[track_caller]
-    fn from(err: lance_core::Error) -> Self {
-        ILError::StorageError(err.to_string(), Location::caller())
-    }
-}
-
 impl From<arrow::error::ArrowError> for ILError {
     #[track_caller]
     fn from(err: arrow::error::ArrowError) -> Self {

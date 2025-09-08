@@ -95,11 +95,6 @@ pub(crate) fn build_parquet_writer<W: AsyncFileWriter>(
         .set_writer_version(match data_file_format {
             DataFileFormat::ParquetV1 => WriterVersion::PARQUET_1_0,
             DataFileFormat::ParquetV2 => WriterVersion::PARQUET_2_0,
-            DataFileFormat::LanceV2_0 => {
-                return Err(ILError::internal(format!(
-                    "Cannot build parquet writer for {data_file_format}"
-                )));
-            }
         })
         .build();
     Ok(AsyncArrowWriter::try_new(
