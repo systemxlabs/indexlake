@@ -10,7 +10,7 @@ use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
     rows_to_record_batch,
 };
-use crate::expr::{Expr, split_conjunction_filters};
+use crate::expr::{Expr, merge_filters, split_conjunction_filters};
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::read_data_file_by_record;
 use crate::table::Table;
@@ -117,16 +117,9 @@ async fn process_table_scan(
 ) -> ILResult<RecordBatchStream> {
     let mut streams: Vec<RecordBatchStream> = if scan.partition.partition_idx == 0 {
         // Scan inline rows
-        let projected_schema = Arc::new(project_schema(&table.schema, scan.projection.as_ref())?);
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
-        let row_stream = catalog_helper
-            .scan_inline_rows(&table.table_id, &catalog_schema, None, &scan.filters)
-            .await?;
-        let inline_stream = Box::pin(row_stream.chunks(scan.batch_size).map(move |rows| {
-            let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-            let batch = rows_to_record_batch(&projected_schema, &rows)?;
-            Ok(batch)
-        }));
+        let inline_stream = Box::pin(
+            scan_inline_rows(catalog_helper, &table.table_id, &table.schema, &scan).await?,
+        );
         vec![inline_stream]
     } else {
         vec![]
@@ -168,6 +161,45 @@ async fn process_table_scan(
     streams.push(Box::pin(stream));
 
     Ok(Box::pin(futures::stream::select_all(streams)))
+}
+
+async fn scan_inline_rows(
+    catalog_helper: &CatalogHelper,
+    table_id: &Uuid,
+    table_schema: &SchemaRef,
+    scan: &TableScan,
+) -> ILResult<RecordBatchStream> {
+    let projected_schema = Arc::new(project_schema(table_schema, scan.projection.as_ref())?);
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
+
+    let database = catalog_helper.catalog.database();
+    let mut db_filters = Vec::new();
+    let mut arrow_filters = Vec::new();
+    for filter in scan.filters.iter() {
+        if database.supports_filter(filter, table_schema)? {
+            db_filters.push(filter.clone());
+        } else {
+            arrow_filters.push(filter.clone());
+        }
+    }
+
+    let arrow_filter = merge_filters(arrow_filters);
+
+    let row_stream = catalog_helper
+        .scan_inline_rows(table_id, &catalog_schema, None, &db_filters)
+        .await?;
+    let inline_stream = Box::pin(row_stream.chunks(scan.batch_size).map(move |rows| {
+        let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
+        let batch = rows_to_record_batch(&projected_schema, &rows)?;
+        if let Some(arrow_filter) = &arrow_filter {
+            let bool_array = arrow_filter.condition_eval(&batch)?;
+            let filtered_batch = arrow::compute::filter_record_batch(&batch, &bool_array)?;
+            Ok(filtered_batch)
+        } else {
+            Ok(batch)
+        }
+    }));
+    Ok(Box::pin(inline_stream))
 }
 
 async fn process_index_scan(

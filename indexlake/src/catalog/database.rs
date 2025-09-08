@@ -1,4 +1,7 @@
+use arrow_schema::Schema;
 use uuid::Uuid;
+
+use crate::{ILResult, expr::Expr};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CatalogDatabase {
@@ -33,6 +36,14 @@ impl CatalogDatabase {
         match self {
             CatalogDatabase::Sqlite => format!("'{value}'"),
             CatalogDatabase::Postgres => format!("'{value}'"),
+        }
+    }
+
+    // TODO implement this
+    pub fn supports_filter(&self, filter: &Expr, _schema: &Schema) -> ILResult<bool> {
+        match filter {
+            Expr::Function(_) => Ok(false),
+            _ => Ok(true),
         }
     }
 }
