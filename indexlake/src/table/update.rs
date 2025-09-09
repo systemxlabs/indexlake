@@ -7,7 +7,7 @@ use futures::StreamExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::catalog::{DataFileRecord, TransactionHelper};
+use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_record_batch};
 use crate::expr::Expr;
 use crate::storage::{
     Storage, read_data_file_by_record, read_data_file_by_record_and_row_id_condition,
@@ -23,10 +23,9 @@ pub(crate) async fn process_update_by_condition(
     condition: &Expr,
     mut matched_data_file_rows: HashMap<Uuid, RecordBatchStream>,
 ) -> ILResult<()> {
-    let updated_row_count = tx_helper
-        .update_inline_rows(&table.table_id, &set_map, condition)
-        .await?;
+    let updated_row_count = update_inline_rows(tx_helper, table, &set_map, condition).await?;
 
+    // TODO this could be optimized into update_inline_rows function
     if updated_row_count != 0 {
         rebuild_inline_indexes(
             tx_helper,
@@ -62,6 +61,51 @@ pub(crate) async fn process_update_by_condition(
     }
 
     Ok(())
+}
+
+pub(crate) async fn update_inline_rows(
+    tx_helper: &mut TransactionHelper,
+    table: &Table,
+    set_map: &HashMap<String, Expr>,
+    condition: &Expr,
+) -> ILResult<usize> {
+    if tx_helper
+        .database
+        .supports_filter(condition, &table.schema)?
+    {
+        tx_helper
+            .update_inline_rows(&table.table_id, set_map, condition)
+            .await
+    } else {
+        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.schema)?);
+        let row_stream = tx_helper
+            .scan_inline_rows(&table.table_id, &catalog_schema, &[], None)
+            .await?;
+        let mut chunk_stream = row_stream.chunks(100);
+        let mut updated_row_ids = Vec::new();
+        let mut updated_batches = Vec::new();
+        while let Some(row_chunk) = chunk_stream.next().await {
+            let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+            let record_batch = rows_to_record_batch(&table.schema, &rows)?;
+            let bool_array = condition.condition_eval(&record_batch)?;
+            for (i, v) in bool_array.iter().enumerate() {
+                if let Some(v) = v
+                    && v
+                {
+                    updated_row_ids.push(rows[i].uuid(0)?.expect("row_id is not null"));
+                }
+            }
+            let filtered_batch = arrow::compute::filter_record_batch(&record_batch, &bool_array)?;
+            let updated_batch = update_record_batch(&filtered_batch, set_map)?;
+            updated_batches.push(updated_batch);
+        }
+        drop(chunk_stream);
+        tx_helper
+            .delete_inline_rows(&table.table_id, &[], Some(&updated_row_ids))
+            .await?;
+        process_insert_into_inline_rows(tx_helper, table, &updated_batches).await?;
+        Ok(updated_row_ids.len())
+    }
 }
 
 pub(crate) async fn update_data_file_rows_by_matched_rows(

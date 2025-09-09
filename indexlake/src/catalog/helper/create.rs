@@ -16,10 +16,10 @@ impl TransactionHelper {
         let mut columns = Vec::new();
         match self.database {
             CatalogDatabase::Postgres => {
-                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} UUID"));
+                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} UUID PRIMARY KEY"));
             }
             CatalogDatabase::Sqlite => {
-                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} BLOB"));
+                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} BLOB PRIMARY KEY"));
             }
         }
 
