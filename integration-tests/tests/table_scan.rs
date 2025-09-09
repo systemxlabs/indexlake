@@ -168,7 +168,7 @@ async fn partitioned_scan(
 
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-    let scan = TableScan::default().with_partition(TableScanPartition {
+    let scan = TableScan::default().with_partition(TableScanPartition::Auto {
         partition_idx: 0,
         partition_count: 2,
     });
@@ -185,7 +185,7 @@ async fn partitioned_scan(
 +-------+-----+"#,
     );
 
-    let scan = TableScan::default().with_partition(TableScanPartition {
+    let scan = TableScan::default().with_partition(TableScanPartition::Auto {
         partition_idx: 1,
         partition_count: 2,
     });
@@ -201,7 +201,7 @@ async fn partitioned_scan(
 +---------+-----+"#,
     );
 
-    let scan = TableScan::default().with_partition(TableScanPartition {
+    let scan = TableScan::default().with_partition(TableScanPartition::Auto {
         partition_idx: 2,
         partition_count: 3,
     });

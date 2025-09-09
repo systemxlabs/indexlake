@@ -24,10 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = "test_namespace";
     client.create_namespace(namespace_name, true).await?;
 
-    let total_rows = 100000;
+    let total_rows = 1000000;
     let num_tasks = 10;
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 1000;
+    let insert_batch_size = 10000;
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::sleep(std::time::Duration::from_secs(10));
 
     let start_time = Instant::now();
-    let limit = 500;
+    let limit = 10;
     let table_search = TableSearch {
         query: Arc::new(BM25SearchQuery {
             query: "杨绛女士".to_string(),

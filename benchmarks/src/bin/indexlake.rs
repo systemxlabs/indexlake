@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..num_tasks {
         let table = table.clone();
         let handle = tokio::spawn(async move {
-            let scan = TableScan::default().with_partition(TableScanPartition {
+            let scan = TableScan::default().with_partition(TableScanPartition::Auto {
                 partition_idx: i,
                 partition_count: num_tasks,
             });

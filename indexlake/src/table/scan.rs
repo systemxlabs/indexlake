@@ -27,43 +27,55 @@ pub struct TableScan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableScanPartition {
-    pub partition_idx: usize,
-    pub partition_count: usize,
+pub enum TableScanPartition {
+    Auto {
+        partition_idx: usize,
+        partition_count: usize,
+    },
+    Provided {
+        contains_inline_rows: bool,
+        data_file_records: Vec<DataFileRecord>,
+    },
 }
 
 impl TableScanPartition {
     pub fn single_partition() -> Self {
-        Self {
+        Self::Auto {
             partition_idx: 0,
             partition_count: 1,
         }
     }
 
     pub fn validate(&self) -> ILResult<()> {
-        if self.partition_count == 0 {
-            return Err(ILError::invalid_input(
-                "Partition count must be greater than 0",
-            ));
-        }
-        if self.partition_idx >= self.partition_count {
-            return Err(ILError::invalid_input(format!(
-                "Partition index out of range: {} >= {}",
-                self.partition_idx, self.partition_count
-            )));
+        match self {
+            Self::Auto {
+                partition_idx,
+                partition_count,
+            } => {
+                if *partition_count == 0 {
+                    return Err(ILError::invalid_input(
+                        "Partition count must be greater than 0",
+                    ));
+                }
+                if partition_idx >= partition_count {
+                    return Err(ILError::invalid_input(format!(
+                        "Partition index out of range: {partition_idx} >= {partition_count}",
+                    )));
+                }
+            }
+            Self::Provided { .. } => {}
         }
         Ok(())
     }
 
-    pub fn offset_limit(&self, count: usize) -> (usize, usize) {
-        let partition_size = std::cmp::max(count / self.partition_count, 1);
-        let offset = std::cmp::min(self.partition_idx * partition_size, count);
-        let limit = if self.partition_idx == self.partition_count - 1 {
-            count - offset
-        } else {
-            partition_size
-        };
-        (offset, limit)
+    pub fn contains_inline_rows(&self) -> bool {
+        match self {
+            Self::Auto { partition_idx, .. } => *partition_idx == 0,
+            Self::Provided {
+                contains_inline_rows,
+                ..
+            } => *contains_inline_rows,
+        }
     }
 }
 
@@ -115,7 +127,7 @@ async fn process_table_scan(
     table: &Table,
     scan: TableScan,
 ) -> ILResult<RecordBatchStream> {
-    let mut streams: Vec<RecordBatchStream> = if scan.partition.partition_idx == 0 {
+    let mut streams: Vec<RecordBatchStream> = if scan.partition.contains_inline_rows() {
         // Scan inline rows
         let inline_stream = Box::pin(
             scan_inline_rows(catalog_helper, &table.table_id, &table.schema, &scan).await?,
@@ -125,13 +137,9 @@ async fn process_table_scan(
         vec![]
     };
 
-    let data_file_count = catalog_helper.count_data_files(&table.table_id).await?;
-    let (offset, limit) = scan.partition.offset_limit(data_file_count as usize);
-
     // Scan data files
-    let data_file_records = catalog_helper
-        .get_partitioned_data_files(&table.table_id, offset, limit)
-        .await?;
+    let data_file_records =
+        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition).await?;
 
     let mut futs = Vec::with_capacity(data_file_records.len());
     for data_file_record in data_file_records {
@@ -161,6 +169,38 @@ async fn process_table_scan(
     streams.push(Box::pin(stream));
 
     Ok(Box::pin(futures::stream::select_all(streams)))
+}
+
+pub(crate) async fn get_partitioned_data_file_records(
+    catalog_helper: &CatalogHelper,
+    table_id: &Uuid,
+    scan_partition: TableScanPartition,
+) -> ILResult<Vec<DataFileRecord>> {
+    match scan_partition {
+        TableScanPartition::Auto {
+            partition_idx,
+            partition_count,
+        } => {
+            let data_file_count = catalog_helper.count_data_files(table_id).await? as usize;
+
+            let partition_size = std::cmp::max(data_file_count / partition_count, 1);
+            let offset = std::cmp::min(partition_idx * partition_size, data_file_count);
+            let limit = if partition_idx == partition_count - 1 {
+                data_file_count - offset
+            } else {
+                partition_size
+            };
+
+            // Scan data files
+            let data_file_records = catalog_helper
+                .get_partitioned_data_files(table_id, offset, limit)
+                .await?;
+            Ok(data_file_records)
+        }
+        TableScanPartition::Provided {
+            data_file_records, ..
+        } => Ok(data_file_records),
+    }
 }
 
 async fn scan_inline_rows(
@@ -221,7 +261,7 @@ async fn process_index_scan(
         .collect::<Vec<_>>();
 
     // Scan inline rows
-    let mut streams: Vec<RecordBatchStream> = if scan.partition.partition_idx == 0 {
+    let mut streams: Vec<RecordBatchStream> = if scan.partition.contains_inline_rows() {
         let inline_rows_stream = index_scan_inline_rows(
             catalog_helper,
             table,
@@ -235,24 +275,24 @@ async fn process_index_scan(
         vec![]
     };
 
-    let data_file_count = catalog_helper.count_data_files(&table.table_id).await?;
-    let (offset, limit) = scan.partition.offset_limit(data_file_count as usize);
-
-    let data_file_records = catalog_helper
-        .get_partitioned_data_files(&table.table_id, offset, limit)
-        .await?;
+    let data_file_records =
+        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition).await?;
 
     let mut futs = Vec::with_capacity(data_file_records.len());
     for data_file_record in data_file_records {
         let catalog_helper = catalog_helper.clone();
         let table = table.clone();
-        let scan = scan.clone();
+        let scan_projection = scan.projection.clone();
+        let scan_filters = scan.filters.clone();
+        let scan_batch_size = scan.batch_size;
         let index_filter_assignment = index_filter_assignment.clone();
         let fut = async move {
             index_scan_data_file(
                 &catalog_helper,
                 &table,
-                &scan,
+                scan_projection,
+                &scan_filters,
+                scan_batch_size,
                 &data_file_record,
                 &index_filter_assignment,
             )
@@ -376,7 +416,9 @@ async fn index_scan_inline_rows(
 async fn index_scan_data_file(
     catalog_helper: &CatalogHelper,
     table: &Table,
-    scan: &TableScan,
+    scan_projection: Option<Vec<usize>>,
+    scan_filters: &[Expr],
+    scan_batch_size: usize,
     data_file_record: &DataFileRecord,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
 ) -> ILResult<RecordBatchStream> {
@@ -389,14 +431,13 @@ async fn index_scan_data_file(
         .collect::<HashMap<_, _>>();
     let row_ids = filter_index_files_row_ids(
         table,
-        &scan.filters,
+        scan_filters,
         &index_file_records_map,
         index_filter_assignment,
     )
     .await?;
 
-    let left_filters = scan
-        .filters
+    let left_filters = scan_filters
         .iter()
         .enumerate()
         .filter(|(idx, _)| {
@@ -411,10 +452,10 @@ async fn index_scan_data_file(
         &table.storage,
         &table.schema,
         data_file_record,
-        scan.projection.clone(),
+        scan_projection,
         left_filters,
         Some(&row_ids),
-        scan.batch_size,
+        scan_batch_size,
     )
     .await
 }
@@ -504,57 +545,4 @@ fn assign_index_filters(
         }
     }
     Ok(index_filter_assignment)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn partition_offset_limit() {
-        let partition = TableScanPartition {
-            partition_idx: 0,
-            partition_count: 2,
-        };
-        let (offset, limit) = partition.offset_limit(1);
-        assert_eq!(offset, 0);
-        assert_eq!(limit, 1);
-        let partition = TableScanPartition {
-            partition_idx: 1,
-            partition_count: 2,
-        };
-        let (offset, limit) = partition.offset_limit(1);
-        assert_eq!(offset, 1);
-        assert_eq!(limit, 0);
-
-        let partition = TableScanPartition {
-            partition_idx: 0,
-            partition_count: 2,
-        };
-        let (offset, limit) = partition.offset_limit(3);
-        assert_eq!(offset, 0);
-        assert_eq!(limit, 1);
-        let partition = TableScanPartition {
-            partition_idx: 1,
-            partition_count: 2,
-        };
-        let (offset, limit) = partition.offset_limit(3);
-        assert_eq!(offset, 1);
-        assert_eq!(limit, 2);
-
-        let partition = TableScanPartition {
-            partition_idx: 0,
-            partition_count: 2,
-        };
-        let (offset, limit) = partition.offset_limit(4);
-        assert_eq!(offset, 0);
-        assert_eq!(limit, 2);
-        let partition = TableScanPartition {
-            partition_idx: 1,
-            partition_count: 2,
-        };
-        let (offset, limit) = partition.offset_limit(4);
-        assert_eq!(offset, 2);
-        assert_eq!(limit, 2);
-    }
 }

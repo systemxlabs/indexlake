@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // insert data
-    let total_rows = 1000000;
+    let total_rows = 100000;
     let insert_batch_size = 10000;
 
     let start_time = Instant::now();

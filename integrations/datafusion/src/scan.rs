@@ -107,7 +107,7 @@ impl ExecutionPlan for IndexLakeScanExec {
         let mut scan = TableScan::default()
             .with_projection(self.projection.clone())
             .with_filters(il_filters)
-            .with_partition(TableScanPartition {
+            .with_partition(TableScanPartition::Auto {
                 partition_idx: partition,
                 partition_count: self.partition_count,
             });
@@ -141,7 +141,7 @@ impl ExecutionPlan for IndexLakeScanExec {
         partition: Option<usize>,
     ) -> Result<Statistics, DataFusionError> {
         let scan_partition = match partition {
-            Some(partition) => TableScanPartition {
+            Some(partition) => TableScanPartition::Auto {
                 partition_idx: partition,
                 partition_count: self.partition_count,
             },

@@ -3,6 +3,7 @@ use std::ops::Range;
 
 use arrow::datatypes::{DataType, Field};
 use parquet::arrow::arrow_reader::RowSelection;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -173,15 +174,15 @@ impl FieldRecord {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct DataFileRecord {
-    pub(crate) data_file_id: Uuid,
-    pub(crate) table_id: Uuid,
-    pub(crate) format: DataFileFormat,
-    pub(crate) relative_path: String,
-    pub(crate) record_count: i64,
-    pub(crate) row_ids: Vec<Uuid>,
-    pub(crate) validity: Vec<bool>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataFileRecord {
+    pub data_file_id: Uuid,
+    pub table_id: Uuid,
+    pub format: DataFileFormat,
+    pub relative_path: String,
+    pub record_count: i64,
+    pub row_ids: Vec<Uuid>,
+    pub validity: Vec<bool>,
 }
 
 impl DataFileRecord {

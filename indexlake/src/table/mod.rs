@@ -96,18 +96,14 @@ impl Table {
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
 
-        let inline_row_count = if partition.partition_idx == 0 {
+        let inline_row_count = if partition.contains_inline_rows() {
             catalog_helper.count_inline_rows(&self.table_id).await? as usize
         } else {
             0
         };
 
-        let data_file_count = catalog_helper.count_data_files(&self.table_id).await?;
-        let (offset, limit) = partition.offset_limit(data_file_count as usize);
-
-        let data_file_records = catalog_helper
-            .get_partitioned_data_files(&self.table_id, offset, limit)
-            .await?;
+        let data_file_records =
+            get_partitioned_data_file_records(&catalog_helper, &self.table_id, partition).await?;
         let data_file_row_count: usize = data_file_records
             .iter()
             .map(|record| record.valid_row_count())
@@ -269,6 +265,12 @@ impl Table {
             Expr::Function(_) => self.index_manager.supports_filter(filter),
             _ => Ok(FilterSupport::Exact),
         }
+    }
+
+    pub async fn data_file_count(&self) -> ILResult<usize> {
+        let catalog_helper = CatalogHelper::new(self.catalog.clone());
+        let count = catalog_helper.count_data_files(&self.table_id).await?;
+        Ok(count as usize)
     }
 }
 
