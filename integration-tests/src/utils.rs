@@ -150,3 +150,19 @@ pub async fn read_first_row_id_bytes_from_table(table: &Table) -> ILResult<Vec<u
     }
     Ok(first_row_id_bytes.to_vec())
 }
+
+pub async fn assert_inline_row_count(table: &Table, check: impl Fn(usize) -> bool) -> ILResult<()> {
+    let inline_row_count = table.inline_row_count().await?;
+    if !check(inline_row_count) {
+        return Err(ILError::internal("table inline row count check failed"));
+    }
+    Ok(())
+}
+
+pub async fn assert_data_file_count(table: &Table, check: impl Fn(usize) -> bool) -> ILResult<()> {
+    let data_file_count = table.data_file_count().await?;
+    if !check(data_file_count) {
+        return Err(ILError::internal("table data file count check failed"));
+    }
+    Ok(())
+}

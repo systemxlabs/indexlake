@@ -8,7 +8,9 @@ use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableScan};
 use indexlake_index_rstar::{RStarIndexKind, RStarIndexParams, WkbDialect};
 use indexlake_integration_tests::data::{prepare_simple_geom_table, prepare_simple_testing_table};
-use indexlake_integration_tests::utils::full_table_scan;
+use indexlake_integration_tests::utils::{
+    assert_data_file_count, assert_inline_row_count, full_table_scan,
+};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
@@ -338,6 +340,11 @@ async fn table_data_types(
     table
         .insert(TableInsertion::new(vec![record_batch]).with_force_inline(true))
         .await?;
+
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    assert_inline_row_count(&table, |count| count > 0).await?;
+    assert_data_file_count(&table, |count| count > 0).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);

@@ -11,6 +11,8 @@ use indexlake::storage::DataFileFormat;
 use indexlake::table::{Table, TableConfig, TableCreation, TableInsertion};
 use indexlake::{Client, ILResult};
 
+use crate::utils::{assert_data_file_count, assert_inline_row_count};
+
 pub async fn prepare_simple_testing_table(
     client: &Client,
     format: DataFileFormat,
@@ -64,6 +66,9 @@ pub async fn prepare_simple_testing_table(
 
     // wait for dump task to finish
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    assert_inline_row_count(&table, |count| count > 0).await?;
+    assert_data_file_count(&table, |count| count > 0).await?;
 
     Ok(table)
 }
@@ -135,6 +140,9 @@ pub async fn prepare_simple_geom_table(client: &Client, format: DataFileFormat) 
 
     // wait for dump task to finish
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    assert_inline_row_count(&table, |count| count > 0).await?;
+    assert_data_file_count(&table, |count| count > 0).await?;
 
     Ok(table)
 }
@@ -287,6 +295,9 @@ pub async fn prepare_simple_vector_table(
 
     // wait for dump task to finish
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    assert_inline_row_count(&table, |count| count > 0).await?;
+    assert_data_file_count(&table, |count| count > 0).await?;
 
     Ok(table)
 }

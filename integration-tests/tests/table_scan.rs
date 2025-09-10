@@ -12,7 +12,9 @@ use indexlake::table::{
 use indexlake_integration_tests::data::{
     prepare_simple_testing_table, prepare_simple_vector_table,
 };
-use indexlake_integration_tests::utils::table_scan;
+use indexlake_integration_tests::utils::{
+    assert_data_file_count, assert_inline_row_count, table_scan,
+};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
@@ -96,7 +98,7 @@ async fn scan_with_filters(
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
 #[tokio::test(flavor = "multi_thread")]
-async fn partitioned_scan(
+async fn auto_partition_scan(
     #[future(awt)]
     #[case]
     catalog: Arc<dyn Catalog>,
@@ -171,6 +173,9 @@ async fn partitioned_scan(
         .await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    assert_inline_row_count(&table, |count| count == 1).await?;
+    assert_data_file_count(&table, |count| count == 2).await?;
 
     let scan = TableScan::default().with_partition(TableScanPartition::Auto {
         partition_idx: 0,

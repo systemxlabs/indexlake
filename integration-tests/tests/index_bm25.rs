@@ -15,7 +15,9 @@ use arrow::array::RecordBatch;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::IndexCreation;
 use indexlake_index_bm25::{BM25IndexKind, BM25IndexParams, BM25SearchQuery};
-use indexlake_integration_tests::utils::table_search;
+use indexlake_integration_tests::utils::{
+    assert_data_file_count, assert_inline_row_count, table_search,
+};
 
 #[rstest::rstest]
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
@@ -89,9 +91,12 @@ async fn create_bm25_index(
         ],
     )?;
     table
-        .insert(TableInsertion::new(vec![record_batch]))
+        .insert(TableInsertion::new(vec![record_batch]).with_force_inline(true))
         .await?;
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    assert_inline_row_count(&table, |count| count > 0).await?;
+    assert_data_file_count(&table, |count| count > 0).await?;
 
     let search = TableSearch {
         query: Arc::new(BM25SearchQuery {

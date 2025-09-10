@@ -112,6 +112,12 @@ impl Table {
         Ok(inline_row_count + data_file_row_count)
     }
 
+    pub async fn inline_row_count(&self) -> ILResult<usize> {
+        let catalog_helper = CatalogHelper::new(self.catalog.clone());
+        let count = catalog_helper.count_inline_rows(&self.table_id).await?;
+        Ok(count as usize)
+    }
+
     pub async fn search(&self, search: TableSearch) -> ILResult<RecordBatchStream> {
         let batch_stream = process_search(self, search).await?;
         Ok(batch_stream)

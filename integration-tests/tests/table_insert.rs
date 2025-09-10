@@ -6,7 +6,9 @@ use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan};
 use indexlake::{Client, ILError};
 use indexlake_integration_tests::data::prepare_simple_testing_table;
-use indexlake_integration_tests::utils::full_table_scan;
+use indexlake_integration_tests::utils::{
+    assert_data_file_count, assert_inline_row_count, full_table_scan,
+};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
@@ -141,6 +143,9 @@ async fn bypass_insert_table(
     )?;
     table.insert(TableInsertion::new(vec![batch])).await?;
 
+    assert_inline_row_count(&table, |count| count == 0).await?;
+    assert_data_file_count(&table, |count| count == 1).await?;
+
     let table_str = full_table_scan(&table).await?;
     println!("{table_str}");
     assert_eq!(
@@ -203,6 +208,8 @@ async fn insert_string_with_quotes(
         ]))],
     )?;
     table.insert(TableInsertion::new(vec![batch])).await?;
+
+    assert_inline_row_count(&table, |count| count > 0).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{table_str}");
