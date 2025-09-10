@@ -84,9 +84,25 @@ impl TableProvider for IndexLakeTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        let data_file_count = self
+            .table
+            .data_file_count()
+            .await
+            .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+        let data_files = if data_file_count > 1000 {
+            None
+        } else {
+            let records = self
+                .table
+                .data_file_records()
+                .await
+                .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+            Some(Arc::new(records))
+        };
         let exec = IndexLakeScanExec::try_new(
             self.table.clone(),
             self.partition_count,
+            data_files,
             self.concurrency,
             projection.cloned(),
             filters.to_vec(),

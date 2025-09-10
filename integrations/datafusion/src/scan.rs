@@ -17,6 +17,7 @@ use datafusion::physical_plan::{
 };
 use datafusion::prelude::Expr;
 use futures::TryStreamExt;
+use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
 use log::error;
 
@@ -26,6 +27,7 @@ use crate::datafusion_expr_to_indexlake_expr;
 pub struct IndexLakeScanExec {
     pub table: Arc<Table>,
     pub partition_count: usize,
+    pub data_files: Option<Arc<Vec<DataFileRecord>>>,
     pub concurrency: Option<usize>,
     pub projection: Option<Vec<usize>>,
     pub filters: Vec<Expr>,
@@ -37,6 +39,7 @@ impl IndexLakeScanExec {
     pub fn try_new(
         table: Arc<Table>,
         partition_count: usize,
+        data_files: Option<Arc<Vec<DataFileRecord>>>,
         concurrency: Option<usize>,
         projection: Option<Vec<usize>>,
         filters: Vec<Expr>,
@@ -52,6 +55,7 @@ impl IndexLakeScanExec {
         Ok(Self {
             table,
             partition_count,
+            data_files,
             concurrency,
             projection,
             filters,
@@ -104,13 +108,30 @@ impl ExecutionPlan for IndexLakeScanExec {
             .map(|f| datafusion_expr_to_indexlake_expr(f, &df_schema))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let scan_partition = if let Some(data_files) = self.data_files.as_ref() {
+            let data_file_count = data_files.len();
+            let partition_size = std::cmp::max(data_file_count / self.partition_count, 1);
+            let start = std::cmp::min(partition * partition_size, data_file_count);
+            let end = std::cmp::min(start + partition_size, data_file_count);
+            TableScanPartition::Provided {
+                contains_inline_rows: partition == 0,
+                data_file_records: if start == data_file_count {
+                    vec![]
+                } else {
+                    data_files[start..end].to_vec()
+                },
+            }
+        } else {
+            TableScanPartition::Auto {
+                partition_idx: partition,
+                partition_count: self.partition_count,
+            }
+        };
+
         let mut scan = TableScan::default()
             .with_projection(self.projection.clone())
             .with_filters(il_filters)
-            .with_partition(TableScanPartition::Auto {
-                partition_idx: partition,
-                partition_count: self.partition_count,
-            });
+            .with_partition(scan_partition);
 
         if let Some(limit) = self.limit {
             scan.batch_size = limit;
@@ -169,6 +190,7 @@ impl ExecutionPlan for IndexLakeScanExec {
         match IndexLakeScanExec::try_new(
             self.table.clone(),
             self.partition_count,
+            self.data_files.clone(),
             self.concurrency,
             self.projection.clone(),
             self.filters.clone(),

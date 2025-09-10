@@ -19,3 +19,4 @@ log = { workspace = true }
 num_cpus = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true }
+uuid = { workspace = true }

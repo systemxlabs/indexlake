@@ -28,13 +28,15 @@ pub struct IndexLakeScanExecNode {
     pub table_name: ::prost::alloc::string::String,
     #[prost(uint32, tag = "3")]
     pub partition_count: u32,
-    #[prost(uint32, optional, tag = "4")]
+    #[prost(message, optional, tag = "4")]
+    pub data_files: ::core::option::Option<DataFiles>,
+    #[prost(uint32, optional, tag = "5")]
     pub concurrency: ::core::option::Option<u32>,
-    #[prost(message, optional, tag = "5")]
+    #[prost(message, optional, tag = "6")]
     pub projection: ::core::option::Option<Projection>,
-    #[prost(message, repeated, tag = "6")]
+    #[prost(message, repeated, tag = "7")]
     pub filters: ::prost::alloc::vec::Vec<::datafusion_proto::protobuf::LogicalExprNode>,
-    #[prost(uint32, optional, tag = "7")]
+    #[prost(uint32, optional, tag = "8")]
     pub limit: ::core::option::Option<u32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -66,4 +68,52 @@ pub struct MemoryDatasourceNode {
 pub struct Projection {
     #[prost(uint32, repeated, tag = "1")]
     pub projection: ::prost::alloc::vec::Vec<u32>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DataFiles {
+    #[prost(message, repeated, tag = "1")]
+    pub files: ::prost::alloc::vec::Vec<DataFile>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DataFile {
+    #[prost(bytes = "vec", tag = "1")]
+    pub data_file_id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "2")]
+    pub table_id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(enumeration = "DataFileFormat", tag = "3")]
+    pub format: i32,
+    #[prost(string, tag = "4")]
+    pub relative_path: ::prost::alloc::string::String,
+    #[prost(int64, tag = "5")]
+    pub record_count: i64,
+    #[prost(bytes = "vec", repeated, tag = "6")]
+    pub row_ids: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+    #[prost(bool, repeated, tag = "7")]
+    pub validity: ::prost::alloc::vec::Vec<bool>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum DataFileFormat {
+    ParquetV1 = 0,
+    ParquetV2 = 1,
+}
+impl DataFileFormat {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::ParquetV1 => "ParquetV1",
+            Self::ParquetV2 => "ParquetV2",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ParquetV1" => Some(Self::ParquetV1),
+            "ParquetV2" => Some(Self::ParquetV2),
+            _ => None,
+        }
+    }
 }

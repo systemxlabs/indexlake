@@ -272,6 +272,12 @@ impl Table {
         let count = catalog_helper.count_data_files(&self.table_id).await?;
         Ok(count as usize)
     }
+
+    pub async fn data_file_records(&self) -> ILResult<Vec<DataFileRecord>> {
+        let catalog_helper = CatalogHelper::new(self.catalog.clone());
+        let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
+        Ok(data_file_records)
+    }
 }
 
 fn spawn_storage_data_files_clean_task(

@@ -17,10 +17,11 @@ message IndexLakeScanExecNode {
   string namespace_name = 1;
   string table_name = 2;
   uint32 partition_count = 3;
-  optional uint32 concurrency = 4;
-  Projection projection = 5;
-  repeated datafusion.LogicalExprNode filters = 6;
-  optional uint32 limit = 7;
+  DataFiles data_files = 4;
+  optional uint32 concurrency = 5;
+  Projection projection = 6;
+  repeated datafusion.LogicalExprNode filters = 7;
+  optional uint32 limit = 8;
 }
 
 message IndexLakeInsertExecNode {
@@ -40,4 +41,23 @@ message MemoryDatasourceNode {
 
 message Projection {
   repeated uint32 projection = 1;
+}
+
+message DataFiles {
+  repeated DataFile files = 1;
+}
+
+message DataFile {
+  bytes data_file_id = 1;
+  bytes table_id = 2;
+  DataFileFormat format = 3;
+  string relative_path = 4;
+  int64 record_count = 5;
+  repeated bytes row_ids = 6;
+  repeated bool validity = 7;
+}
+
+enum DataFileFormat {
+  ParquetV1 = 0;
+  ParquetV2 = 1;
 }

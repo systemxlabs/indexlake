@@ -7,7 +7,7 @@ mod schema;
 
 pub use database::*;
 pub(crate) use helper::*;
-pub(crate) use record::*;
+pub use record::*;
 pub use row::*;
 pub use scalar::*;
 pub use schema::*;

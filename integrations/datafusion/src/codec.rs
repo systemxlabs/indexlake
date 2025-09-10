@@ -17,13 +17,16 @@ use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use datafusion_proto::physical_plan::from_proto::parse_physical_sort_exprs;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_sort_exprs;
 use indexlake::Client;
+use indexlake::catalog::DataFileRecord;
+use indexlake::storage::DataFileFormat;
 use indexlake::table::Table;
 use prost::Message;
+use uuid::Uuid;
 
 use crate::index_lake_physical_plan_node::IndexLakePhysicalPlanType;
 use crate::{
-    IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode, IndexLakeScanExec,
-    IndexLakeScanExecNode, MemoryDatasourceNode,
+    DataFile, DataFiles, IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode,
+    IndexLakeScanExec, IndexLakeScanExecNode, MemoryDatasourceNode,
 };
 
 #[derive(Debug)]
@@ -59,6 +62,8 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             IndexLakePhysicalPlanType::Scan(node) => {
                 let table = load_table(&self.client, &node.namespace_name, &node.table_name)?;
 
+                let data_files = parse_data_files(node.data_files)?;
+
                 let projection = parse_projection(node.projection.as_ref());
                 let filters =
                     parse_exprs(&node.filters, registry, &DefaultLogicalExtensionCodec {})?;
@@ -66,6 +71,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 Ok(Arc::new(IndexLakeScanExec::try_new(
                     Arc::new(table),
                     node.partition_count as usize,
+                    data_files,
                     node.concurrency.map(|c| c as usize),
                     projection,
                     filters,
@@ -135,12 +141,15 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
             let filters = serialize_exprs(&exec.filters, &DefaultLogicalExtensionCodec {})?;
 
+            let data_files = serialize_data_files(exec.data_files.as_ref())?;
+
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Scan(
                     IndexLakeScanExecNode {
                         namespace_name: exec.table.namespace_name.clone(),
                         table_name: exec.table.table_name.clone(),
                         partition_count: exec.partition_count as u32,
+                        data_files,
                         concurrency: exec.concurrency.map(|c| c as u32),
                         projection,
                         filters,
@@ -308,4 +317,86 @@ fn parse_partitions(
         partitions.push(partition);
     }
     Ok(partitions)
+}
+
+fn serialize_data_files(
+    records: Option<&Arc<Vec<DataFileRecord>>>,
+) -> Result<Option<DataFiles>, DataFusionError> {
+    match records {
+        Some(records) => {
+            let mut proto_data_files = vec![];
+            for record in records.iter() {
+                proto_data_files.push(DataFile {
+                    data_file_id: record.data_file_id.as_bytes().to_vec(),
+                    table_id: record.table_id.as_bytes().to_vec(),
+                    format: serialize_data_file_format(record.format),
+                    relative_path: record.relative_path.clone(),
+                    record_count: record.record_count,
+                    row_ids: record
+                        .row_ids
+                        .iter()
+                        .map(|id| id.as_bytes().to_vec())
+                        .collect(),
+                    validity: record.validity.clone(),
+                });
+            }
+            Ok(Some(DataFiles {
+                files: proto_data_files,
+            }))
+        }
+        None => Ok(None),
+    }
+}
+
+fn parse_data_files(
+    proto_data_files: Option<DataFiles>,
+) -> Result<Option<Arc<Vec<DataFileRecord>>>, DataFusionError> {
+    match proto_data_files {
+        Some(proto_data_files) => {
+            let mut records = vec![];
+            for proto_data_file in proto_data_files.files {
+                records.push(DataFileRecord {
+                    data_file_id: Uuid::from_slice(&proto_data_file.data_file_id).map_err(|e| {
+                        DataFusionError::Internal(format!("Failed to parse data file id: {e:?}"))
+                    })?,
+                    table_id: Uuid::from_slice(&proto_data_file.table_id).map_err(|e| {
+                        DataFusionError::Internal(format!("Failed to parse table id: {e:?}"))
+                    })?,
+                    format: parse_data_file_format(proto_data_file.format)?,
+                    relative_path: proto_data_file.relative_path,
+                    record_count: proto_data_file.record_count,
+                    row_ids: proto_data_file
+                        .row_ids
+                        .into_iter()
+                        .map(|id| {
+                            Uuid::from_slice(id.as_slice()).map_err(|e| {
+                                DataFusionError::Internal(format!("Failed to parse row id: {e:?}"))
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    validity: proto_data_file.validity,
+                });
+            }
+            Ok(Some(Arc::new(records)))
+        }
+        None => Ok(None),
+    }
+}
+
+fn serialize_data_file_format(format: DataFileFormat) -> i32 {
+    let proto_format = match format {
+        DataFileFormat::ParquetV1 => crate::protobuf::DataFileFormat::ParquetV1,
+        DataFileFormat::ParquetV2 => crate::protobuf::DataFileFormat::ParquetV2,
+    };
+    proto_format.into()
+}
+
+fn parse_data_file_format(format: i32) -> Result<DataFileFormat, DataFusionError> {
+    let proto_format = crate::protobuf::DataFileFormat::try_from(format).map_err(|e| {
+        DataFusionError::Internal(format!("Failed to parse data file format: {e:?}"))
+    })?;
+    match proto_format {
+        crate::protobuf::DataFileFormat::ParquetV1 => Ok(DataFileFormat::ParquetV1),
+        crate::protobuf::DataFileFormat::ParquetV2 => Ok(DataFileFormat::ParquetV2),
+    }
 }
