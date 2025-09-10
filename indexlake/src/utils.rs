@@ -1,35 +1,18 @@
-use std::collections::HashSet;
-use std::hash::Hash;
+use std::iter::repeat_n;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions,
+    Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions, StringArray,
 };
 use arrow::datatypes::{FieldRef, Schema};
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
 use uuid::Uuid;
 
-use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, INTERNAL_ROW_ID_FIELD_REF};
+use crate::catalog::INTERNAL_ROW_ID_FIELD_NAME;
 use crate::expr::{Expr, visited_columns};
+use crate::table::MetadataColumn;
 use crate::{ILError, ILResult};
-
-pub fn has_duplicated_items(container: impl Iterator<Item = impl Eq + Hash>) -> bool {
-    let mut set = HashSet::new();
-    for item in container {
-        if set.contains(&item) {
-            return true;
-        }
-        set.insert(item);
-    }
-    false
-}
-
-pub fn schema_with_row_id(schema: &Schema) -> Schema {
-    let mut fields = vec![INTERNAL_ROW_ID_FIELD_REF.clone()];
-    fields.extend(schema.fields.iter().cloned());
-    Schema::new_with_metadata(fields, schema.metadata().clone())
-}
 
 pub fn schema_without_row_id(schema: &Schema) -> Schema {
     let fields = schema
@@ -41,16 +24,55 @@ pub fn schema_without_row_id(schema: &Schema) -> Schema {
     Schema::new_with_metadata(fields, schema.metadata().clone())
 }
 
-pub fn record_batch_with_row_id(
-    record: &RecordBatch,
-    row_id_array: FixedSizeBinaryArray,
+pub fn append_new_fields_to_schema(schema: &Schema, new_fields: &[FieldRef]) -> Schema {
+    let mut fields = schema.fields.to_vec();
+    fields.extend(new_fields.iter().cloned());
+    Schema::new_with_metadata(fields, schema.metadata().clone())
+}
+
+pub fn record_batch_with_location_kind(
+    record_batch: &RecordBatch,
+    location_kind: &str,
 ) -> ILResult<RecordBatch> {
-    let schema = schema_with_row_id(&record.schema());
-    let mut arrays = vec![Arc::new(row_id_array) as ArrayRef];
-    arrays.extend(record.columns().iter().cloned());
-    let options = RecordBatchOptions::new().with_row_count(Some(record.num_rows()));
+    let new_schema = append_new_fields_to_schema(
+        record_batch.schema_ref(),
+        &[MetadataColumn::LocationKind.to_field()],
+    );
+
+    let mut arrays = record_batch.columns().to_vec();
+    let location_kind_array = Arc::new(StringArray::from_iter_values(repeat_n(
+        location_kind,
+        record_batch.num_rows(),
+    )));
+    arrays.push(location_kind_array);
+
+    let options = RecordBatchOptions::new().with_row_count(Some(record_batch.num_rows()));
     Ok(RecordBatch::try_new_with_options(
-        Arc::new(schema),
+        Arc::new(new_schema),
+        arrays,
+        &options,
+    )?)
+}
+
+pub fn record_batch_with_location(
+    record_batch: &RecordBatch,
+    location: &str,
+) -> ILResult<RecordBatch> {
+    let new_schema = append_new_fields_to_schema(
+        record_batch.schema_ref(),
+        &[MetadataColumn::Location.to_field()],
+    );
+
+    let mut arrays = record_batch.columns().to_vec();
+    let location_array = Arc::new(StringArray::from_iter_values(repeat_n(
+        location,
+        record_batch.num_rows(),
+    )));
+    arrays.push(location_array);
+
+    let options = RecordBatchOptions::new().with_row_count(Some(record_batch.num_rows()));
+    Ok(RecordBatch::try_new_with_options(
+        Arc::new(new_schema),
         arrays,
         &options,
     )?)
@@ -169,19 +191,4 @@ pub fn deserialize_array(buf: &[u8], field: FieldRef) -> ILResult<ArrayRef> {
             .as_slice(),
     )?;
     Ok(array)
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::utils::has_duplicated_items;
-
-    #[test]
-    fn test_has_duplicated_items() {
-        let items = [1, 2, 3, 4, 5];
-        assert!(!has_duplicated_items(items.iter()));
-
-        let items_with_duplicates = [1, 2, 3, 4, 5, 3];
-        assert!(has_duplicated_items(items_with_duplicates.iter()));
-    }
 }

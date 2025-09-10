@@ -1,20 +1,24 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use arrow::datatypes::SchemaRef;
+use arrow_schema::{DataType, Field, FieldRef, Schema};
 use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-    rows_to_record_batch,
+    inline_row_table_name, rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, split_conjunction_filters};
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::read_data_file_by_record;
 use crate::table::Table;
-use crate::utils::{fixed_size_binary_array_to_uuids, project_schema};
+use crate::utils::{
+    append_new_fields_to_schema, fixed_size_binary_array_to_uuids, project_schema,
+    record_batch_with_location, record_batch_with_location_kind,
+};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, Clone, derive_with::With)]
@@ -24,6 +28,63 @@ pub struct TableScan {
     pub batch_size: usize,
     pub partition: TableScanPartition,
     pub concurrency: usize,
+    pub metadata_columns: Vec<MetadataColumn>,
+}
+
+impl TableScan {
+    pub fn output_schema(&self, table_schema: &Schema) -> ILResult<SchemaRef> {
+        let projected_schema = if let Some(projection) = &self.projection {
+            table_schema.project(projection)?
+        } else {
+            table_schema.clone()
+        };
+        let schema = append_new_fields_to_schema(
+            &projected_schema,
+            &self
+                .metadata_columns
+                .iter()
+                .map(|column| column.to_field())
+                .collect::<Vec<_>>(),
+        );
+        Ok(Arc::new(schema))
+    }
+}
+
+impl Default for TableScan {
+    fn default() -> Self {
+        Self {
+            projection: None,
+            filters: vec![],
+            batch_size: 1024,
+            partition: TableScanPartition::single_partition(),
+            concurrency: num_cpus::get(),
+            metadata_columns: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MetadataColumn {
+    LocationKind,
+    Location,
+}
+
+impl MetadataColumn {
+    pub fn to_field(&self) -> FieldRef {
+        static LOCATION_KIND_FIELD: LazyLock<FieldRef> = LazyLock::new(|| {
+            Arc::new(Field::new(
+                "_indexlake_location_kind",
+                DataType::Utf8,
+                false,
+            ))
+        });
+        static LOCATION_FIELD: LazyLock<FieldRef> =
+            LazyLock::new(|| Arc::new(Field::new("_indexlake_location", DataType::Utf8, false)));
+        match self {
+            MetadataColumn::LocationKind => LOCATION_KIND_FIELD.clone(),
+            MetadataColumn::Location => LOCATION_FIELD.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,29 +140,6 @@ impl TableScanPartition {
     }
 }
 
-impl TableScan {
-    pub fn projected_schema(&self, table_schema: &SchemaRef) -> ILResult<SchemaRef> {
-        if let Some(projection) = &self.projection {
-            let projected_schema = table_schema.project(projection)?;
-            Ok(Arc::new(projected_schema))
-        } else {
-            Ok(table_schema.clone())
-        }
-    }
-}
-
-impl Default for TableScan {
-    fn default() -> Self {
-        Self {
-            projection: None,
-            filters: vec![],
-            batch_size: 1024,
-            partition: TableScanPartition::single_partition(),
-            concurrency: num_cpus::get(),
-        }
-    }
-}
-
 pub(crate) async fn process_scan(
     catalog_helper: &CatalogHelper,
     table: &Table,
@@ -148,8 +186,10 @@ async fn process_table_scan(
         let projection = scan.projection.clone();
         let filters = scan.filters.clone();
         let batch_size = scan.batch_size;
+        let metadata_columns = scan.metadata_columns.clone();
+        let location = format!("data_file_{}", data_file_record.data_file_id);
         let fut = async move {
-            read_data_file_by_record(
+            let stream = read_data_file_by_record(
                 &storage,
                 &table_schema,
                 &data_file_record,
@@ -158,7 +198,22 @@ async fn process_table_scan(
                 None,
                 batch_size,
             )
-            .await
+            .await?;
+            let stream = stream.map(move |batch| {
+                let mut batch = batch?;
+                for meta_column in metadata_columns.iter() {
+                    match meta_column {
+                        MetadataColumn::LocationKind => {
+                            batch = record_batch_with_location_kind(&batch, "data_file")?;
+                        }
+                        MetadataColumn::Location => {
+                            batch = record_batch_with_location(&batch, location.as_str())?;
+                        }
+                    }
+                }
+                Ok::<_, ILError>(batch)
+            });
+            Ok::<_, ILError>(stream)
         };
         futs.push(fut);
     }
@@ -224,13 +279,25 @@ async fn scan_inline_rows(
     }
 
     let arrow_filter = merge_filters(arrow_filters);
+    let metadata_columns = scan.metadata_columns.clone();
+    let inline_row_table_name = inline_row_table_name(table_id);
 
     let row_stream = catalog_helper
         .scan_inline_rows(table_id, &catalog_schema, None, &db_filters)
         .await?;
     let inline_stream = Box::pin(row_stream.chunks(scan.batch_size).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(&projected_schema, &rows)?;
+        let mut batch = rows_to_record_batch(&projected_schema, &rows)?;
+        for meta_column in metadata_columns.iter() {
+            match meta_column {
+                MetadataColumn::LocationKind => {
+                    batch = record_batch_with_location_kind(&batch, "inline")?;
+                }
+                MetadataColumn::Location => {
+                    batch = record_batch_with_location(&batch, inline_row_table_name.as_str())?;
+                }
+            }
+        }
         if let Some(arrow_filter) = &arrow_filter {
             let bool_array = arrow_filter.condition_eval(&batch)?;
             let filtered_batch = arrow::compute::filter_record_batch(&batch, &bool_array)?;

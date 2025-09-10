@@ -1,10 +1,14 @@
 use arrow::array::{Float32Builder, Int32Array, ListBuilder, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
+use arrow::util::pretty::pretty_format_batches;
+use futures::TryStreamExt;
 use indexlake::Client;
 use indexlake::catalog::{Catalog, Scalar};
 use indexlake::expr::{col, lit};
 use indexlake::storage::{DataFileFormat, Storage};
-use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};
+use indexlake::table::{
+    MetadataColumn, TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition,
+};
 use indexlake_integration_tests::data::{
     prepare_simple_testing_table, prepare_simple_vector_table,
 };
@@ -257,6 +261,63 @@ async fn scan_with_catalog_unsupported_filter(
 | 4  | [40.0, 40.0, 40.0] |
 +----+--------------------+"#,
     );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_with_metadata_columns(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let scan = TableScan::default()
+        .with_metadata_columns(vec![MetadataColumn::LocationKind, MetadataColumn::Location]);
+    let stream = table.scan(scan).await?;
+    let batches = stream.try_collect::<Vec<_>>().await?;
+    println!("{}", pretty_format_batches(&batches).unwrap());
+
+    for batch in batches {
+        let location_kind_idx = batch
+            .schema_ref()
+            .index_of(MetadataColumn::LocationKind.to_field().name())?;
+        let location_kind_array = batch
+            .column(location_kind_idx)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for kind in location_kind_array.iter() {
+            assert!(["data_file", "inline"].contains(&kind.unwrap()));
+        }
+
+        let location_idx = batch
+            .schema_ref()
+            .index_of(MetadataColumn::Location.to_field().name())?;
+        let location_array = batch
+            .column(location_idx)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for location in location_array.iter() {
+            let location = location.unwrap();
+            assert!(
+                location.starts_with("data_file_") || location.starts_with("indexlake_inline_")
+            );
+        }
+    }
 
     Ok(())
 }
