@@ -9,6 +9,7 @@ use datafusion::datasource::source::DataSource;
 use datafusion::error::DataFusionError;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::dml::InsertOp;
+use datafusion::physical_expr::LexOrdering;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
 use datafusion_proto::logical_plan::from_proto::parse_exprs;
@@ -113,7 +114,9 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                             &schema,
                             self,
                         )?;
-                        Ok::<_, DataFusionError>(sort_exprs)
+                        let lex_ordering =
+                            LexOrdering::new(sort_exprs).expect("lex ordering is not empty");
+                        Ok::<_, DataFusionError>(lex_ordering)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
