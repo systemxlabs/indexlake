@@ -6,7 +6,6 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use indexlake::catalog::Scalar;
 use indexlake::expr::{BinaryOp, Expr};
 use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
-use indexlake::utils::build_row_id_array;
 use indexlake::{ILError, ILResult};
 use uuid::Uuid;
 
@@ -120,7 +119,7 @@ impl Index for BTreeIndex {
     async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
-                row_ids: build_row_id_array(std::iter::empty::<&[u8]>())?,
+                row_ids: Vec::new(),
             });
         }
 
@@ -131,10 +130,8 @@ impl Index for BTreeIndex {
             result_row_ids.retain(|id| filter_row_ids.contains(id));
         }
 
-        let row_id_array = build_row_id_array(result_row_ids.iter().map(|id| id.as_bytes()))?;
-
         Ok(FilterIndexEntries {
-            row_ids: row_id_array,
+            row_ids: result_row_ids,
         })
     }
 }

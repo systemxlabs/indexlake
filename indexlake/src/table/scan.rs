@@ -16,8 +16,8 @@ use crate::index::{FilterSupport, IndexManager};
 use crate::storage::read_data_file_by_record;
 use crate::table::Table;
 use crate::utils::{
-    append_new_fields_to_schema, fixed_size_binary_array_to_uuids, project_schema,
-    record_batch_with_location, record_batch_with_location_kind,
+    append_new_fields_to_schema, project_schema, record_batch_with_location,
+    record_batch_with_location_kind,
 };
 use crate::{ILError, ILResult, RecordBatchStream};
 
@@ -445,14 +445,12 @@ async fn index_scan_inline_rows(
         filter_index_entries_list.push(filter_index_entries);
     }
 
-    let mut intersected_row_ids =
-        fixed_size_binary_array_to_uuids(&filter_index_entries_list[0].row_ids)?
-            .into_iter()
-            .collect::<HashSet<_>>();
+    let mut intersected_row_ids = filter_index_entries_list[0]
+        .row_ids
+        .iter()
+        .collect::<HashSet<_>>();
     for filter_index_entries in filter_index_entries_list.iter().skip(1) {
-        let set = fixed_size_binary_array_to_uuids(&filter_index_entries.row_ids)?
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let set = filter_index_entries.row_ids.iter().collect::<HashSet<_>>();
         intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
     }
 
@@ -465,6 +463,7 @@ async fn index_scan_inline_rows(
             Some(
                 intersected_row_ids
                     .into_iter()
+                    .copied()
                     .collect::<Vec<_>>()
                     .as_slice(),
             ),
@@ -570,18 +569,16 @@ async fn filter_index_files_row_ids(
         filter_index_entries_list.push(filter_index_entries);
     }
 
-    let mut intersected_row_ids =
-        fixed_size_binary_array_to_uuids(&filter_index_entries_list[0].row_ids)?
-            .into_iter()
-            .collect::<HashSet<_>>();
+    let mut intersected_row_ids = filter_index_entries_list[0]
+        .row_ids
+        .iter()
+        .collect::<HashSet<_>>();
     for filter_index_entries in filter_index_entries_list.iter().skip(1) {
-        let set = fixed_size_binary_array_to_uuids(&filter_index_entries.row_ids)?
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let set = filter_index_entries.row_ids.iter().collect::<HashSet<_>>();
         intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
     }
 
-    Ok(intersected_row_ids)
+    Ok(intersected_row_ids.into_iter().copied().collect())
 }
 
 fn assign_index_filters(

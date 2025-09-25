@@ -69,8 +69,10 @@ impl IndexKind for RStarIndexKind {
                 name,
                 args,
                 return_type,
-            }) => match name.as_str() {
-                "intersects" => check_intersects_function(index_def, args, return_type),
+            }) => match name.to_ascii_lowercase().as_str() {
+                "intersects" | "st_intersects" => {
+                    check_intersects_function(index_def, args, return_type)
+                }
                 _ => Ok(FilterSupport::Unsupported),
             },
             _ => Ok(FilterSupport::Unsupported),

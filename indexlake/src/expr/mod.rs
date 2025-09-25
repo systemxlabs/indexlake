@@ -225,7 +225,7 @@ impl Expr {
         }
     }
 
-    pub fn as_literal(self) -> ILResult<Literal> {
+    pub fn as_literal(&self) -> ILResult<&Literal> {
         match self {
             Expr::Literal(literal) => Ok(literal),
             _ => Err(ILError::internal("Expr is not a literal")),

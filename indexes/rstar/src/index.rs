@@ -1,7 +1,8 @@
+use std::collections::HashSet;
+
 use indexlake::catalog::Scalar;
 use indexlake::expr::{Expr, Function};
 use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
-use indexlake::utils::build_row_id_array;
 use indexlake::{ILError, ILResult};
 use rstar::{AABB, RTree, RTreeObject};
 use uuid::Uuid;
@@ -37,41 +38,74 @@ impl Index for RStarIndex {
     }
 
     async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
-        let aabb = match &filters[0] {
-            Expr::Function(Function {
-                name,
-                args,
-                return_type: _,
-            }) => {
-                if name == "intersects" {
-                    let literal = args[1].clone().as_literal()?;
-                    let Scalar::Binary(Some(wkb)) = literal.value else {
-                        return Err(ILError::internal(
-                            "Intersects function must have a literal binary as the second argument",
-                        ));
-                    };
-                    let aabb = compute_aabb(&wkb, self.params.wkb_dialect)?;
-                    AABB::from_corners(
-                        [aabb.lower().x, aabb.lower().y],
-                        [aabb.upper().x, aabb.upper().y],
-                    )
-                } else {
-                    todo!()
-                }
-            }
-            _ => todo!(),
-        };
+        if filters.is_empty() {
+            return Ok(FilterIndexEntries {
+                row_ids: Vec::new(),
+            });
+        }
 
-        let selection = self.rtree.locate_in_envelope_intersecting(&aabb);
-        let row_ids = selection
+        let first_filter = &filters[0];
+        let mut row_ids = self
+            .apply_filter(first_filter)?
             .into_iter()
-            .map(|object| object.row_id)
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
 
-        let row_id_array = build_row_id_array(row_ids.iter())?;
+        for filter in &filters[1..] {
+            let filter_row_ids = self
+                .apply_filter(filter)?
+                .into_iter()
+                .collect::<HashSet<_>>();
+            row_ids.retain(|id| filter_row_ids.contains(id));
+        }
 
         Ok(FilterIndexEntries {
-            row_ids: row_id_array,
+            row_ids: row_ids.into_iter().collect(),
         })
     }
+}
+
+impl RStarIndex {
+    fn apply_filter(&self, filter: &Expr) -> ILResult<Vec<Uuid>> {
+        match filter {
+            Expr::Function(func) => {
+                if ["intersects", "st_intersects"]
+                    .contains(&func.name.to_ascii_lowercase().as_str())
+                {
+                    rtree_intersects(&self.rtree, func, &self.params)
+                } else {
+                    Err(ILError::not_supported(format!(
+                        "Not supported filter: {filter}"
+                    )))
+                }
+            }
+            _ => Err(ILError::not_supported(format!(
+                "Not supported filter: {filter}"
+            ))),
+        }
+    }
+}
+
+fn rtree_intersects(
+    rtree: &RTree<IndexTreeObject>,
+    func: &Function,
+    params: &RStarIndexParams,
+) -> ILResult<Vec<Uuid>> {
+    let literal = func.args[1].as_literal()?;
+    let Scalar::Binary(Some(wkb)) = &literal.value else {
+        return Err(ILError::internal(
+            "Intersects function must have a literal binary as the second argument",
+        ));
+    };
+    let aabb = compute_aabb(wkb, params.wkb_dialect)?;
+    let aabb = AABB::from_corners(
+        [aabb.lower().x, aabb.lower().y],
+        [aabb.upper().x, aabb.upper().y],
+    );
+
+    let selection = rtree.locate_in_envelope_intersecting(&aabb);
+    let row_ids = selection
+        .into_iter()
+        .map(|object| object.row_id)
+        .collect::<Vec<_>>();
+    Ok(row_ids)
 }

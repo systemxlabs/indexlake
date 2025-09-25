@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::ILResult;
 use crate::expr::Expr;
 use crate::storage::{InputFile, OutputFile};
-use arrow::array::{FixedSizeBinaryArray, RecordBatch};
+use arrow::array::RecordBatch;
 use std::any::Any;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -76,7 +76,7 @@ pub struct RowIdScore {
 
 #[derive(Debug, Clone)]
 pub struct FilterIndexEntries {
-    pub row_ids: FixedSizeBinaryArray,
+    pub row_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy)]
