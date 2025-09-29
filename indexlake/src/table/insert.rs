@@ -22,6 +22,7 @@ pub struct TableInsertion {
     pub data: Vec<RecordBatch>,
     pub force_inline: bool,
     pub try_dump: bool,
+    pub ignore_row_id: bool,
 }
 
 impl TableInsertion {
@@ -30,6 +31,7 @@ impl TableInsertion {
             data,
             force_inline: false,
             try_dump: true,
+            ignore_row_id: true,
         }
     }
 

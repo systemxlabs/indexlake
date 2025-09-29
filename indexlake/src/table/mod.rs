@@ -59,8 +59,12 @@ impl Table {
     }
 
     pub async fn insert(&self, insert: TableInsertion) -> ILResult<()> {
-        let rewritten_batches =
-            check_and_rewrite_insert_batches(&insert.data, &self.schema, &self.field_records)?;
+        let rewritten_batches = check_and_rewrite_insert_batches(
+            &insert.data,
+            self.schema.clone(),
+            &self.field_records,
+            insert.ignore_row_id,
+        )?;
         let total_rows = rewritten_batches
             .iter()
             .map(|batch| batch.num_rows())
@@ -337,10 +341,15 @@ impl Default for TableConfig {
 
 pub fn check_and_rewrite_insert_batches(
     batches: &[RecordBatch],
-    table_schema: &Schema,
+    table_schema: SchemaRef,
     field_records: &[FieldRecord],
+    ignore_row_id: bool,
 ) -> ILResult<Vec<RecordBatch>> {
-    let expected_schema = schema_without_row_id(table_schema);
+    let expected_schema = if ignore_row_id {
+        Arc::new(schema_without_row_id(&table_schema))
+    } else {
+        table_schema
+    };
     let field_name_to_default_value = field_records
         .iter()
         .filter(|record| record.default_value.is_some())
@@ -353,7 +362,6 @@ pub fn check_and_rewrite_insert_batches(
 
         let mut fields = Vec::with_capacity(expected_schema.fields().len());
         let mut arrays = Vec::with_capacity(expected_schema.fields().len());
-        let mut accessed_batch_field_count = 0;
 
         for table_field in expected_schema.fields() {
             let table_field_name = table_field.name();
@@ -368,7 +376,6 @@ pub fn check_and_rewrite_insert_batches(
 
                 fields.push(batch_field);
                 arrays.push(batch.column(batch_field_idx).clone());
-                accessed_batch_field_count += 1;
             } else if let Some(default_value) = field_name_to_default_value.get(table_field_name) {
                 fields.push(table_field.clone());
                 arrays.push(default_value.to_array_of_size(batch.num_rows())?);
@@ -379,19 +386,15 @@ pub fn check_and_rewrite_insert_batches(
             }
         }
 
-        if accessed_batch_field_count != batch.num_columns() {
-            return Err(ILError::invalid_input(format!(
-                "Invalid batch schema: {batch_schema}, expected schema: {expected_schema}",
-            )));
+        if ignore_row_id {
+            fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
+
+            let row_ids = (0..batch.num_rows())
+                .map(|_| Uuid::now_v7().into_bytes())
+                .collect::<Vec<_>>();
+            let row_id_array = build_row_id_array(row_ids.into_iter())?;
+            arrays.insert(0, Arc::new(row_id_array) as ArrayRef);
         }
-
-        fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
-
-        let row_ids = (0..batch.num_rows())
-            .map(|_| Uuid::now_v7().into_bytes())
-            .collect::<Vec<_>>();
-        let row_id_array = build_row_id_array(row_ids.into_iter())?;
-        arrays.insert(0, Arc::new(row_id_array) as ArrayRef);
 
         let rewritten_batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)?;
         rewritten_batches.push(rewritten_batch);

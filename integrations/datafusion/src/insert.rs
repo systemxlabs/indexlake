@@ -40,11 +40,14 @@ impl IndexLakeInsertExec {
             }
         }
 
-        let input_schema = input.schema();
-        let input_schema_without_row_id = Arc::new(schema_without_row_id(&input_schema));
-        let empty_batch = RecordBatch::new_empty(input_schema_without_row_id);
-        check_and_rewrite_insert_batches(&[empty_batch], &table.schema, &table.field_records)
-            .map_err(|e| DataFusionError::Plan(e.to_string()))?;
+        let empty_batch = RecordBatch::new_empty(input.schema());
+        check_and_rewrite_insert_batches(
+            &[empty_batch],
+            table.schema.clone(),
+            &table.field_records,
+            true,
+        )
+        .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let cache = PlanProperties::new(
             EquivalenceProperties::new(make_count_schema()),
@@ -115,12 +118,8 @@ impl ExecutionPlan for IndexLakeInsertExec {
 
             let mut count = 0u64;
             while let Some(batch) = input_stream.next().await {
-                let mut batch = batch?;
+                let batch = batch?;
                 count += batch.num_rows() as u64;
-
-                if let Ok(index) = batch.schema().index_of(INTERNAL_ROW_ID_FIELD_NAME) {
-                    batch.remove_column(index);
-                }
 
                 table
                     .insert(TableInsertion::new(vec![batch]))

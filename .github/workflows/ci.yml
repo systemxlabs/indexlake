@@ -13,11 +13,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
-
       - name: Run cargo check
         run: cargo check --workspace
 
@@ -32,11 +27,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
-
       - name: Run cargo test
         run: cargo test --all-features
 
@@ -48,10 +38,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+      - name: Install rustfmt and clippy
+        run: rustup component add rustfmt clippy
 
       - name: Run cargo fmt
         run: cargo fmt --all --check
