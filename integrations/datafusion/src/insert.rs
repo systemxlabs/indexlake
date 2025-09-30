@@ -13,9 +13,7 @@ use datafusion::physical_plan::{
     PlanProperties,
 };
 use futures::StreamExt;
-use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
 use indexlake::table::{Table, TableInsertion, check_and_rewrite_insert_batches};
-use indexlake::utils::schema_without_row_id;
 
 #[derive(Debug)]
 pub struct IndexLakeInsertExec {
