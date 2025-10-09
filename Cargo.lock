@@ -2667,6 +2667,7 @@ dependencies = [
  "futures",
  "geo",
  "geozero",
+ "hex",
  "indexlake",
  "indexlake-catalog-postgres",
  "indexlake-catalog-sqlite",

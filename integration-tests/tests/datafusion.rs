@@ -11,7 +11,9 @@ use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{TableConfig, TableCreation};
 use indexlake_datafusion::{IndexLakePhysicalCodec, IndexLakeTable};
 use indexlake_integration_tests::data::prepare_simple_testing_table;
-use indexlake_integration_tests::utils::{datafusion_insert, datafusion_scan, sort_record_batches};
+use indexlake_integration_tests::utils::{
+    datafusion_insert, datafusion_scan, read_first_row_id_bytes_from_table, sort_record_batches,
+};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
@@ -147,6 +149,51 @@ async fn datafusion_scan_with_filters(
 | Charlie | 22  |
 | David   | 23  |
 +---------+-----+"#,
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn datafusion_scan_with_row_id_filter(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let first_row_id_bytes = read_first_row_id_bytes_from_table(&table).await?;
+
+    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let session = SessionContext::new();
+    session.register_table("indexlake_table", Arc::new(df_table))?;
+
+    let table_str = datafusion_scan(
+        &session,
+        &format!(
+            "SELECT * FROM indexlake_table where _indexlake_row_id = X'{}'",
+            hex::encode(first_row_id_bytes)
+        ),
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| Alice | 20  |
++-------+-----+"#,
     );
 
     Ok(())

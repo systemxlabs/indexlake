@@ -26,6 +26,7 @@ env_logger = { workspace = true }
 futures = { workspace = true }
 geo = { workspace = true }
 geozero = { workspace = true, features = ["with-wkb"] }
+hex = { workspace = true }
 opendal = { workspace = true, features = ["services-fs", "services-s3"] }
 rstest = { workspace = true }
 rusqlite = { workspace = true, features = ["bundled"] }
