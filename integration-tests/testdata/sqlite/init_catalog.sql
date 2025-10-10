@@ -1,6 +1,6 @@
 CREATE TABLE indexlake_namespace (
     namespace_id BLOB PRIMARY KEY,
-    namespace_name VARCHAR NOT NULL
+    namespace_name VARCHAR NOT NULL UNIQUE
 );
 
 CREATE TABLE indexlake_table (
@@ -8,7 +8,8 @@ CREATE TABLE indexlake_table (
     table_name VARCHAR NOT NULL,
     namespace_id BLOB NOT NULL,
     config VARCHAR NOT NULL,
-    schema_metadata VARCHAR NOT NULL
+    schema_metadata VARCHAR NOT NULL,
+    UNIQUE (namespace_id, table_name)
 );
 
 CREATE TABLE indexlake_field (

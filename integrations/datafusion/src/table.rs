@@ -13,6 +13,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::Expr;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
+use indexlake::utils::schema_without_row_id;
 use log::warn;
 
 use crate::{
@@ -25,6 +26,7 @@ pub struct IndexLakeTable {
     table: Arc<Table>,
     partition_count: usize,
     column_defaults: HashMap<String, Expr>,
+    hide_row_id: bool,
     concurrency: Option<usize>,
 }
 
@@ -44,12 +46,18 @@ impl IndexLakeTable {
             table,
             partition_count: num_cpus::get(),
             column_defaults,
+            hide_row_id: false,
             concurrency: None,
         })
     }
 
     pub fn with_partition_count(mut self, partition_count: usize) -> Self {
         self.partition_count = partition_count;
+        self
+    }
+
+    pub fn with_hide_row_id(mut self, hide_row_id: bool) -> Self {
+        self.hide_row_id = hide_row_id;
         self
     }
 
@@ -66,7 +74,11 @@ impl TableProvider for IndexLakeTable {
     }
 
     fn schema(&self) -> SchemaRef {
-        self.table.schema.clone()
+        if self.hide_row_id {
+            Arc::new(schema_without_row_id(&self.table.schema))
+        } else {
+            self.table.schema.clone()
+        }
     }
 
     fn table_type(&self) -> TableType {
@@ -99,12 +111,21 @@ impl TableProvider for IndexLakeTable {
                 .map_err(|e| DataFusionError::Internal(e.to_string()))?;
             Some(Arc::new(records))
         };
+
+        let il_projection = if let Some(df_projection) = projection
+            && self.hide_row_id
+        {
+            Some(df_projection.iter().map(|i| i + 1).collect::<Vec<_>>())
+        } else {
+            projection.cloned()
+        };
+
         let exec = IndexLakeScanExec::try_new(
             self.table.clone(),
             self.partition_count,
             data_files,
             self.concurrency,
-            projection.cloned(),
+            il_projection,
             filters.to_vec(),
             limit,
         )?;
