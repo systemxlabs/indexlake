@@ -68,6 +68,43 @@ async fn create_table(
 }
 
 #[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() })]
+#[case(async { catalog_postgres().await }, async { storage_s3().await })]
+#[tokio::test(flavor = "multi_thread")]
+async fn create_table_with_row_id_field(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<Storage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![
+        INTERNAL_ROW_ID_FIELD_REF.clone(),
+        Arc::new(Field::new("name", DataType::Utf8, false)),
+    ]));
+
+    let table_creation = TableCreation {
+        namespace_name: namespace_name,
+        table_name: uuid::Uuid::new_v4().to_string(),
+        schema: table_schema,
+        ..Default::default()
+    };
+
+    let res = client.create_table(table_creation).await;
+    assert!(res.is_err());
+
+    Ok(())
+}
+
+#[rstest::rstest]
 #[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]

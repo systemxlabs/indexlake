@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
+use arrow_schema::Schema;
 use futures::StreamExt;
 use uuid::Uuid;
 
@@ -22,6 +23,19 @@ pub struct TableCreation {
     pub default_values: HashMap<String, Scalar>,
     pub config: TableConfig,
     pub if_not_exists: bool,
+}
+
+impl Default for TableCreation {
+    fn default() -> Self {
+        Self {
+            namespace_name: String::default(),
+            table_name: String::default(),
+            schema: Arc::new(Schema::empty()),
+            default_values: HashMap::default(),
+            config: TableConfig::default(),
+            if_not_exists: false,
+        }
+    }
 }
 
 pub(crate) async fn process_create_table(

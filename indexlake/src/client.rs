@@ -1,7 +1,10 @@
 use arrow::datatypes::Schema;
 use uuid::Uuid;
 
-use crate::catalog::{Catalog, CatalogHelper, INTERNAL_ROW_ID_FIELD_REF, TransactionHelper};
+use crate::catalog::{
+    Catalog, CatalogHelper, INTERNAL_ROW_ID_FIELD_NAME, INTERNAL_ROW_ID_FIELD_REF,
+    TransactionHelper,
+};
 use crate::index::{IndexDefinition, IndexKind, IndexManager};
 use crate::storage::Storage;
 use crate::table::{Table, TableCreation, process_create_table};
@@ -67,6 +70,15 @@ impl Client {
     }
 
     pub async fn create_table(&self, table_creation: TableCreation) -> ILResult<Uuid> {
+        if table_creation
+            .schema
+            .field_with_name(INTERNAL_ROW_ID_FIELD_NAME)
+            .is_ok()
+        {
+            return Err(ILError::invalid_input(format!(
+                "Schema contains system column: {INTERNAL_ROW_ID_FIELD_NAME}"
+            )));
+        }
         let mut tx_helper = self.transaction_helper().await?;
         let table_id = process_create_table(&mut tx_helper, table_creation.clone()).await?;
         tx_helper.commit().await?;
