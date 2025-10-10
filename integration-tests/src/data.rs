@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{
@@ -34,9 +33,8 @@ pub async fn prepare_simple_testing_table(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
         config: table_config,
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation).await?;
 
@@ -91,9 +89,8 @@ pub async fn prepare_simple_geom_table(client: &Client, format: DataFileFormat) 
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
         config: table_config,
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation).await?;
     let table = client.load_table(&namespace_name, &table_name).await?;
@@ -168,9 +165,8 @@ pub async fn prepare_btree_integer_table(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
         config: table_config,
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation).await?;
     let table = client.load_table(&namespace_name, &table_name).await?;
@@ -211,9 +207,8 @@ pub async fn prepare_btree_string_table(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
         config: table_config,
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation).await?;
     let table = client.load_table(&namespace_name, &table_name).await?;
@@ -262,9 +257,8 @@ pub async fn prepare_simple_vector_table(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
         config: table_config,
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation).await?;
 

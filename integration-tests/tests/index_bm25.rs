@@ -55,9 +55,8 @@ async fn create_bm25_index(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
         config: table_config,
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation).await?;
 

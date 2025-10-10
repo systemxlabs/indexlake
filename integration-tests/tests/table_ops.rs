@@ -44,9 +44,7 @@ async fn create_table(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: expected_schema.clone(),
-        default_values: HashMap::new(),
-        config: TableConfig::default(),
-        if_not_exists: false,
+        ..Default::default()
     };
 
     let expected_table_id = client.create_table(table_creation).await?;
@@ -71,7 +69,7 @@ async fn create_table(
 #[case(async { catalog_sqlite() }, async { storage_fs() })]
 #[case(async { catalog_postgres().await }, async { storage_s3().await })]
 #[tokio::test(flavor = "multi_thread")]
-async fn create_table_with_row_id_field(
+async fn create_table_with_invalid_schema(
     #[future(awt)]
     #[case]
     catalog: Arc<dyn Catalog>,
@@ -86,18 +84,26 @@ async fn create_table_with_row_id_field(
     let namespace_name = uuid::Uuid::new_v4().to_string();
     client.create_namespace(&namespace_name, true).await?;
 
-    let table_schema = Arc::new(Schema::new(vec![
+    let schema_with_row_id = Arc::new(Schema::new(vec![
         INTERNAL_ROW_ID_FIELD_REF.clone(),
         Arc::new(Field::new("name", DataType::Utf8, false)),
     ]));
-
     let table_creation = TableCreation {
-        namespace_name: namespace_name,
+        namespace_name: namespace_name.clone(),
         table_name: uuid::Uuid::new_v4().to_string(),
-        schema: table_schema,
+        schema: schema_with_row_id,
         ..Default::default()
     };
+    let res = client.create_table(table_creation).await;
+    assert!(res.is_err());
 
+    let schema_empty = Arc::new(Schema::empty());
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: uuid::Uuid::new_v4().to_string(),
+        schema: schema_empty,
+        ..Default::default()
+    };
     let res = client.create_table(table_creation).await;
     assert!(res.is_err());
 
@@ -220,9 +226,8 @@ async fn table_data_types(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
         config: table_config,
-        if_not_exists: false,
+        ..Default::default()
     };
 
     client.create_table(table_creation).await?;
@@ -426,9 +431,7 @@ async fn duplicated_table_name(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: expected_schema.clone(),
-        default_values: HashMap::new(),
-        config: TableConfig::default(),
-        if_not_exists: false,
+        ..Default::default()
     };
 
     client.create_table(table_creation.clone()).await?;
@@ -469,8 +472,7 @@ async fn create_table_with_invalid_column_default_value(
         table_name: table_name.clone(),
         schema: expected_schema.clone(),
         default_values: HashMap::from([("id".to_string(), indexlake::catalog::Scalar::from(1i32))]),
-        config: TableConfig::default(),
-        if_not_exists: false,
+        ..Default::default()
     };
 
     let res = client.create_table(table_creation.clone()).await;
@@ -541,9 +543,7 @@ async fn drop_table(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: table_schema.clone(),
-        default_values: HashMap::new(),
-        config: TableConfig::default(),
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation.clone()).await?;
 
@@ -563,12 +563,8 @@ async fn drop_table(
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     table.drop().await?;
-    assert!(
-        client
-            .load_table(&namespace_name, &table_name)
-            .await
-            .is_err()
-    );
+    let res = client.load_table(&namespace_name, &table_name).await;
+    assert!(res.is_err());
 
     client.create_table(table_creation).await?;
     let table = client.load_table(&namespace_name, &table_name).await?;
