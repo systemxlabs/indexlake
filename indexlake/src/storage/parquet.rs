@@ -17,7 +17,7 @@ use parquet::file::properties::{WriterProperties, WriterVersion};
 use uuid::Uuid;
 
 use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_REF};
-use crate::expr::{Expr, ExprPredicate};
+use crate::expr::{Expr, ExprPredicate, visited_columns};
 use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
 use crate::utils::{
     array_to_uuids, build_projection_from_condition, build_row_id_array,
@@ -124,7 +124,20 @@ pub(crate) async fn read_parquet_file_by_record(
     let arrow_predicate_opt = if filters.is_empty() {
         None
     } else {
-        Some(ExprPredicate::try_new(filters, projection_mask.clone())?)
+        let visited_columns = filters
+            .iter()
+            .map(|expr| visited_columns(expr))
+            .flatten()
+            .collect::<HashSet<_>>();
+        let mut predicate_projection = Vec::new();
+        for visited_column in visited_columns {
+            let index = table_schema.index_of(&visited_column)?;
+            predicate_projection.push(index);
+        }
+        let parquet_schema = ArrowSchemaConverter::new().convert(table_schema)?;
+        let predicate_projection_mask =
+            ProjectionMask::roots(&parquet_schema, predicate_projection);
+        Some(ExprPredicate::try_new(filters, predicate_projection_mask)?)
     };
 
     let input_file = storage.open_file(&data_file_record.relative_path).await?;

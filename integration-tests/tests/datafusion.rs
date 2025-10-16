@@ -246,6 +246,46 @@ async fn datafusion_scan_with_row_id_filter(
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
 #[tokio::test(flavor = "multi_thread")]
+async fn datafusion_scan_with_projection_filter(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let session = SessionContext::new();
+    session.register_table("indexlake_table", Arc::new(df_table))?;
+    let table_str = datafusion_scan(
+        &session,
+        "SELECT _indexlake_row_id, name FROM indexlake_table where age > 21",
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+---------+
+| name    |
++---------+
+| Charlie |
+| David   |
++---------+"#,
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
 async fn datafusion_scan_with_limit(
     #[future(awt)]
     #[case]

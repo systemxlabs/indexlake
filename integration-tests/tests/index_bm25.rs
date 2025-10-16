@@ -8,7 +8,6 @@ use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::RecordBatch;
