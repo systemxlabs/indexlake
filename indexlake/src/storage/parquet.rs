@@ -126,8 +126,7 @@ pub(crate) async fn read_parquet_file_by_record(
     } else {
         let visited_columns = filters
             .iter()
-            .map(|expr| visited_columns(expr))
-            .flatten()
+            .flat_map(visited_columns)
             .collect::<HashSet<_>>();
         let mut predicate_projection = Vec::new();
         for visited_column in visited_columns {
