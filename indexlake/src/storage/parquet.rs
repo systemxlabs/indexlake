@@ -12,7 +12,7 @@ use parquet::arrow::async_writer::AsyncFileWriter;
 use parquet::arrow::{
     ArrowSchemaConverter, AsyncArrowWriter, ParquetRecordBatchStreamBuilder, ProjectionMask,
 };
-use parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader};
+use parquet::file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataReader};
 use parquet::file::properties::{WriterProperties, WriterVersion};
 use uuid::Uuid;
 
@@ -48,9 +48,9 @@ impl AsyncFileReader for InputFile {
         Box::pin(async {
             let reader = ParquetMetaDataReader::new()
                 .with_prefetch_hint(None)
-                .with_column_indexes(false)
-                .with_page_indexes(false)
-                .with_offset_indexes(false);
+                .with_column_index_policy(PageIndexPolicy::Skip)
+                .with_page_index_policy(PageIndexPolicy::Skip)
+                .with_offset_index_policy(PageIndexPolicy::Skip);
             let size = self
                 .file_size_bytes()
                 .await

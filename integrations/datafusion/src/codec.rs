@@ -11,6 +11,7 @@ use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_expr::LexOrdering;
 use datafusion::physical_plan::ExecutionPlan;
+use datafusion::prelude::SessionContext;
 use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
 use datafusion_proto::logical_plan::from_proto::parse_exprs;
 use datafusion_proto::logical_plan::to_proto::serialize_exprs;
@@ -110,7 +111,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     .map(|sort_exprs| {
                         let sort_exprs = parse_physical_sort_exprs(
                             sort_exprs.physical_sort_expr_nodes.as_slice(),
-                            registry,
+                            &SessionContext::new(),
                             &schema,
                             self,
                         )?;
