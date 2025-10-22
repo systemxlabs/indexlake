@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use arrow::array::{FixedSizeBinaryArray, RecordBatch};
+use arrow::array::RecordBatch;
 use arrow::datatypes::{DataType, Schema, SchemaRef};
 use futures::StreamExt;
 use tokio::task::JoinHandle;
@@ -13,7 +13,9 @@ use crate::catalog::{
     rows_to_record_batch,
 };
 use crate::expr::Expr;
-use crate::storage::{Storage, find_matched_row_ids_from_data_file};
+use crate::storage::{
+    Storage, find_matched_row_ids_from_data_file, read_row_id_array_from_data_file,
+};
 use crate::table::Table;
 
 pub(crate) async fn process_delete_by_condition(
@@ -104,17 +106,19 @@ pub(crate) async fn delete_data_file_rows_by_condition(
 
 pub(crate) async fn process_delete_by_row_id_condition(
     tx_helper: &mut TransactionHelper,
-    table_id: &Uuid,
-    table_schema: &SchemaRef,
+    table: &Table,
     row_id_condition: &Expr,
 ) -> ILResult<()> {
-    delete_inline_rows(tx_helper, table_id, table_schema, row_id_condition).await?;
+    delete_inline_rows(tx_helper, &table.table_id, &table.schema, row_id_condition).await?;
 
-    let data_file_records = tx_helper.get_data_files(table_id).await?;
+    let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
     for mut data_file_record in data_file_records {
-        // We need row index to update validity, so we need to get all row ids
-        let row_ids = data_file_record.row_ids;
-        let row_id_array = FixedSizeBinaryArray::try_from_iter(row_ids.into_iter())?;
+        let row_id_array = read_row_id_array_from_data_file(
+            &table.storage,
+            &data_file_record.relative_path,
+            data_file_record.format,
+        )
+        .await?;
 
         let batch = RecordBatch::try_new(
             Arc::new(Schema::new(vec![INTERNAL_ROW_ID_FIELD_REF.clone()])),

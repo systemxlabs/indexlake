@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, RecordBatch, UInt64Array};
+use arrow::array::{ArrayRef, FixedSizeBinaryArray, RecordBatch, UInt64Array};
 use arrow::datatypes::{Schema, SchemaRef};
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
@@ -232,4 +232,37 @@ pub(crate) async fn find_matched_row_ids_from_parquet_file(
         matched_row_ids.extend(row_ids);
     }
     Ok(matched_row_ids)
+}
+
+pub(crate) async fn read_row_id_array_from_parquet(
+    storage: &Storage,
+    relative_path: &str,
+) -> ILResult<FixedSizeBinaryArray> {
+    let input_file = storage.open_file(relative_path).await?;
+    let arrow_reader_builder = ParquetRecordBatchStreamBuilder::new(input_file).await?;
+    let parquet_schema = arrow_reader_builder.parquet_schema();
+
+    let projection_mask = ProjectionMask::roots(parquet_schema, [0]);
+
+    let stream = arrow_reader_builder
+        .with_projection(projection_mask)
+        .build()?
+        .map_err(ILError::from);
+
+    let batches = stream.try_collect::<Vec<_>>().await?;
+
+    let arrays = batches
+        .iter()
+        .map(|b| b.column(0).as_ref())
+        .collect::<Vec<_>>();
+    let array = arrow::compute::concat(&arrays)?;
+
+    let array = array
+        .as_any()
+        .downcast_ref::<FixedSizeBinaryArray>()
+        .ok_or_else(|| {
+            ILError::internal("Can not downcast row id array to FixedSizeBinaryArray")
+        })?;
+
+    Ok(array.clone())
 }

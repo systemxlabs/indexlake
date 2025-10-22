@@ -2,6 +2,7 @@ mod fs;
 mod parquet;
 mod s3;
 
+use arrow::array::FixedSizeBinaryArray;
 pub use opendal::services::S3Config;
 pub(crate) use parquet::*;
 use uuid::Uuid;
@@ -276,6 +277,18 @@ pub(crate) async fn find_matched_row_ids_from_data_file(
                 data_file_record,
             )
             .await
+        }
+    }
+}
+
+pub(crate) async fn read_row_id_array_from_data_file(
+    storage: &Storage,
+    relative_path: &str,
+    format: DataFileFormat,
+) -> ILResult<FixedSizeBinaryArray> {
+    match format {
+        DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
+            read_row_id_array_from_parquet(storage, relative_path).await
         }
     }
 }
