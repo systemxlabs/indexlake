@@ -50,13 +50,15 @@ impl TransactionHelper {
     pub(crate) async fn update_data_file_rows_as_invalid(
         &mut self,
         mut data_file_record: DataFileRecord,
+        row_ids: &[Uuid],
         invalid_row_ids: &HashSet<Uuid>,
     ) -> ILResult<usize> {
         if invalid_row_ids.is_empty() {
             return Ok(1);
         }
 
-        for (i, row_id) in data_file_record.row_ids.iter().enumerate() {
+        // TODO accelerate this by binary search
+        for (i, row_id) in row_ids.iter().enumerate() {
             if invalid_row_ids.contains(row_id) {
                 data_file_record.validity[i] = false;
             }

@@ -11,9 +11,10 @@ use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_r
 use crate::expr::Expr;
 use crate::storage::{
     Storage, read_data_file_by_record, read_data_file_by_record_and_row_id_condition,
+    read_row_id_array_from_data_file,
 };
 use crate::table::{Table, process_insert_into_inline_rows, rebuild_inline_indexes};
-use crate::utils::extract_row_ids_from_record_batch;
+use crate::utils::{array_to_uuids, extract_row_ids_from_record_batch};
 use crate::{ILResult, RecordBatchStream};
 
 pub(crate) async fn process_update_by_condition(
@@ -126,8 +127,15 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
         let updated_batch = update_record_batch(&batch, set_map)?;
         process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
     }
+    let row_id_array = read_row_id_array_from_data_file(
+        &table.storage,
+        &data_file_record.relative_path,
+        data_file_record.format,
+    )
+    .await?;
+    let row_ids = array_to_uuids(Arc::new(row_id_array).as_ref())?;
     tx_helper
-        .update_data_file_rows_as_invalid(data_file_record, &updated_row_ids)
+        .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)
         .await?;
     Ok(())
 }
@@ -171,8 +179,16 @@ pub(crate) async fn update_data_file_rows_by_condition(
         process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
     }
 
+    let row_id_array = read_row_id_array_from_data_file(
+        &table.storage,
+        &data_file_record.relative_path,
+        data_file_record.format,
+    )
+    .await?;
+    let row_ids = array_to_uuids(Arc::new(row_id_array).as_ref())?;
+
     tx_helper
-        .update_data_file_rows_as_invalid(data_file_record, &updated_row_ids)
+        .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)
         .await?;
     Ok(())
 }

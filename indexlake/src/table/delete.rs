@@ -17,6 +17,7 @@ use crate::storage::{
     Storage, find_matched_row_ids_from_data_file, read_row_id_array_from_data_file,
 };
 use crate::table::Table;
+use crate::utils::array_to_uuids;
 
 pub(crate) async fn process_delete_by_condition(
     tx_helper: &mut TransactionHelper,
@@ -29,14 +30,28 @@ pub(crate) async fn process_delete_by_condition(
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
     for data_file_record in data_file_records {
+        let row_id_array = read_row_id_array_from_data_file(
+            &table.storage,
+            &data_file_record.relative_path,
+            data_file_record.format,
+        )
+        .await?;
+        let row_ids = array_to_uuids(Arc::new(row_id_array).as_ref())?;
+
         if let Some(matched_row_ids) = matched_data_file_row_ids.get(&data_file_record.data_file_id)
         {
             tx_helper
-                .update_data_file_rows_as_invalid(data_file_record, matched_row_ids)
+                .update_data_file_rows_as_invalid(data_file_record, &row_ids, matched_row_ids)
                 .await?;
         } else {
-            delete_data_file_rows_by_condition(tx_helper, table, condition, data_file_record)
-                .await?;
+            delete_data_file_rows_by_condition(
+                tx_helper,
+                table,
+                condition,
+                data_file_record,
+                &row_ids,
+            )
+            .await?;
         }
     }
     Ok(())
@@ -89,6 +104,7 @@ pub(crate) async fn delete_data_file_rows_by_condition(
     table: &Table,
     condition: &Expr,
     data_file_record: DataFileRecord,
+    row_ids: &[Uuid],
 ) -> ILResult<()> {
     let deleted_row_ids = find_matched_row_ids_from_data_file(
         &table.storage,
@@ -99,7 +115,7 @@ pub(crate) async fn delete_data_file_rows_by_condition(
     .await?;
 
     tx_helper
-        .update_data_file_rows_as_invalid(data_file_record, &deleted_row_ids)
+        .update_data_file_rows_as_invalid(data_file_record, row_ids, &deleted_row_ids)
         .await?;
     Ok(())
 }
