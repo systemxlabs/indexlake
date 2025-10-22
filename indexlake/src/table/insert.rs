@@ -458,7 +458,7 @@ pub(crate) async fn append_non_mergeable_index_builders(
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
 
     let row_stream = tx_helper
-        .scan_inline_rows(table_id, &catalog_schema, &[], None)
+        .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
         .await?;
     let mut inline_stream = row_stream.chunks(100).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;

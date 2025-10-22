@@ -2518,6 +2518,7 @@ dependencies = [
  "derive-with",
  "futures",
  "hex",
+ "itertools 0.14.0",
  "log",
  "num_cpus",
  "opendal",

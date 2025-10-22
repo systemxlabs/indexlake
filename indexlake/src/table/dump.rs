@@ -7,9 +7,10 @@ use log::{debug, error};
 use uuid::Uuid;
 
 use crate::catalog::{
-    Catalog, CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-    RowStream, TransactionHelper, rows_to_record_batch,
+    Catalog, CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME,
+    IndexFileRecord, InlineIndexRecord, RowStream, TransactionHelper, rows_to_record_batch,
 };
+use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
 use crate::table::{Table, TableConfig};
@@ -101,6 +102,7 @@ impl DumpTask {
                 &catalog_schema,
                 &[],
                 Some(self.table_config.inline_row_count_limit),
+                Some(col(INTERNAL_ROW_ID_FIELD_NAME)),
             )
             .await?;
 
@@ -249,7 +251,7 @@ pub(crate) async fn rebuild_inline_indexes(
     // append index builders
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
     let row_stream = tx_helper
-        .scan_inline_rows(table_id, &catalog_schema, &[], None)
+        .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
         .await?;
     let mut chunk_stream = row_stream.chunks(100);
     while let Some(row_chunk) = chunk_stream.next().await {

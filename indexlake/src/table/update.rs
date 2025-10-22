@@ -79,7 +79,7 @@ pub(crate) async fn update_inline_rows(
     } else {
         let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.schema)?);
         let row_stream = tx_helper
-            .scan_inline_rows(&table.table_id, &catalog_schema, &[], None)
+            .scan_inline_rows(&table.table_id, &catalog_schema, &[], None, None)
             .await?;
         let mut chunk_stream = row_stream.chunks(100);
         let mut updated_row_ids = Vec::new();

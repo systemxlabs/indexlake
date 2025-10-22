@@ -18,13 +18,13 @@ pub(crate) use update::*;
 use uuid::Uuid;
 
 use crate::catalog::{
-    Catalog, CatalogHelper, DataFileRecord, FieldRecord, INTERNAL_ROW_ID_FIELD_REF,
-    IndexFileRecord, Scalar, TransactionHelper,
+    Catalog, CatalogHelper, DataFileRecord, FieldRecord, INTERNAL_ROW_ID_FIELD_NAME,
+    INTERNAL_ROW_ID_FIELD_REF, IndexFileRecord, Scalar, TransactionHelper,
 };
 use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::{DataFileFormat, Storage};
-use crate::utils::{build_row_id_array, schema_without_row_id};
+use crate::utils::{build_row_id_array, schema_without_row_id, sort_record_batches};
 use crate::{ILError, ILResult, RecordBatchStream};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, SchemaRef};
@@ -59,7 +59,7 @@ impl Table {
     }
 
     pub async fn insert(&self, insert: TableInsertion) -> ILResult<()> {
-        let rewritten_batches = check_and_rewrite_insert_batches(
+        let mut rewritten_batches = check_and_rewrite_insert_batches(
             &insert.data,
             self.schema.clone(),
             &self.field_records,
@@ -71,6 +71,10 @@ impl Table {
             .sum::<usize>();
 
         if total_rows >= self.config.inline_row_count_limit && !insert.force_inline {
+            if !insert.ignore_row_id {
+                rewritten_batches =
+                    sort_record_batches(&rewritten_batches, INTERNAL_ROW_ID_FIELD_NAME)?;
+            }
             let mut tx_helper = self.transaction_helper().await?;
             process_bypass_insert(&mut tx_helper, self, &rewritten_batches).await?;
             tx_helper.commit().await?;

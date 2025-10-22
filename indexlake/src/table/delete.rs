@@ -57,7 +57,7 @@ pub(crate) async fn delete_inline_rows(
     } else {
         let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
         let row_stream = tx_helper
-            .scan_inline_rows(table_id, &catalog_schema, &[], None)
+            .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
             .await?;
         let mut chunk_stream = row_stream.chunks(100);
         let mut matched_row_ids = Vec::new();

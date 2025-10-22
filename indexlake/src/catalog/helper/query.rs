@@ -57,6 +57,7 @@ impl TransactionHelper {
         schema: &CatalogSchemaRef,
         filters: &[Expr],
         limit: Option<usize>,
+        order_by: Option<Expr>,
     ) -> ILResult<RowStream<'_>> {
         let filter_strs = filters
             .iter()
@@ -72,10 +73,17 @@ impl TransactionHelper {
         let limit_clause = limit
             .map(|limit| format!(" LIMIT {limit}"))
             .unwrap_or_default();
+
+        let order_by_clause = if let Some(expr) = order_by {
+            format!(" ORDER BY {}", expr.to_sql(self.database)?)
+        } else {
+            "".to_string()
+        };
+
         self.transaction
             .query(
                 &format!(
-                    "SELECT {}  FROM {}{where_clause}{limit_clause}",
+                    "SELECT {}  FROM {}{where_clause}{order_by_clause}{limit_clause}",
                     schema.select_items(self.database).join(", "),
                     inline_row_table_name(table_id),
                 ),

@@ -102,6 +102,31 @@ pub fn extract_row_ids_from_record_batch(record_batch: &RecordBatch) -> ILResult
     fixed_size_binary_array_to_uuids(&row_id_array)
 }
 
+pub fn sort_record_batches(batches: &[RecordBatch], sort_col: &str) -> ILResult<Vec<RecordBatch>> {
+    if batches.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // TODO not concat batches, this might lead arrow array overflow
+    let record = arrow::compute::concat_batches(&batches[0].schema(), batches)?;
+
+    let sort_col_idx = record.schema().index_of(sort_col)?;
+    let sort_array = record.column(sort_col_idx);
+
+    let indices = arrow::compute::sort_to_indices(sort_array, None, None)?;
+
+    let sorted_arrays: Vec<ArrayRef> = record
+        .columns()
+        .iter()
+        .map(|col| arrow::compute::take(col, &indices, None))
+        .collect::<arrow::error::Result<_>>()?;
+
+    let options = RecordBatchOptions::new().with_row_count(Some(record.num_rows()));
+    let batch = RecordBatch::try_new_with_options(record.schema(), sorted_arrays, &options)?;
+
+    Ok(vec![batch])
+}
+
 pub fn array_to_uuids(array: &dyn Array) -> ILResult<Vec<Uuid>> {
     let data_type = array.data_type();
     let fixed_size_binary_array = array.as_fixed_size_binary_opt().ok_or_else(|| {

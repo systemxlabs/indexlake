@@ -168,7 +168,7 @@ pub(crate) async fn process_create_index(
     // create inline index
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.schema)?);
     let row_stream = tx_helper
-        .scan_inline_rows(&table.table_id, &catalog_schema, &[], None)
+        .scan_inline_rows(&table.table_id, &catalog_schema, &[], None, None)
         .await?;
     let table_schema = table.schema.clone();
     let mut inline_stream = row_stream.chunks(100).map(move |rows| {
