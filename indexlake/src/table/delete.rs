@@ -146,7 +146,7 @@ pub(crate) async fn process_delete_by_row_id_condition(
             if let Some(v) = v
                 && v
             {
-                data_file_record.validity[i] = false;
+                data_file_record.validity.set(i, false);
             }
         }
 

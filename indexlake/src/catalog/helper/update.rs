@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::ILResult;
-use crate::catalog::{DataFileRecord, TransactionHelper, inline_row_table_name};
+use crate::catalog::{DataFileRecord, RowValidity, TransactionHelper, inline_row_table_name};
 use crate::expr::Expr;
 
 impl TransactionHelper {
@@ -35,13 +35,12 @@ impl TransactionHelper {
     pub(crate) async fn update_data_file_validity(
         &mut self,
         data_file_id: &Uuid,
-        validity: &[bool],
+        validity: &RowValidity,
     ) -> ILResult<usize> {
-        let validity_bytes = DataFileRecord::validity_to_bytes(validity);
         self.transaction
             .execute(&format!(
                 "UPDATE indexlake_data_file SET validity = {} WHERE data_file_id = {}",
-                self.database.sql_binary_literal(&validity_bytes),
+                self.database.sql_binary_literal(validity.bytes()),
                 self.database.sql_uuid_literal(data_file_id)
             ))
             .await
@@ -60,7 +59,7 @@ impl TransactionHelper {
         // TODO accelerate this by binary search
         for (i, row_id) in row_ids.iter().enumerate() {
             if invalid_row_ids.contains(row_id) {
-                data_file_record.validity[i] = false;
+                data_file_record.validity.set(i, false);
             }
         }
 

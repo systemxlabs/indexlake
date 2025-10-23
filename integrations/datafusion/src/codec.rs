@@ -18,7 +18,7 @@ use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use datafusion_proto::physical_plan::from_proto::parse_physical_sort_exprs;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_sort_exprs;
 use indexlake::Client;
-use indexlake::catalog::DataFileRecord;
+use indexlake::catalog::{DataFileRecord, RowValidity};
 use indexlake::storage::DataFileFormat;
 use indexlake::table::Table;
 use prost::Message;
@@ -335,7 +335,7 @@ fn serialize_data_files(
                     format: serialize_data_file_format(record.format),
                     relative_path: record.relative_path.clone(),
                     record_count: record.record_count,
-                    validity: record.validity.clone(),
+                    validity: record.validity.bytes().to_vec(),
                 });
             }
             Ok(Some(DataFiles {
@@ -363,7 +363,10 @@ fn parse_data_files(
                     format: parse_data_file_format(proto_data_file.format)?,
                     relative_path: proto_data_file.relative_path,
                     record_count: proto_data_file.record_count,
-                    validity: proto_data_file.validity,
+                    validity: RowValidity::from(
+                        proto_data_file.validity,
+                        proto_data_file.record_count as usize,
+                    ),
                 });
             }
             Ok(Some(Arc::new(records)))

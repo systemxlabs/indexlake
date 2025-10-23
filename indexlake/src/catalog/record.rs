@@ -181,12 +181,12 @@ pub struct DataFileRecord {
     pub format: DataFileFormat,
     pub relative_path: String,
     pub record_count: i64,
-    pub validity: Vec<bool>,
+    pub validity: RowValidity,
 }
 
 impl DataFileRecord {
     pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
-        let validity_bytes = Self::validity_to_bytes(&self.validity);
+        let validity_bytes = self.validity.bytes();
         format!(
             "({}, {}, '{}', '{}', {}, {})",
             database.sql_uuid_literal(&self.data_file_id),
@@ -194,15 +194,8 @@ impl DataFileRecord {
             self.format,
             self.relative_path,
             self.record_count,
-            database.sql_binary_literal(&validity_bytes),
+            database.sql_binary_literal(validity_bytes),
         )
-    }
-
-    pub(crate) fn validity_to_bytes(validity: &[bool]) -> Vec<u8> {
-        validity
-            .iter()
-            .flat_map(|valid| if *valid { vec![1u8] } else { vec![0u8] })
-            .collect::<Vec<_>>()
     }
 
     pub(crate) fn catalog_schema() -> CatalogSchema {
@@ -241,11 +234,8 @@ impl DataFileRecord {
         let relative_path = row.utf8_owned(3)?.expect("relative_path is not null");
         let record_count = row.int64(4)?.expect("record_count is not null");
 
-        let validity_bytes = row.binary(5)?.expect("validity is not null");
-        let mut validity = Vec::with_capacity(record_count as usize);
-        for byte in validity_bytes {
-            validity.push(*byte == 1u8);
-        }
+        let validity_bytes = row.binary_owned(5)?.expect("validity is not null");
+        let validity = RowValidity::from(validity_bytes, record_count as usize);
 
         Ok(DataFileRecord {
             data_file_id,
@@ -258,7 +248,7 @@ impl DataFileRecord {
     }
 
     pub(crate) fn valid_row_count(&self) -> usize {
-        self.validity.iter().filter(|valid| **valid).count()
+        self.validity.iter().filter(|valid| *valid).count()
     }
 
     pub(crate) fn row_ranges(&self) -> Vec<Range<usize>> {
@@ -266,7 +256,7 @@ impl DataFileRecord {
             .validity
             .iter()
             .enumerate()
-            .filter(|(_, valid)| **valid)
+            .filter(|(_, valid)| *valid)
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
 
@@ -288,7 +278,60 @@ impl DataFileRecord {
 
     pub(crate) fn row_selection(&self) -> RowSelection {
         let ranges = self.row_ranges();
-        RowSelection::from_consecutive_ranges(ranges.into_iter(), self.validity.len())
+        RowSelection::from_consecutive_ranges(ranges.into_iter(), self.record_count as usize)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RowValidity {
+    pub(crate) validity: Vec<u8>,
+    pub(crate) num_rows: usize,
+}
+
+impl RowValidity {
+    pub fn new(num_rows: usize) -> Self {
+        let num_bytes = num_rows.div_ceil(8);
+        let validity = vec![u8::MAX; num_bytes];
+        Self { validity, num_rows }
+    }
+
+    pub fn from(bytes: Vec<u8>, num_rows: usize) -> Self {
+        assert_eq!(bytes.len(), num_rows.div_ceil(8));
+        Self {
+            validity: bytes,
+            num_rows,
+        }
+    }
+
+    pub fn set(&mut self, row_idx: usize, valid: bool) {
+        assert!(row_idx < self.num_rows);
+
+        let byte_idx = row_idx / 8;
+        let bit_idx = row_idx % 8;
+
+        if valid {
+            self.validity[byte_idx] |= 1 << bit_idx;
+        } else {
+            self.validity[byte_idx] &= !(1 << bit_idx);
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+        self.validity
+            .iter()
+            .enumerate()
+            .flat_map(|(byte_idx, byte)| {
+                let bit_len = if byte_idx == self.validity.len() - 1 {
+                    self.num_rows % 8
+                } else {
+                    8
+                };
+                (0..bit_len).map(move |bit| (byte & (1 << bit)) != 0)
+            })
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.validity
     }
 }
 
@@ -437,5 +480,18 @@ impl InlineIndexRecord {
             index_id,
             index_data,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_row_validity() {
+        let mut row_validity = RowValidity::new(5);
+        row_validity.set(2, false);
+        let bool_vec = row_validity.iter().collect::<Vec<bool>>();
+        assert_eq!(bool_vec, vec![true, true, false, true, true])
     }
 }

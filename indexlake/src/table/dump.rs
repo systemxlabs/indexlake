@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::catalog::{
     Catalog, CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME,
-    IndexFileRecord, InlineIndexRecord, RowStream, TransactionHelper, rows_to_record_batch,
+    IndexFileRecord, InlineIndexRecord, RowStream, RowValidity, TransactionHelper,
+    rows_to_record_batch,
 };
 use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
@@ -158,7 +159,7 @@ impl DumpTask {
                 format: self.table_config.preferred_data_file_format,
                 relative_path: relative_path.clone(),
                 record_count: row_ids.len() as i64,
-                validity: vec![true; row_ids.len()],
+                validity: RowValidity::new(row_ids.len()),
             }])
             .await?;
 

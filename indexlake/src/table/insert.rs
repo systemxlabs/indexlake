@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     CatalogDatabase, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-    TransactionHelper, rows_to_record_batch,
+    RowValidity, TransactionHelper, rows_to_record_batch,
 };
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, build_parquet_writer};
@@ -156,7 +156,7 @@ pub(crate) async fn process_bypass_insert(
             format: table.config.preferred_data_file_format,
             relative_path: relative_path.clone(),
             record_count: record_count as i64,
-            validity: vec![true; record_count],
+            validity: RowValidity::new(record_count),
         }])
         .await?;
 
