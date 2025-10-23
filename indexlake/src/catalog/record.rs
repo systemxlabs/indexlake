@@ -181,26 +181,19 @@ pub struct DataFileRecord {
     pub format: DataFileFormat,
     pub relative_path: String,
     pub record_count: i64,
-    pub row_ids: Vec<Uuid>,
     pub validity: Vec<bool>,
 }
 
 impl DataFileRecord {
     pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
-        let row_ids_bytes = self
-            .row_ids
-            .iter()
-            .flat_map(|id| id.into_bytes())
-            .collect::<Vec<_>>();
         let validity_bytes = Self::validity_to_bytes(&self.validity);
         format!(
-            "({}, {}, '{}', '{}', {}, {}, {})",
+            "({}, {}, '{}', '{}', {}, {})",
             database.sql_uuid_literal(&self.data_file_id),
             database.sql_uuid_literal(&self.table_id),
             self.format,
             self.relative_path,
             self.record_count,
-            database.sql_binary_literal(&row_ids_bytes),
             database.sql_binary_literal(&validity_bytes),
         )
     }
@@ -219,7 +212,6 @@ impl DataFileRecord {
             Column::new("format", CatalogDataType::Utf8, false),
             Column::new("relative_path", CatalogDataType::Utf8, false),
             Column::new("record_count", CatalogDataType::Int64, false),
-            Column::new("row_ids", CatalogDataType::Binary, false),
             Column::new("validity", CatalogDataType::Binary, false),
         ])
     }
@@ -249,15 +241,7 @@ impl DataFileRecord {
         let relative_path = row.utf8_owned(3)?.expect("relative_path is not null");
         let record_count = row.int64(4)?.expect("record_count is not null");
 
-        let row_ids_bytes = row.binary(5)?.expect("row_ids is not null");
-        let row_ids_chunks = row_ids_bytes.chunks_exact(16);
-        let mut row_ids = Vec::with_capacity(record_count as usize);
-        for chunk in row_ids_chunks {
-            let row_id = Uuid::from_slice(chunk)?;
-            row_ids.push(row_id);
-        }
-
-        let validity_bytes = row.binary(6)?.expect("validity is not null");
+        let validity_bytes = row.binary(5)?.expect("validity is not null");
         let mut validity = Vec::with_capacity(record_count as usize);
         for byte in validity_bytes {
             validity.push(*byte == 1u8);
@@ -269,7 +253,6 @@ impl DataFileRecord {
             format,
             relative_path,
             record_count,
-            row_ids,
             validity,
         })
     }

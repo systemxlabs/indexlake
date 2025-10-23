@@ -158,7 +158,6 @@ impl DumpTask {
                 format: self.table_config.preferred_data_file_format,
                 relative_path: relative_path.clone(),
                 record_count: row_ids.len() as i64,
-                row_ids: row_ids.clone(),
                 validity: vec![true; row_ids.len()],
             }])
             .await?;

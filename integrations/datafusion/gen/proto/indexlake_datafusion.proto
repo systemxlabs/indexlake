@@ -53,8 +53,7 @@ message DataFile {
   DataFileFormat format = 3;
   string relative_path = 4;
   int64 record_count = 5;
-  repeated bytes row_ids = 6;
-  repeated bool validity = 7;
+  repeated bool validity = 6;
 }
 
 enum DataFileFormat {

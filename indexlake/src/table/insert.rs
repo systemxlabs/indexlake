@@ -156,7 +156,6 @@ pub(crate) async fn process_bypass_insert(
             format: table.config.preferred_data_file_format,
             relative_path: relative_path.clone(),
             record_count: record_count as i64,
-            row_ids,
             validity: vec![true; record_count],
         }])
         .await?;

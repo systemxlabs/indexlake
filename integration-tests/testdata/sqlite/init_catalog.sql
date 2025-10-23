@@ -32,7 +32,6 @@ CREATE TABLE indexlake_data_file (
     format VARCHAR NOT NULL,
     relative_path VARCHAR NOT NULL,
     record_count BIGINT NOT NULL,
-    row_ids BLOB NOT NULL,
     validity BLOB NOT NULL
 );
 

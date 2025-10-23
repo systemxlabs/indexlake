@@ -335,11 +335,6 @@ fn serialize_data_files(
                     format: serialize_data_file_format(record.format),
                     relative_path: record.relative_path.clone(),
                     record_count: record.record_count,
-                    row_ids: record
-                        .row_ids
-                        .iter()
-                        .map(|id| id.as_bytes().to_vec())
-                        .collect(),
                     validity: record.validity.clone(),
                 });
             }
@@ -368,15 +363,6 @@ fn parse_data_files(
                     format: parse_data_file_format(proto_data_file.format)?,
                     relative_path: proto_data_file.relative_path,
                     record_count: proto_data_file.record_count,
-                    row_ids: proto_data_file
-                        .row_ids
-                        .into_iter()
-                        .map(|id| {
-                            Uuid::from_slice(id.as_slice()).map_err(|e| {
-                                DataFusionError::Internal(format!("Failed to parse row id: {e:?}"))
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
                     validity: proto_data_file.validity,
                 });
             }
