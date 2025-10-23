@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, RecordBatch, UInt64Array};
+use datafusion::arrow::array::{ArrayRef, Int64Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::common::stats::Precision;
 use datafusion::error::DataFusionError;
@@ -114,10 +114,10 @@ impl ExecutionPlan for IndexLakeInsertExec {
                 }
             }
 
-            let mut count = 0u64;
+            let mut count = 0i64;
             while let Some(batch) = input_stream.next().await {
                 let batch = batch?;
-                count += batch.num_rows() as u64;
+                count += batch.num_rows() as i64;
 
                 table
                     .insert(TableInsertion::new(vec![batch]))
@@ -136,17 +136,17 @@ impl ExecutionPlan for IndexLakeInsertExec {
     }
 }
 
-fn make_result_batch(count: u64) -> Result<RecordBatch, DataFusionError> {
+fn make_result_batch(count: i64) -> Result<RecordBatch, DataFusionError> {
     let schema = make_count_schema();
-    let array = Arc::new(UInt64Array::from(vec![count])) as ArrayRef;
+    let array = Arc::new(Int64Array::from(vec![count])) as ArrayRef;
     let batch = RecordBatch::try_new(schema, vec![array])?;
     Ok(batch)
 }
 
-fn make_count_schema() -> SchemaRef {
+pub fn make_count_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![Field::new(
         "count",
-        DataType::UInt64,
+        DataType::Int64,
         false,
     )]))
 }
