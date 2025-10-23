@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{FixedSizeBinaryArray, Float64Array, RecordBatch};
@@ -259,8 +259,8 @@ async fn read_data_file_rows(
             RowLocation::DataFile(data_file_id) => {
                 data_file_row_ids
                     .entry(*data_file_id)
-                    .or_insert(HashSet::new())
-                    .insert(row_id_score.row_id);
+                    .or_insert(Vec::new())
+                    .push(row_id_score.row_id);
             }
         }
     }
@@ -279,7 +279,7 @@ async fn read_data_file_rows(
             data_file_record,
             projection.clone(),
             vec![],
-            Some(&row_ids),
+            Some(row_ids),
             1024,
         )
         .await?;

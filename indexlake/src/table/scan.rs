@@ -520,7 +520,7 @@ async fn index_scan_data_file(
         data_file_record,
         scan_projection,
         left_filters,
-        Some(&row_ids),
+        Some(row_ids.into_iter().collect()),
         scan_batch_size,
     )
     .await

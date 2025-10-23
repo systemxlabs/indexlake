@@ -1,10 +1,11 @@
 use arrow::compute::can_cast_types;
 use arrow::datatypes::DataType;
 use arrow_schema::Schema;
+use uuid::Uuid;
 
-use crate::catalog::Scalar;
+use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use crate::expr::like::Like;
-use crate::expr::{BinaryExpr, BinaryOp, Case, Cast, Expr, Function, Literal, TryCast};
+use crate::expr::{BinaryExpr, BinaryOp, Case, Cast, Expr, Function, InList, Literal, TryCast};
 use crate::{ILError, ILResult};
 
 impl Expr {
@@ -133,6 +134,20 @@ pub fn try_cast(expr: Expr, schema: &Schema, cast_type: DataType) -> ILResult<Ex
             "Unsupported TRY_CAST from {expr_type} to {cast_type}"
         )))
     }
+}
+
+pub fn row_ids_in_list_expr(row_ids: Vec<Uuid>) -> Expr {
+    let col = col(INTERNAL_ROW_ID_FIELD_NAME);
+    let mut list = Vec::new();
+    for row_id in row_ids {
+        let scalar = Scalar::FixedSizeBinary(16, Some(row_id.into_bytes().to_vec()));
+        list.push(lit(scalar));
+    }
+    Expr::InList(InList {
+        expr: Box::new(col),
+        list,
+        negated: false,
+    })
 }
 
 impl From<Scalar> for Expr {

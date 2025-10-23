@@ -9,10 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_record_batch};
 use crate::expr::Expr;
-use crate::storage::{
-    Storage, read_data_file_by_record, read_data_file_by_record_and_row_id_condition,
-    read_row_id_array_from_data_file,
-};
+use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{Table, process_insert_into_inline_rows, rebuild_inline_indexes};
 use crate::utils::{array_to_uuids, extract_row_ids_from_record_batch};
 use crate::{ILResult, RecordBatchStream};
@@ -147,27 +144,16 @@ pub(crate) async fn update_data_file_rows_by_condition(
     condition: &Expr,
     data_file_record: DataFileRecord,
 ) -> ILResult<()> {
-    let mut stream = if condition.only_visit_row_id_column() {
-        read_data_file_by_record_and_row_id_condition(
-            &table.storage,
-            &table.schema,
-            &data_file_record,
-            None,
-            condition,
-        )
-        .await?
-    } else {
-        read_data_file_by_record(
-            &table.storage,
-            &table.schema,
-            &data_file_record,
-            None,
-            vec![condition.clone()],
-            None,
-            1024,
-        )
-        .await?
-    };
+    let mut stream = read_data_file_by_record(
+        &table.storage,
+        &table.schema,
+        &data_file_record,
+        None,
+        vec![condition.clone()],
+        None,
+        1024,
+    )
+    .await?;
 
     let mut updated_row_ids = HashSet::new();
     while let Some(batch) = stream.next().await {
@@ -205,27 +191,16 @@ pub(crate) async fn parallel_find_matched_data_file_rows(
         let table_schema = table_schema.clone();
         let condition = condition.clone();
         let handle: JoinHandle<ILResult<(Uuid, RecordBatchStream)>> = tokio::spawn(async move {
-            let mut stream = if condition.only_visit_row_id_column() {
-                read_data_file_by_record_and_row_id_condition(
-                    &storage,
-                    &table_schema,
-                    &data_file_record,
-                    None,
-                    &condition,
-                )
-                .await?
-            } else {
-                read_data_file_by_record(
-                    &storage,
-                    &table_schema,
-                    &data_file_record,
-                    None,
-                    vec![condition],
-                    None,
-                    1024,
-                )
-                .await?
-            };
+            let mut stream = read_data_file_by_record(
+                &storage,
+                &table_schema,
+                &data_file_record,
+                None,
+                vec![condition],
+                None,
+                1024,
+            )
+            .await?;
 
             // prefetch record batch into memory
             let mut prefetch_row_count = 0;

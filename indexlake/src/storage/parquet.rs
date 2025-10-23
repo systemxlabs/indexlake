@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, FixedSizeBinaryArray, RecordBatch, UInt64Array};
+use arrow::array::FixedSizeBinaryArray;
 use arrow::datatypes::{Schema, SchemaRef};
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
@@ -16,13 +16,10 @@ use parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader};
 use parquet::file::properties::{WriterProperties, WriterVersion};
 use uuid::Uuid;
 
-use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_REF};
+use crate::catalog::DataFileRecord;
 use crate::expr::{Expr, ExprPredicate, visited_columns};
 use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
-use crate::utils::{
-    array_to_uuids, build_projection_from_condition, build_row_id_array,
-    extract_row_ids_from_record_batch,
-};
+use crate::utils::{build_projection_from_condition, extract_row_ids_from_record_batch};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 impl AsyncFileReader for InputFile {
@@ -110,7 +107,6 @@ pub(crate) async fn read_parquet_file_by_record(
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
     filters: Vec<Expr>,
-    row_ids: Option<&HashSet<Uuid>>,
     batch_size: usize,
 ) -> ILResult<RecordBatchStream> {
     let projection_mask = match projection {
@@ -148,58 +144,12 @@ pub(crate) async fn read_parquet_file_by_record(
     }
 
     let stream = arrow_reader_builder
-        .with_row_selection(data_file_record.row_selection(row_ids)?)
+        .with_row_selection(data_file_record.row_selection())
         .with_projection(projection_mask.clone())
         .with_batch_size(batch_size)
         .build()?
         .map_err(ILError::from);
     Ok(Box::pin(stream))
-}
-
-pub(crate) async fn read_parquet_file_by_record_and_row_id_condition(
-    storage: &Storage,
-    table_schema: &Schema,
-    data_file_record: &DataFileRecord,
-    projection: Option<Vec<usize>>,
-    row_id_condition: &Expr,
-) -> ILResult<RecordBatchStream> {
-    let valid_row_ids = data_file_record.valid_row_ids();
-    let valid_row_ids_array = Arc::new(build_row_id_array(valid_row_ids)?) as ArrayRef;
-
-    let schema = Arc::new(Schema::new(vec![INTERNAL_ROW_ID_FIELD_REF.clone()]));
-    let batch = RecordBatch::try_new(schema, vec![valid_row_ids_array.clone()])?;
-
-    let bool_array = row_id_condition.condition_eval(&batch)?;
-
-    let mut indices = Vec::new();
-    for (i, v) in bool_array.iter().enumerate() {
-        if let Some(v) = v
-            && v
-        {
-            indices.push(i as u64);
-        }
-    }
-    if indices.is_empty() {
-        return Ok(Box::pin(futures::stream::empty()));
-    }
-    let index_array = UInt64Array::from(indices);
-
-    let take_array = arrow::compute::take(valid_row_ids_array.as_ref(), &index_array, None)?;
-    let match_row_ids = array_to_uuids(&take_array)?
-        .into_iter()
-        .collect::<HashSet<_>>();
-
-    let stream = read_parquet_file_by_record(
-        storage,
-        table_schema,
-        data_file_record,
-        projection,
-        vec![],
-        Some(&match_row_ids),
-        1024,
-    )
-    .await?;
-    Ok(stream)
 }
 
 pub(crate) async fn find_matched_row_ids_from_parquet_file(
@@ -220,7 +170,6 @@ pub(crate) async fn find_matched_row_ids_from_parquet_file(
         data_file_record,
         Some(projection),
         vec![condition.clone()],
-        None,
         1024,
     )
     .await?;

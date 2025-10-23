@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 use arrow::datatypes::{DataType, Field};
@@ -278,29 +278,12 @@ impl DataFileRecord {
         self.validity.iter().filter(|valid| **valid).count()
     }
 
-    pub(crate) fn valid_row_ids(&self) -> impl Iterator<Item = Uuid> {
-        self.row_ids.iter().enumerate().filter_map(
-            |(i, id)| {
-                if self.validity[i] { Some(*id) } else { None }
-            },
-        )
-    }
-
-    pub(crate) fn row_ranges(
-        &self,
-        row_ids: Option<&HashSet<Uuid>>,
-    ) -> ILResult<Vec<Range<usize>>> {
+    pub(crate) fn row_ranges(&self) -> Vec<Range<usize>> {
         let offsets = self
             .validity
             .iter()
             .enumerate()
-            .filter(|(i, valid)| {
-                **valid
-                    && row_ids
-                        .as_ref()
-                        .map(|ids| ids.contains(&self.row_ids[*i]))
-                        .unwrap_or(true)
-            })
+            .filter(|(_, valid)| **valid)
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
 
@@ -317,15 +300,12 @@ impl DataFileRecord {
             ranges.push(current_offset..offsets[next_offset_idx - 1] + 1);
             offset_idx = next_offset_idx;
         }
-        Ok(ranges)
+        ranges
     }
 
-    pub(crate) fn row_selection(&self, row_ids: Option<&HashSet<Uuid>>) -> ILResult<RowSelection> {
-        let ranges = self.row_ranges(row_ids)?;
-        Ok(RowSelection::from_consecutive_ranges(
-            ranges.into_iter(),
-            self.validity.len(),
-        ))
+    pub(crate) fn row_selection(&self) -> RowSelection {
+        let ranges = self.row_ranges();
+        RowSelection::from_consecutive_ranges(ranges.into_iter(), self.validity.len())
     }
 }
 

@@ -8,7 +8,7 @@ pub(crate) use parquet::*;
 use uuid::Uuid;
 
 use crate::catalog::DataFileRecord;
-use crate::expr::Expr;
+use crate::expr::{Expr, row_ids_in_list_expr};
 use crate::storage::fs::FsStorage;
 use crate::storage::s3::S3Storage;
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -221,10 +221,14 @@ pub(crate) async fn read_data_file_by_record(
     table_schema: &Schema,
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
-    filters: Vec<Expr>,
-    row_ids: Option<&HashSet<Uuid>>,
+    mut filters: Vec<Expr>,
+    row_ids: Option<Vec<Uuid>>,
     batch_size: usize,
 ) -> ILResult<RecordBatchStream> {
+    if let Some(row_ids) = row_ids {
+        let row_id_filter = row_ids_in_list_expr(row_ids);
+        filters.push(row_id_filter);
+    }
     match data_file_record.format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
             read_parquet_file_by_record(
@@ -233,29 +237,7 @@ pub(crate) async fn read_data_file_by_record(
                 data_file_record,
                 projection,
                 filters,
-                row_ids,
                 batch_size,
-            )
-            .await
-        }
-    }
-}
-
-pub(crate) async fn read_data_file_by_record_and_row_id_condition(
-    storage: &Storage,
-    table_schema: &Schema,
-    data_file_record: &DataFileRecord,
-    projection: Option<Vec<usize>>,
-    row_id_condition: &Expr,
-) -> ILResult<RecordBatchStream> {
-    match data_file_record.format {
-        DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
-            read_parquet_file_by_record_and_row_id_condition(
-                storage,
-                table_schema,
-                data_file_record,
-                projection,
-                row_id_condition,
             )
             .await
         }
