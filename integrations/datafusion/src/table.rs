@@ -79,9 +79,9 @@ impl TableProvider for IndexLakeTable {
 
     fn schema(&self) -> SchemaRef {
         if self.hide_row_id {
-            Arc::new(schema_without_row_id(&self.table.schema))
+            Arc::new(schema_without_row_id(&self.table.output_schema))
         } else {
-            self.table.schema.clone()
+            self.table.output_schema.clone()
         }
     }
 
@@ -140,7 +140,7 @@ impl TableProvider for IndexLakeTable {
         &self,
         filters: &[&Expr],
     ) -> Result<Vec<TableProviderFilterPushDown>, DataFusionError> {
-        let df_schema = DFSchema::try_from(self.table.schema.clone())?;
+        let df_schema = DFSchema::try_from(self.table.output_schema.clone())?;
         let mut supports = Vec::with_capacity(filters.len());
         for filter in filters {
             let Ok(il_expr) = datafusion_expr_to_indexlake_expr(filter, &df_schema) else {
@@ -149,7 +149,7 @@ impl TableProvider for IndexLakeTable {
             };
             let support = self
                 .table
-                .supports_filter(&il_expr)
+                .supports_filter(il_expr.clone())
                 .map_err(|e| DataFusionError::Internal(e.to_string()))?;
             match support {
                 FilterSupport::Exact => supports.push(TableProviderFilterPushDown::Exact),
@@ -174,7 +174,7 @@ impl TableProvider for IndexLakeTable {
             Ok(row_count) => Some(Statistics {
                 num_rows: Precision::Exact(row_count),
                 total_byte_size: Precision::Absent,
-                column_statistics: Statistics::unknown_column(&self.table.schema),
+                column_statistics: Statistics::unknown_column(&self.table.output_schema),
             }),
             Err(e) => {
                 warn!(

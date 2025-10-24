@@ -45,7 +45,7 @@ impl IndexLakeScanExec {
         filters: Vec<Expr>,
         limit: Option<usize>,
     ) -> Result<Self, DataFusionError> {
-        let projected_schema = project_schema(&table.schema, projection.as_ref())?;
+        let projected_schema = project_schema(&table.output_schema, projection.as_ref())?;
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema),
             Partitioning::UnknownPartitioning(partition_count),
@@ -101,7 +101,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             )));
         }
 
-        let df_schema = DFSchema::try_from(self.table.schema.clone())?;
+        let df_schema = DFSchema::try_from(self.table.output_schema.clone())?;
         let il_filters = self
             .filters
             .iter()
@@ -217,7 +217,7 @@ impl DisplayAs for IndexLakeScanExec {
             self.table.namespace_name, self.table.table_name, self.partition_count
         )?;
         let projected_schema = self.schema();
-        if !schema_projection_equals(&projected_schema, &self.table.schema) {
+        if !schema_projection_equals(&projected_schema, &self.table.output_schema) {
             write!(
                 f,
                 ", projection={}",

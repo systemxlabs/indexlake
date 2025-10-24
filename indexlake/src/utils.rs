@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::iter::repeat_n;
 use std::sync::Arc;
 
@@ -216,4 +217,54 @@ pub fn deserialize_array(buf: &[u8], field: FieldRef) -> ILResult<ArrayRef> {
             .as_slice(),
     )?;
     Ok(array)
+}
+
+pub fn rewrite_batch_schema(
+    batch: &RecordBatch,
+    field_name_id_map: &HashMap<String, Uuid>,
+) -> ILResult<RecordBatch> {
+    let mut new_fields = Vec::new();
+    let batch_schema = batch.schema_ref();
+    for field in batch_schema.fields() {
+        if let Some(field_id) = field_name_id_map.get(field.name()) {
+            let new_field_name = hex::encode(field_id);
+            let new_field = field.as_ref().clone().with_name(new_field_name);
+            new_fields.push(Arc::new(new_field));
+        } else if field.name() == INTERNAL_ROW_ID_FIELD_NAME {
+            new_fields.push(field.clone());
+        } else {
+            return Err(ILError::invalid_input(format!("Invalid field {field}")));
+        }
+    }
+    let new_schema =
+        Arc::new(Schema::new(new_fields).with_metadata(batch_schema.metadata().clone()));
+    let new_batch = RecordBatch::try_new(new_schema, batch.columns().to_vec())?;
+    Ok(new_batch)
+}
+
+pub fn correct_batch_schema(
+    batch: &RecordBatch,
+    field_id_name_map: &HashMap<Uuid, String>,
+) -> ILResult<RecordBatch> {
+    let mut new_fields = Vec::new();
+    let batch_schema = batch.schema_ref();
+    for field in batch_schema.fields() {
+        if field.name() == INTERNAL_ROW_ID_FIELD_NAME {
+            new_fields.push(field.clone());
+        } else if let Ok(field_id) = Uuid::parse_str(field.name()) {
+            let Some(correct_field_name) = field_id_name_map.get(&field_id) else {
+                return Err(ILError::internal(format!(
+                    "Not found field name for field id {field_id}"
+                )));
+            };
+            let new_field = field.as_ref().clone().with_name(correct_field_name);
+            new_fields.push(Arc::new(new_field));
+        } else {
+            new_fields.push(field.clone());
+        }
+    }
+    let new_schema =
+        Arc::new(Schema::new(new_fields).with_metadata(batch_schema.metadata().clone()));
+    let new_batch = RecordBatch::try_new(new_schema, batch.columns().to_vec())?;
+    Ok(new_batch)
 }

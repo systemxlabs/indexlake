@@ -11,17 +11,42 @@ use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_r
 use crate::expr::Expr;
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{Table, process_insert_into_inline_rows, rebuild_inline_indexes};
-use crate::utils::{array_to_uuids, extract_row_ids_from_record_batch};
-use crate::{ILResult, RecordBatchStream};
+use crate::utils::{extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids};
+use crate::{ILError, ILResult, RecordBatchStream};
+
+#[derive(Debug)]
+pub struct TableUpdate {
+    pub set_map: HashMap<String, Expr>,
+    pub condition: Expr,
+}
+
+impl TableUpdate {
+    pub(crate) fn rewrite_columns(
+        mut self,
+        field_name_id_map: &HashMap<String, Uuid>,
+    ) -> ILResult<Self> {
+        let mut new_set_map = HashMap::with_capacity(self.set_map.len());
+        for (key, value) in self.set_map {
+            let Some(field_id) = field_name_id_map.get(&key) else {
+                return Err(ILError::invalid_input(format!("Not found field {key}")));
+            };
+            let new_value = value.rewrite_columns(field_name_id_map)?;
+            new_set_map.insert(hex::encode(field_id), new_value);
+        }
+        let new_condition = self.condition.rewrite_columns(field_name_id_map)?;
+        self.set_map = new_set_map;
+        self.condition = new_condition;
+        Ok(self)
+    }
+}
 
 pub(crate) async fn process_update_by_condition(
     tx_helper: &mut TransactionHelper,
     table: &Table,
-    set_map: HashMap<String, Expr>,
-    condition: &Expr,
+    update: TableUpdate,
     mut matched_data_file_rows: HashMap<Uuid, RecordBatchStream>,
 ) -> ILResult<()> {
-    let updated_row_count = update_inline_rows(tx_helper, table, &set_map, condition).await?;
+    let updated_row_count = update_inline_rows(tx_helper, table, &update).await?;
 
     // TODO this could be optimized into update_inline_rows function
     if updated_row_count != 0 {
@@ -41,7 +66,7 @@ pub(crate) async fn process_update_by_condition(
             update_data_file_rows_by_matched_rows(
                 tx_helper,
                 table,
-                &set_map,
+                &update.set_map,
                 stream,
                 data_file_record,
             )
@@ -50,8 +75,8 @@ pub(crate) async fn process_update_by_condition(
             update_data_file_rows_by_condition(
                 tx_helper,
                 table,
-                &set_map,
-                condition,
+                &update.set_map,
+                &update.condition,
                 data_file_record,
             )
             .await?;
@@ -64,15 +89,14 @@ pub(crate) async fn process_update_by_condition(
 pub(crate) async fn update_inline_rows(
     tx_helper: &mut TransactionHelper,
     table: &Table,
-    set_map: &HashMap<String, Expr>,
-    condition: &Expr,
+    update: &TableUpdate,
 ) -> ILResult<usize> {
     if tx_helper
         .database
-        .supports_filter(condition, &table.schema)?
+        .supports_filter(&update.condition, &table.schema)?
     {
         tx_helper
-            .update_inline_rows(&table.table_id, set_map, condition)
+            .update_inline_rows(&table.table_id, &update.set_map, &update.condition)
             .await
     } else {
         let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.schema)?);
@@ -85,7 +109,7 @@ pub(crate) async fn update_inline_rows(
         while let Some(row_chunk) = chunk_stream.next().await {
             let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
             let record_batch = rows_to_record_batch(&table.schema, &rows)?;
-            let bool_array = condition.condition_eval(&record_batch)?;
+            let bool_array = update.condition.condition_eval(&record_batch)?;
             for (i, v) in bool_array.iter().enumerate() {
                 if let Some(v) = v
                     && v
@@ -94,7 +118,7 @@ pub(crate) async fn update_inline_rows(
                 }
             }
             let filtered_batch = arrow::compute::filter_record_batch(&record_batch, &bool_array)?;
-            let updated_batch = update_record_batch(&filtered_batch, set_map)?;
+            let updated_batch = update_record_batch(&filtered_batch, &update.set_map)?;
             updated_batches.push(updated_batch);
         }
         drop(chunk_stream);
@@ -130,7 +154,7 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
         data_file_record.format,
     )
     .await?;
-    let row_ids = array_to_uuids(Arc::new(row_id_array).as_ref())?;
+    let row_ids = fixed_size_binary_array_to_uuids(&row_id_array)?;
     tx_helper
         .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)
         .await?;
@@ -171,7 +195,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
         data_file_record.format,
     )
     .await?;
-    let row_ids = array_to_uuids(Arc::new(row_id_array).as_ref())?;
+    let row_ids = fixed_size_binary_array_to_uuids(&row_id_array)?;
 
     tx_helper
         .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)

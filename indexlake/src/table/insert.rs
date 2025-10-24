@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::*;
@@ -14,14 +15,14 @@ use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, build_parquet_writer};
 use crate::table::Table;
 use crate::utils::{
-    extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, serialize_array,
+    extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, rewrite_batch_schema,
+    serialize_array,
 };
 use crate::{ILError, ILResult};
 
 pub struct TableInsertion {
     pub data: Vec<RecordBatch>,
     pub force_inline: bool,
-    pub try_dump: bool,
     pub ignore_row_id: bool,
 }
 
@@ -30,7 +31,6 @@ impl TableInsertion {
         Self {
             data,
             force_inline: false,
-            try_dump: true,
             ignore_row_id: true,
         }
     }
@@ -40,9 +40,14 @@ impl TableInsertion {
         self
     }
 
-    pub fn with_try_dump(mut self, try_dump: bool) -> Self {
-        self.try_dump = try_dump;
-        self
+    pub fn rewrite_columns(mut self, field_name_id_map: &HashMap<String, Uuid>) -> ILResult<Self> {
+        let mut new_data = Vec::with_capacity(self.data.len());
+        for batch in self.data {
+            let new_batch = rewrite_batch_schema(&batch, field_name_id_map)?;
+            new_data.push(new_batch);
+        }
+        self.data = new_data;
+        Ok(self)
     }
 }
 

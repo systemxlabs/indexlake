@@ -4,6 +4,7 @@ use indexlake::Client;
 use indexlake::catalog::{Catalog, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use indexlake::expr::{col, lit};
 use indexlake::storage::{DataFileFormat, Storage};
+use indexlake::table::TableUpdate;
 use indexlake_integration_tests::data::{
     prepare_simple_testing_table, prepare_simple_vector_table,
 };
@@ -33,9 +34,11 @@ async fn update_table_by_condition(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let set_map = HashMap::from([("age".to_string(), lit(30i32))]);
-    let condition = col("name").eq(lit("Alice"));
-    table.update(set_map, &condition).await?;
+    let update = TableUpdate {
+        set_map: HashMap::from([("age".to_string(), lit(30i32))]),
+        condition: col("name").eq(lit("Alice")),
+    };
+    table.update(update).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -73,15 +76,18 @@ async fn update_table_by_row_id(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let set_map = HashMap::from([("age".to_string(), lit(30i32))]);
-
     let first_row_id_bytes = read_first_row_id_bytes_from_table(&table).await?;
     let condition = col(INTERNAL_ROW_ID_FIELD_NAME).eq(lit(Scalar::FixedSizeBinary(
         16,
         Some(first_row_id_bytes.to_vec()),
     )));
 
-    table.update(set_map, &condition).await?;
+    let update = TableUpdate {
+        set_map: HashMap::from([("age".to_string(), lit(30i32))]),
+        condition,
+    };
+
+    table.update(update).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -127,9 +133,11 @@ async fn update_table_by_catalog_unsupported_condition(
     let list_array = list_builder.finish();
     let scalar = Scalar::List(Arc::new(list_array));
 
-    let condition = col("vector").gt(lit(scalar));
-    let set_map = HashMap::from([("id".to_string(), lit(10i32))]);
-    table.update(set_map, &condition).await?;
+    let update = TableUpdate {
+        set_map: HashMap::from([("id".to_string(), lit(10i32))]),
+        condition: col("vector").gt(lit(scalar)),
+    };
+    table.update(update).await?;
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);

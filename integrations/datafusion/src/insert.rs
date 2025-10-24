@@ -13,7 +13,7 @@ use datafusion::physical_plan::{
     PlanProperties,
 };
 use futures::StreamExt;
-use indexlake::table::{Table, TableInsertion, check_and_rewrite_insert_batches};
+use indexlake::table::{Table, TableInsertion};
 
 #[derive(Debug)]
 pub struct IndexLakeInsertExec {
@@ -37,15 +37,6 @@ impl IndexLakeInsertExec {
                 ));
             }
         }
-
-        let empty_batch = RecordBatch::new_empty(input.schema());
-        check_and_rewrite_insert_batches(
-            &[empty_batch],
-            table.schema.clone(),
-            &table.field_records,
-            true,
-        )
-        .map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let cache = PlanProperties::new(
             EquivalenceProperties::new(make_count_schema()),

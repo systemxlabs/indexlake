@@ -17,7 +17,7 @@ use crate::storage::{
     Storage, find_matched_row_ids_from_data_file, read_row_id_array_from_data_file,
 };
 use crate::table::Table;
-use crate::utils::array_to_uuids;
+use crate::utils::fixed_size_binary_array_to_uuids;
 
 pub(crate) async fn process_delete_by_condition(
     tx_helper: &mut TransactionHelper,
@@ -36,7 +36,7 @@ pub(crate) async fn process_delete_by_condition(
             data_file_record.format,
         )
         .await?;
-        let row_ids = array_to_uuids(Arc::new(row_id_array).as_ref())?;
+        let row_ids = fixed_size_binary_array_to_uuids(&row_id_array)?;
 
         if let Some(matched_row_ids) = matched_data_file_row_ids.get(&data_file_record.data_file_id)
         {

@@ -127,10 +127,6 @@ impl FieldRecord {
         ))
     }
 
-    pub(crate) fn into_field(self) -> Field {
-        Field::new(self.field_name, self.data_type, self.nullable).with_metadata(self.metadata)
-    }
-
     pub(crate) fn catalog_schema() -> CatalogSchema {
         CatalogSchema::new(vec![
             Column::new("field_id", CatalogDataType::Uuid, false),

@@ -48,6 +48,16 @@ impl TableScan {
         );
         Ok(Arc::new(schema))
     }
+
+    pub fn rewrite_columns(mut self, field_name_id_map: &HashMap<String, Uuid>) -> ILResult<Self> {
+        let rewritten_filters = self
+            .filters
+            .into_iter()
+            .map(|f| f.rewrite_columns(field_name_id_map))
+            .collect::<ILResult<Vec<_>>>()?;
+        self.filters = rewritten_filters;
+        Ok(self)
+    }
 }
 
 impl Default for TableScan {

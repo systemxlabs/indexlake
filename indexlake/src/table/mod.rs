@@ -10,11 +10,12 @@ use arrow_schema::{Field, Schema};
 pub use create::*;
 pub(crate) use delete::*;
 pub(crate) use dump::*;
+use futures::StreamExt;
 pub use insert::*;
 use log::warn;
 pub use scan::*;
 pub use search::*;
-pub(crate) use update::*;
+pub use update::*;
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -24,7 +25,7 @@ use crate::catalog::{
 use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::{DataFileFormat, Storage};
-use crate::utils::{build_row_id_array, schema_without_row_id, sort_record_batches};
+use crate::utils::{build_row_id_array, correct_batch_schema, sort_record_batches};
 use crate::{ILError, ILResult, RecordBatchStream};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, SchemaRef};
@@ -39,7 +40,11 @@ pub struct Table {
     pub table_id: Uuid,
     pub table_name: String,
     pub field_records: Arc<Vec<FieldRecord>>,
-    pub schema: SchemaRef,
+    pub(crate) schema: SchemaRef,
+    pub output_schema: SchemaRef,
+    pub field_name_id_map: HashMap<String, Uuid>,
+    pub field_id_name_map: HashMap<Uuid, String>,
+    pub field_id_default_value_map: HashMap<Uuid, Scalar>,
     pub config: Arc<TableConfig>,
     pub catalog: Arc<dyn Catalog>,
     pub storage: Arc<Storage>,
@@ -52,6 +57,7 @@ impl Table {
     }
 
     pub async fn create_index(self, index_creation: IndexCreation) -> ILResult<()> {
+        let index_creation = index_creation.rewrite_columns(&self.field_name_id_map)?;
         let mut tx_helper = self.transaction_helper().await?;
         process_create_index(&mut tx_helper, self, index_creation).await?;
         tx_helper.commit().await?;
@@ -59,10 +65,11 @@ impl Table {
     }
 
     pub async fn insert(&self, insert: TableInsertion) -> ILResult<()> {
+        let insert = insert.rewrite_columns(&self.field_name_id_map)?;
         let mut rewritten_batches = check_and_rewrite_insert_batches(
             &insert.data,
             self.schema.clone(),
-            &self.field_records,
+            &self.field_id_default_value_map,
             insert.ignore_row_id,
         )?;
         let total_rows = rewritten_batches
@@ -83,20 +90,28 @@ impl Table {
             process_insert_into_inline_rows(&mut tx_helper, self, &rewritten_batches).await?;
             tx_helper.commit().await?;
 
-            if insert.try_dump {
-                try_run_dump_task(self).await?;
-            }
+            try_run_dump_task(self).await?;
         }
 
         Ok(())
     }
 
     pub async fn scan(&self, scan: TableScan) -> ILResult<RecordBatchStream> {
+        let scan = scan.rewrite_columns(&self.field_name_id_map)?;
         scan.partition.validate()?;
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let batch_stream = process_scan(&catalog_helper, self, scan).await?;
-        Ok(batch_stream)
+
+        let field_id_name_map = self.field_id_name_map.clone();
+        let correct_batch_stream = batch_stream
+            .map(move |batch| {
+                let batch = batch?;
+                let correct_batch = correct_batch_schema(&batch, &field_id_name_map)?;
+                Ok::<_, ILError>(correct_batch)
+            })
+            .boxed();
+        Ok(correct_batch_stream)
     }
 
     pub async fn count(&self, partition: TableScanPartition) -> ILResult<usize> {
@@ -128,12 +143,24 @@ impl Table {
 
     pub async fn search(&self, search: TableSearch) -> ILResult<RecordBatchStream> {
         let batch_stream = process_search(self, search).await?;
-        Ok(batch_stream)
+
+        let field_id_name_map = self.field_id_name_map.clone();
+        let correct_batch_stream = batch_stream
+            .map(move |batch| {
+                let batch = batch?;
+                let correct_batch = correct_batch_schema(&batch, &field_id_name_map)?;
+                Ok::<_, ILError>(correct_batch)
+            })
+            .boxed();
+        Ok(correct_batch_stream)
     }
 
-    pub async fn update(&self, set_map: HashMap<String, Expr>, condition: &Expr) -> ILResult<()> {
+    pub async fn update(&self, update: TableUpdate) -> ILResult<()> {
+        let update = update.rewrite_columns(&self.field_name_id_map)?;
         // TODO update all rows
-        condition.check_data_type(&self.schema, &DataType::Boolean)?;
+        update
+            .condition
+            .check_data_type(&self.schema, &DataType::Boolean)?;
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
@@ -141,26 +168,20 @@ impl Table {
         let matched_data_file_rows = parallel_find_matched_data_file_rows(
             self.storage.clone(),
             self.schema.clone(),
-            condition.clone(),
+            update.condition.clone(),
             data_file_records,
         )
         .await?;
 
         let mut tx_helper = self.transaction_helper().await?;
-        process_update_by_condition(
-            &mut tx_helper,
-            self,
-            set_map,
-            condition,
-            matched_data_file_rows,
-        )
-        .await?;
+        process_update_by_condition(&mut tx_helper, self, update, matched_data_file_rows).await?;
         tx_helper.commit().await?;
 
         Ok(())
     }
 
-    pub async fn delete(&self, condition: &Expr) -> ILResult<()> {
+    pub async fn delete(&self, condition: Expr) -> ILResult<()> {
+        let condition = condition.rewrite_columns(&self.field_name_id_map)?;
         condition.check_data_type(&self.schema, &DataType::Boolean)?;
 
         if let Ok(scalar) = condition.constant_eval()
@@ -171,7 +192,7 @@ impl Table {
 
         if condition.only_visit_row_id_column() {
             let mut tx_helper = self.transaction_helper().await?;
-            process_delete_by_row_id_condition(&mut tx_helper, self, condition).await?;
+            process_delete_by_row_id_condition(&mut tx_helper, self, &condition).await?;
             tx_helper.commit().await?;
         } else {
             let catalog_helper = CatalogHelper::new(self.catalog.clone());
@@ -185,8 +206,13 @@ impl Table {
             .await?;
 
             let mut tx_helper = self.transaction_helper().await?;
-            process_delete_by_condition(&mut tx_helper, self, condition, matched_data_file_row_ids)
-                .await?;
+            process_delete_by_condition(
+                &mut tx_helper,
+                self,
+                &condition,
+                matched_data_file_row_ids,
+            )
+            .await?;
             tx_helper.commit().await?;
         }
 
@@ -268,9 +294,10 @@ impl Table {
         Ok(())
     }
 
-    pub fn supports_filter(&self, filter: &Expr) -> ILResult<FilterSupport> {
+    pub fn supports_filter(&self, filter: Expr) -> ILResult<FilterSupport> {
+        let filter = filter.rewrite_columns(&self.field_name_id_map)?;
         match filter {
-            Expr::Function(_) => self.index_manager.supports_filter(filter),
+            Expr::Function(_) => self.index_manager.supports_filter(&filter),
             _ => Ok(FilterSupport::Exact),
         }
     }
@@ -340,31 +367,37 @@ impl Default for TableConfig {
 pub fn check_and_rewrite_insert_batches(
     batches: &[RecordBatch],
     table_schema: SchemaRef,
-    field_records: &[FieldRecord],
+    field_id_default_value_map: &HashMap<Uuid, Scalar>,
     ignore_row_id: bool,
 ) -> ILResult<Vec<RecordBatch>> {
-    let expected_schema = if ignore_row_id {
-        Arc::new(schema_without_row_id(&table_schema))
-    } else {
-        table_schema
-    };
-    let field_name_to_default_value = field_records
-        .iter()
-        .filter(|record| record.default_value.is_some())
-        .map(|record| (&record.field_name, record.default_value.as_ref().unwrap()))
-        .collect::<HashMap<_, _>>();
-
     let mut rewritten_batches = Vec::with_capacity(batches.len());
     for batch in batches {
         let batch_schema = batch.schema_ref();
 
-        let mut fields = Vec::with_capacity(expected_schema.fields().len());
-        let mut arrays = Vec::with_capacity(expected_schema.fields().len());
+        let mut fields = Vec::with_capacity(table_schema.fields().len());
+        let mut arrays = Vec::with_capacity(table_schema.fields().len());
 
-        for table_field in expected_schema.fields() {
+        for table_field in table_schema.fields() {
             let table_field_name = table_field.name();
 
-            if let Ok(batch_field_idx) = batch_schema.index_of(table_field_name) {
+            if table_field_name == INTERNAL_ROW_ID_FIELD_NAME {
+                fields.push(INTERNAL_ROW_ID_FIELD_REF.clone());
+                if ignore_row_id {
+                    let row_ids = (0..batch.num_rows())
+                        .map(|_| Uuid::now_v7().into_bytes())
+                        .collect::<Vec<_>>();
+                    let row_id_array = build_row_id_array(row_ids.into_iter())?;
+                    arrays.insert(0, Arc::new(row_id_array) as ArrayRef);
+                } else {
+                    let Ok(batch_field_idx) = batch_schema.index_of(INTERNAL_ROW_ID_FIELD_NAME)
+                    else {
+                        return Err(ILError::invalid_input(format!(
+                            "Not found field {INTERNAL_ROW_ID_FIELD_NAME} in batch schema",
+                        )));
+                    };
+                    arrays.push(batch.column(batch_field_idx).clone());
+                }
+            } else if let Ok(batch_field_idx) = batch_schema.index_of(table_field_name) {
                 let batch_field = batch_schema
                     .fields
                     .get(batch_field_idx)
@@ -374,7 +407,9 @@ pub fn check_and_rewrite_insert_batches(
 
                 fields.push(batch_field);
                 arrays.push(batch.column(batch_field_idx).clone());
-            } else if let Some(default_value) = field_name_to_default_value.get(table_field_name) {
+            } else if let Ok(field_id) = Uuid::parse_str(table_field_name)
+                && let Some(default_value) = field_id_default_value_map.get(&field_id)
+            {
                 fields.push(table_field.clone());
                 arrays.push(default_value.to_array_of_size(batch.num_rows())?);
             } else {
@@ -382,16 +417,6 @@ pub fn check_and_rewrite_insert_batches(
                     "Not found field {table_field_name} in batch schema",
                 )));
             }
-        }
-
-        if ignore_row_id {
-            fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
-
-            let row_ids = (0..batch.num_rows())
-                .map(|_| Uuid::now_v7().into_bytes())
-                .collect::<Vec<_>>();
-            let row_id_array = build_row_id_array(row_ids.into_iter())?;
-            arrays.insert(0, Arc::new(row_id_array) as ArrayRef);
         }
 
         let rewritten_batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)?;

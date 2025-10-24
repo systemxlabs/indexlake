@@ -12,8 +12,10 @@ pub use case::*;
 pub use compute::*;
 pub use like::*;
 pub use utils::*;
+use uuid::Uuid;
 pub use visitor::*;
 
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use arrow::array::{ArrayRef, AsArray, BooleanArray, RecordBatch};
@@ -291,6 +293,21 @@ impl Expr {
 
     pub(crate) fn only_visit_row_id_column(&self) -> bool {
         visited_columns(self) == [INTERNAL_ROW_ID_FIELD_NAME]
+    }
+
+    pub(crate) fn rewrite_columns(
+        mut self,
+        field_name_id_map: &HashMap<String, Uuid>,
+    ) -> ILResult<Expr> {
+        let mut replacer = ColumnReplacer::new(field_name_id_map);
+        self.drive_mut(&mut replacer);
+        if let Some(fail_col) = replacer.fail_col {
+            Err(ILError::invalid_input(format!(
+                "Column {fail_col} not found"
+            )))
+        } else {
+            Ok(self)
+        }
     }
 }
 

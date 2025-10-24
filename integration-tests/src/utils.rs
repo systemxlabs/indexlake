@@ -46,7 +46,7 @@ pub async fn full_table_scan_with_location_kind(table: &Table) -> ILResult<Strin
 }
 
 pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
-    let batch_schema = scan.output_schema(&table.schema)?;
+    let batch_schema = scan.output_schema(&table.output_schema)?;
     let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
 
     let stream = table.scan(scan).await?;
@@ -69,7 +69,10 @@ pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
 }
 
 pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String> {
-    let batch_schema = Arc::new(project_schema(&table.schema, search.projection.as_ref())?);
+    let batch_schema = Arc::new(project_schema(
+        &table.output_schema,
+        search.projection.as_ref(),
+    )?);
     let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
 
     let stream = table.search(search).await?;

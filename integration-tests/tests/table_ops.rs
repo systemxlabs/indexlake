@@ -60,7 +60,7 @@ async fn create_table(
     fields.extend(expected_schema.fields.iter().cloned());
     let expected_schema = Schema::new(fields);
 
-    assert_eq!(table.schema.as_ref(), &expected_schema);
+    assert_eq!(table.output_schema.as_ref(), &expected_schema);
 
     Ok(())
 }

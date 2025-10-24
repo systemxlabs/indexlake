@@ -63,6 +63,7 @@ pub(crate) async fn process_create_table(
         };
     }
 
+    // check default values
     for (field_name, default_value) in &creation.default_values {
         let default_value_type = default_value.data_type();
         let field = creation.schema.field_with_name(field_name)?;
@@ -78,6 +79,7 @@ pub(crate) async fn process_create_table(
         }
     }
 
+    // insert table record
     let table_id = Uuid::now_v7();
     tx_helper
         .insert_table(&TableRecord {
@@ -89,18 +91,10 @@ pub(crate) async fn process_create_table(
         })
         .await?;
 
+    // insert field records
     let mut field_records = Vec::new();
     for field in creation.schema.fields() {
         let default_value = creation.default_values.get(field.name()).cloned();
-        if let Some(v) = &default_value
-            && &v.data_type() != field.data_type()
-        {
-            return Err(ILError::invalid_input(format!(
-                "Default value type {} does not match field type {}",
-                v.data_type(),
-                field.data_type()
-            )));
-        }
         field_records.push(FieldRecord::new(
             Uuid::now_v7(),
             table_id,
@@ -111,7 +105,7 @@ pub(crate) async fn process_create_table(
     tx_helper.insert_fields(&field_records).await?;
 
     tx_helper
-        .create_inline_row_table(&table_id, creation.schema.fields())
+        .create_inline_row_table(&table_id, &field_records)
         .await?;
 
     Ok(table_id)
@@ -124,6 +118,26 @@ pub struct IndexCreation {
     pub key_columns: Vec<String>,
     pub params: Arc<dyn IndexParams>,
     pub if_not_exists: bool,
+}
+
+impl IndexCreation {
+    pub(crate) fn rewrite_columns(
+        mut self,
+        field_name_id_map: &HashMap<String, Uuid>,
+    ) -> ILResult<Self> {
+        let mut rewritten_columns = Vec::with_capacity(self.key_columns.len());
+        for key_col in self.key_columns {
+            if let Some(field_id) = field_name_id_map.get(&key_col) {
+                rewritten_columns.push(hex::encode(field_id));
+            } else {
+                return Err(ILError::invalid_input(format!(
+                    "key column {key_col} not found"
+                )));
+            }
+        }
+        self.key_columns = rewritten_columns;
+        Ok(self)
+    }
 }
 
 pub(crate) async fn process_create_index(
@@ -238,7 +252,11 @@ pub(crate) async fn process_create_index(
 
     tx_helper.insert_index_files(&index_file_records).await?;
 
-    let key_field_ids = field_names_to_ids(&table.field_records, &creation.key_columns)?;
+    let key_field_ids = creation
+        .key_columns
+        .iter()
+        .map(|c| Uuid::parse_str(c))
+        .collect::<Result<Vec<Uuid>, _>>()?;
 
     tx_helper
         .insert_index(&IndexRecord {
@@ -252,22 +270,4 @@ pub(crate) async fn process_create_index(
         .await?;
 
     Ok(index_id)
-}
-
-fn field_names_to_ids(field_records: &[FieldRecord], names: &[String]) -> ILResult<Vec<Uuid>> {
-    let mut field_ids = Vec::new();
-    for name in names.iter() {
-        let field_id_opt = field_records
-            .iter()
-            .find(|record| &record.field_name == name)
-            .map(|record| record.field_id);
-        if let Some(field_id) = field_id_opt {
-            field_ids.push(field_id);
-        } else {
-            return Err(ILError::invalid_input(format!(
-                "Field name {name} not found in table schema"
-            )));
-        }
-    }
-    Ok(field_ids)
 }

@@ -1,4 +1,5 @@
 use arrow::datatypes::Schema;
+use arrow_schema::Field;
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -106,14 +107,47 @@ impl Client {
                 .get_table_fields(&table_record.table_id)
                 .await?,
         );
+        let field_name_id_map = field_records
+            .iter()
+            .map(|record| (record.field_name.clone(), record.field_id))
+            .collect::<HashMap<String, Uuid>>();
+        let field_id_name_map = field_records
+            .iter()
+            .map(|record| (record.field_id, record.field_name.clone()))
+            .collect::<HashMap<Uuid, String>>();
+        let field_id_default_value_map = field_records
+            .iter()
+            .filter(|record| record.default_value.is_some())
+            .map(|record| (record.field_id, record.default_value.clone().unwrap()))
+            .collect::<HashMap<_, _>>();
 
         let mut fields = field_records
             .iter()
-            .map(|f| Arc::new(f.clone().into_field()))
+            .map(|f| {
+                Arc::new(
+                    Field::new(hex::encode(f.field_id), f.data_type.clone(), f.nullable)
+                        .with_metadata(f.metadata.clone()),
+                )
+            })
             .collect::<Vec<_>>();
         fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
         let schema = Arc::new(Schema::new_with_metadata(
             fields,
+            table_record.schema_metadata.clone(),
+        ));
+
+        let mut output_fields = field_records
+            .iter()
+            .map(|f| {
+                Arc::new(
+                    Field::new(&f.field_name, f.data_type.clone(), f.nullable)
+                        .with_metadata(f.metadata.clone()),
+                )
+            })
+            .collect::<Vec<_>>();
+        output_fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
+        let output_schema = Arc::new(Schema::new_with_metadata(
+            output_fields,
             table_record.schema_metadata,
         ));
 
@@ -124,7 +158,6 @@ impl Client {
         for index_record in index_records {
             let index = IndexDefinition::from_index_record(
                 &index_record,
-                &field_records,
                 table_name,
                 &schema,
                 &self.index_kinds,
@@ -141,6 +174,10 @@ impl Client {
             table_name: table_name.to_string(),
             field_records,
             schema,
+            output_schema,
+            field_name_id_map,
+            field_id_name_map,
+            field_id_default_value_map,
             config: Arc::new(table_record.config),
             catalog: self.catalog.clone(),
             storage: self.storage.clone(),

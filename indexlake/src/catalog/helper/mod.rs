@@ -129,5 +129,5 @@ impl CatalogHelper {
 }
 
 pub(crate) fn inline_row_table_name(table_id: &Uuid) -> String {
-    format!("indexlake_inline_{}", hex::encode(table_id.as_bytes()))
+    format!("indexlake_inline_{}", hex::encode(table_id))
 }

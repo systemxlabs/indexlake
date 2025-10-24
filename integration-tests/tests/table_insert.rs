@@ -316,7 +316,7 @@ async fn insert_unordered_schema(
     let table = prepare_simple_testing_table(&client, format).await?;
 
     let batch = RecordBatch::try_new(
-        Arc::new(table.schema.project(&[2, 1])?),
+        Arc::new(table.output_schema.project(&[2, 1])?),
         vec![
             Arc::new(Int32Array::from_iter_values(vec![24])),
             Arc::new(StringArray::from_iter_values(vec!["Tom"])),
