@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
+use datafusion::arrow::array::{RecordBatch, RecordBatchOptions};
 use datafusion::arrow::datatypes::{Schema, SchemaRef};
 use datafusion::common::stats::Precision;
 use datafusion::common::{DFSchema, Statistics, project_schema};
@@ -16,7 +17,7 @@ use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
 };
 use datafusion::prelude::Expr;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
 use log::error;
@@ -63,6 +64,33 @@ impl IndexLakeScanExec {
             properties,
         })
     }
+
+    pub fn get_scan_partition(&self, partition: Option<usize>) -> TableScanPartition {
+        match partition {
+            Some(partition) => {
+                if let Some(data_files) = self.data_files.as_ref() {
+                    let data_file_count = data_files.len();
+                    let partition_size = std::cmp::max(data_file_count / self.partition_count, 1);
+                    let start = std::cmp::min(partition * partition_size, data_file_count);
+                    let end = std::cmp::min(start + partition_size, data_file_count);
+                    TableScanPartition::Provided {
+                        contains_inline_rows: partition == 0,
+                        data_file_records: if start == data_file_count {
+                            vec![]
+                        } else {
+                            data_files[start..end].to_vec()
+                        },
+                    }
+                } else {
+                    TableScanPartition::Auto {
+                        partition_idx: partition,
+                        partition_count: self.partition_count,
+                    }
+                }
+            }
+            None => TableScanPartition::single_partition(),
+        }
+    }
 }
 
 impl ExecutionPlan for IndexLakeScanExec {
@@ -108,25 +136,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             .map(|f| datafusion_expr_to_indexlake_expr(f, &df_schema))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let scan_partition = if let Some(data_files) = self.data_files.as_ref() {
-            let data_file_count = data_files.len();
-            let partition_size = std::cmp::max(data_file_count / self.partition_count, 1);
-            let start = std::cmp::min(partition * partition_size, data_file_count);
-            let end = std::cmp::min(start + partition_size, data_file_count);
-            TableScanPartition::Provided {
-                contains_inline_rows: partition == 0,
-                data_file_records: if start == data_file_count {
-                    vec![]
-                } else {
-                    data_files[start..end].to_vec()
-                },
-            }
-        } else {
-            TableScanPartition::Auto {
-                partition_idx: partition,
-                partition_count: self.partition_count,
-            }
-        };
+        let scan_partition = self.get_scan_partition(Some(partition));
 
         let mut scan = TableScan::default()
             .with_projection(self.projection.clone())
@@ -161,24 +171,36 @@ impl ExecutionPlan for IndexLakeScanExec {
         &self,
         partition: Option<usize>,
     ) -> Result<Statistics, DataFusionError> {
-        let scan_partition = match partition {
-            Some(partition) => TableScanPartition::Auto {
-                partition_idx: partition,
-                partition_count: self.partition_count,
-            },
-            None => TableScanPartition::single_partition(),
-        };
+        let scan_partition = self.get_scan_partition(partition);
 
         let row_count_result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
                 .block_on(async { self.table.count(scan_partition).await })
         });
         match row_count_result {
-            Ok(row_count) => Ok(Statistics {
-                num_rows: Precision::Exact(row_count),
-                total_byte_size: Precision::Absent,
-                column_statistics: Statistics::unknown_column(&self.schema()),
-            }),
+            Ok(row_count) => {
+                if self.filters.is_empty() {
+                    if let Some(limit) = self.limit {
+                        Ok(Statistics {
+                            num_rows: Precision::Exact(std::cmp::min(row_count, limit)),
+                            total_byte_size: Precision::Absent,
+                            column_statistics: Statistics::unknown_column(&self.schema()),
+                        })
+                    } else {
+                        Ok(Statistics {
+                            num_rows: Precision::Exact(row_count),
+                            total_byte_size: Precision::Absent,
+                            column_statistics: Statistics::unknown_column(&self.schema()),
+                        })
+                    }
+                } else {
+                    Ok(Statistics {
+                        num_rows: Precision::Inexact(row_count),
+                        total_byte_size: Precision::Absent,
+                        column_statistics: Statistics::unknown_column(&self.schema()),
+                    })
+                }
+            }
             Err(e) => Err(DataFusionError::Plan(format!(
                 "Error getting indexlake table {}.{} row count: {:?}",
                 self.table.namespace_name, self.table.table_name, e
@@ -260,13 +282,30 @@ fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
 async fn get_batch_stream(
     table: Arc<Table>,
     projected_schema: SchemaRef,
-    scan: TableScan,
+    mut scan: TableScan,
     limit: Option<usize>,
 ) -> Result<SendableRecordBatchStream, DataFusionError> {
-    let stream = table
-        .scan(scan)
-        .await
-        .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+    let stream = if scan.projection == Some(Vec::new()) {
+        scan.projection = Some(vec![0]);
+        let stream = table
+            .scan(scan)
+            .await
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        stream
+            .map(|batch| {
+                let batch = batch?;
+                let options = RecordBatchOptions::new().with_row_count(Some(batch.num_rows()));
+                let new_batch =
+                    RecordBatch::try_new_with_options(Arc::new(Schema::empty()), vec![], &options)?;
+                Ok(new_batch)
+            })
+            .boxed()
+    } else {
+        table
+            .scan(scan)
+            .await
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?
+    };
     let stream = stream.map_err(|e| DataFusionError::Execution(e.to_string()));
     let stream = Box::pin(RecordBatchStreamAdapter::new(projected_schema, stream));
     let metrics = BaselineMetrics::new(&ExecutionPlanMetricsSet::new(), 0);

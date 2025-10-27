@@ -100,7 +100,7 @@ impl Table {
 
     pub async fn scan(&self, scan: TableScan) -> ILResult<RecordBatchStream> {
         let scan = scan.rewrite_columns(&self.field_name_id_map)?;
-        scan.partition.validate()?;
+        scan.validate()?;
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let batch_stream = process_scan(&catalog_helper, self, scan).await?;

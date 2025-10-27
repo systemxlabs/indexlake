@@ -32,6 +32,26 @@ pub struct TableScan {
 }
 
 impl TableScan {
+    pub fn validate(&self) -> ILResult<()> {
+        if self.projection == Some(vec![]) {
+            return Err(ILError::invalid_input(
+                "projection must not be empty".to_string(),
+            ));
+        }
+        if self.batch_size == 0 {
+            return Err(ILError::invalid_input(
+                "batch_size must be greater than 0".to_string(),
+            ));
+        }
+        if self.concurrency == 0 {
+            return Err(ILError::invalid_input(
+                "concurrency must be greater than 0".to_string(),
+            ));
+        }
+        self.partition.validate()?;
+        Ok(())
+    }
+
     pub fn output_schema(&self, table_schema: &Schema) -> ILResult<SchemaRef> {
         let projected_schema = if let Some(projection) = &self.projection {
             table_schema.project(projection)?
