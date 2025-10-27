@@ -1,9 +1,9 @@
-CREATE TABLE indexlake_namespace (
+CREATE TABLE IF NOT EXISTS indexlake_namespace (
     namespace_id BLOB PRIMARY KEY,
     namespace_name VARCHAR NOT NULL UNIQUE
 );
 
-CREATE TABLE indexlake_table (
+CREATE TABLE IF NOT EXISTS indexlake_table (
     table_id BLOB PRIMARY KEY,
     table_name VARCHAR NOT NULL,
     namespace_id BLOB NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE indexlake_table (
     UNIQUE (namespace_id, table_name)
 );
 
-CREATE TABLE indexlake_field (
+CREATE TABLE IF NOT EXISTS indexlake_field (
     field_id BLOB PRIMARY KEY,
     table_id BLOB NOT NULL,
     field_name VARCHAR NOT NULL,
@@ -22,11 +22,11 @@ CREATE TABLE indexlake_field (
     metadata VARCHAR NOT NULL
 );
 
-CREATE TABLE indexlake_dump_task (
+CREATE TABLE IF NOT EXISTS indexlake_dump_task (
     table_id BLOB PRIMARY KEY
 );
 
-CREATE TABLE indexlake_data_file (
+CREATE TABLE IF NOT EXISTS indexlake_data_file (
     data_file_id BLOB PRIMARY KEY,
     table_id BLOB NOT NULL,
     format VARCHAR NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE indexlake_data_file (
     validity BLOB NOT NULL
 );
 
-CREATE TABLE indexlake_index (
+CREATE TABLE IF NOT EXISTS indexlake_index (
     index_id BLOB PRIMARY KEY,
     table_id BLOB NOT NULL,
     index_name VARCHAR NOT NULL,
@@ -44,7 +44,7 @@ CREATE TABLE indexlake_index (
     params VARCHAR NOT NULL
 );
 
-CREATE TABLE indexlake_index_file (
+CREATE TABLE IF NOT EXISTS indexlake_index_file (
     index_file_id BLOB PRIMARY KEY,
     table_id BLOB NOT NULL,
     index_id BLOB NOT NULL,
@@ -52,12 +52,12 @@ CREATE TABLE indexlake_index_file (
     relative_path VARCHAR NOT NULL
 );
 
-CREATE TABLE indexlake_inline_index (
+CREATE TABLE IF NOT EXISTS indexlake_inline_index (
     index_id BLOB NOT NULL,
     index_data BLOB NOT NULL
 );
 
-CREATE TABLE indexlake_data_file_stats (
+CREATE TABLE IF NOT EXISTS indexlake_data_file_stats (
     data_file_id BLOB NOT NULL,
     field_id BLOB NOT NULL,
     min_value VARCHAR,

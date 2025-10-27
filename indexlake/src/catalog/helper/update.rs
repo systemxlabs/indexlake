@@ -7,6 +7,20 @@ use crate::catalog::{DataFileRecord, RowValidity, TransactionHelper, inline_row_
 use crate::expr::Expr;
 
 impl TransactionHelper {
+    pub(crate) async fn update_table_name(
+        &mut self,
+        table_id: &Uuid,
+        table_name: &str,
+    ) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "UPDATE indexlake_table SET table_name = {} WHERE table_id = {}",
+                self.database.sql_string_literal(table_name),
+                self.database.sql_uuid_literal(table_id),
+            ))
+            .await
+    }
+
     pub(crate) async fn update_field_name(
         &mut self,
         field_id: &Uuid,

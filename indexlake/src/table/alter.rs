@@ -4,6 +4,7 @@ use crate::{ILError, ILResult, catalog::TransactionHelper, table::Table};
 
 #[derive(Debug)]
 pub enum TableAlter {
+    RenameTable { new_name: String },
     RenameColumn { old_name: String, new_name: String },
 }
 
@@ -13,6 +14,11 @@ pub(crate) async fn process_table_alter(
     alter: TableAlter,
 ) -> ILResult<()> {
     match alter {
+        TableAlter::RenameTable { new_name } => {
+            tx_helper
+                .update_table_name(&table.table_id, &new_name)
+                .await?;
+        }
         TableAlter::RenameColumn { old_name, new_name } => {
             alter_rename_column(tx_helper, &table.table_id, &old_name, &new_name).await?;
         }
