@@ -51,6 +51,32 @@ impl TransactionHelper {
         }
     }
 
+    pub(crate) async fn get_table_field(
+        &mut self,
+        table_id: &Uuid,
+        field_name: &str,
+    ) -> ILResult<Option<FieldRecord>> {
+        let catalog_schema = Arc::new(FieldRecord::catalog_schema());
+        let row = self
+            .query_single(
+                &format!(
+                    "SELECT {} FROM indexlake_field WHERE table_id = {} and field_name = {}",
+                    catalog_schema.select_items(self.database).join(", "),
+                    self.database.sql_uuid_literal(table_id),
+                    self.database.sql_string_literal(field_name),
+                ),
+                catalog_schema,
+            )
+            .await?;
+        match row {
+            Some(row) => {
+                let field = FieldRecord::from_row(row)?;
+                Ok(Some(field))
+            }
+            None => Ok(None),
+        }
+    }
+
     pub(crate) async fn scan_inline_rows(
         &mut self,
         table_id: &Uuid,

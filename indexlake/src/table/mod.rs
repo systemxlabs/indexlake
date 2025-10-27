@@ -1,3 +1,4 @@
+mod alter;
 mod create;
 mod delete;
 mod dump;
@@ -6,17 +7,14 @@ mod scan;
 mod search;
 mod update;
 
-use arrow_schema::{Field, Schema};
+pub use alter::*;
 pub use create::*;
 pub(crate) use delete::*;
 pub(crate) use dump::*;
-use futures::StreamExt;
 pub use insert::*;
-use log::warn;
 pub use scan::*;
 pub use search::*;
 pub use update::*;
-use uuid::Uuid;
 
 use crate::catalog::{
     Catalog, CatalogHelper, DataFileRecord, FieldRecord, INTERNAL_ROW_ID_FIELD_NAME,
@@ -29,9 +27,13 @@ use crate::utils::{build_row_id_array, correct_batch_schema, sort_record_batches
 use crate::{ILError, ILResult, RecordBatchStream};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, SchemaRef};
+use arrow_schema::{Field, Schema};
+use futures::StreamExt;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct Table {
@@ -286,6 +288,16 @@ impl Table {
         tx_helper.commit().await?;
 
         spawn_storage_index_files_clean_task(self.storage.clone(), index_file_records);
+        Ok(())
+    }
+
+    pub async fn alter(self, alter: TableAlter) -> ILResult<()> {
+        let mut tx_helper = self.transaction_helper().await?;
+
+        process_table_alter(&mut tx_helper, &self, alter).await?;
+
+        tx_helper.commit().await?;
+
         Ok(())
     }
 
