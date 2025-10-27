@@ -64,6 +64,21 @@ impl Client {
         Ok(namespace_id)
     }
 
+    pub async fn rename_namespace(&self, old_name: &str, new_name: &str) -> ILResult<()> {
+        let mut tx_helper = self.transaction_helper().await?;
+
+        let Some(namespace_id) = tx_helper.get_namespace_id(old_name).await? else {
+            return Err(ILError::invalid_input(format!(
+                "Namespace {old_name} does not exist"
+            )));
+        };
+        tx_helper
+            .update_namespace_name(&namespace_id, new_name)
+            .await?;
+        tx_helper.commit().await?;
+        Ok(())
+    }
+
     pub async fn get_namespace_id(&self, namespace_name: &str) -> ILResult<Option<Uuid>> {
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let namespace_id = catalog_helper.get_namespace_id(namespace_name).await?;

@@ -7,6 +7,20 @@ use crate::catalog::{DataFileRecord, RowValidity, TransactionHelper, inline_row_
 use crate::expr::Expr;
 
 impl TransactionHelper {
+    pub(crate) async fn update_namespace_name(
+        &mut self,
+        namespace_id: &Uuid,
+        namespace_name: &str,
+    ) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "UPDATE indexlake_namespace SET namespace_name = {} WHERE namespace_id = {}",
+                self.database.sql_string_literal(namespace_name),
+                self.database.sql_uuid_literal(namespace_id),
+            ))
+            .await
+    }
+
     pub(crate) async fn update_table_name(
         &mut self,
         table_id: &Uuid,
