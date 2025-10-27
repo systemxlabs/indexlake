@@ -1,8 +1,9 @@
 use arrow::array::{Float32Array, ListArray};
 use arrow::record_batch::RecordBatch;
+use bytes::Bytes;
 use hnsw::{Hnsw, Params, Searcher};
 use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
-use indexlake::storage::{InputFile, OutputFile};
+use indexlake::storage::File;
 use indexlake::utils::extract_row_id_array_from_record_batch;
 use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
@@ -80,8 +81,9 @@ impl IndexBuilder for HnswIndexBuilder {
         Ok(())
     }
 
-    async fn read_file(&mut self, input_file: InputFile) -> ILResult<()> {
-        let data = input_file.read().await?;
+    async fn read_file(&mut self, input_file: Box<dyn File>) -> ILResult<()> {
+        let file_meta = input_file.metadata().await?;
+        let data = input_file.read(0..file_meta.size).await?;
         let hnsw_with_row_ids: HnswWithRowIds = bincode::deserialize(&data)
             .map_err(|e| ILError::index(format!("Failed to deserialize Hnsw and row ids: {e}")))?;
         self.hnsw = hnsw_with_row_ids.hnsw;
@@ -89,15 +91,14 @@ impl IndexBuilder for HnswIndexBuilder {
         Ok(())
     }
 
-    async fn write_file(&mut self, mut output_file: OutputFile) -> ILResult<()> {
+    async fn write_file(&mut self, mut output_file: Box<dyn File>) -> ILResult<()> {
         let hnsw_with_row_ids = HnswWithRowIds {
             hnsw: std::mem::take(&mut self.hnsw),
             row_ids: std::mem::take(&mut self.row_ids),
         };
         let data = bincode::serialize(&hnsw_with_row_ids)
             .map_err(|e| ILError::index(format!("Failed to serialize Hnsw and row ids: {e}")))?;
-        let writer = output_file.writer();
-        writer.write(data).await?;
+        output_file.write(Bytes::from_owner(data)).await?;
         output_file.close().await?;
         Ok(())
     }

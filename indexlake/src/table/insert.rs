@@ -174,7 +174,7 @@ pub(crate) async fn process_bypass_insert(
             &table.table_id,
             &index_file_id,
         );
-        let output_file = table.storage.create_file(&relative_path).await?;
+        let output_file = table.storage.create(&relative_path).await?;
         index_builder.write_file(output_file).await?;
         index_file_records.push(IndexFileRecord {
             index_file_id,
@@ -196,7 +196,7 @@ async fn write_parquet_file(
     batches: &[RecordBatch],
     index_builders: &mut Vec<Box<dyn IndexBuilder>>,
 ) -> ILResult<Vec<Uuid>> {
-    let output_file = table.storage.create_file(relative_path).await?;
+    let output_file = table.storage.create(relative_path).await?;
 
     let mut arrow_writer = build_parquet_writer(
         output_file,

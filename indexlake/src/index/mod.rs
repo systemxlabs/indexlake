@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::ILResult;
 use crate::expr::Expr;
-use crate::storage::{InputFile, OutputFile};
+use crate::storage::File;
 use arrow::array::RecordBatch;
 use std::any::Any;
 use std::fmt::Debug;
@@ -44,9 +44,9 @@ pub trait IndexBuilder: Debug + Send + Sync {
 
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()>;
 
-    async fn read_file(&mut self, input_file: InputFile) -> ILResult<()>;
+    async fn read_file(&mut self, input_file: Box<dyn File>) -> ILResult<()>;
 
-    async fn write_file(&mut self, output_file: OutputFile) -> ILResult<()>;
+    async fn write_file(&mut self, output_file: Box<dyn File>) -> ILResult<()>;
 
     fn read_bytes(&mut self, buf: &[u8]) -> ILResult<()>;
 

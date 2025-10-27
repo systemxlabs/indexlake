@@ -49,7 +49,7 @@ pub struct Table {
     pub field_id_default_value_map: HashMap<Uuid, Scalar>,
     pub config: Arc<TableConfig>,
     pub catalog: Arc<dyn Catalog>,
-    pub storage: Arc<Storage>,
+    pub storage: Arc<dyn Storage>,
     pub index_manager: Arc<IndexManager>,
 }
 
@@ -328,7 +328,7 @@ impl Table {
 }
 
 fn spawn_storage_data_files_clean_task(
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     data_file_records: Vec<DataFileRecord>,
 ) {
     tokio::spawn(async move {
@@ -344,7 +344,7 @@ fn spawn_storage_data_files_clean_task(
 }
 
 fn spawn_storage_index_files_clean_task(
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     index_file_records: Vec<IndexFileRecord>,
 ) {
     tokio::spawn(async move {

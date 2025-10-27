@@ -31,7 +31,7 @@ pub(crate) async fn process_delete_by_condition(
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
     for data_file_record in data_file_records {
         let row_id_array = read_row_id_array_from_data_file(
-            &table.storage,
+            table.storage.as_ref(),
             &data_file_record.relative_path,
             data_file_record.format,
         )
@@ -107,7 +107,7 @@ pub(crate) async fn delete_data_file_rows_by_condition(
     row_ids: &[Uuid],
 ) -> ILResult<()> {
     let deleted_row_ids = find_matched_row_ids_from_data_file(
-        &table.storage,
+        table.storage.as_ref(),
         &table.schema,
         condition,
         &data_file_record,
@@ -130,7 +130,7 @@ pub(crate) async fn process_delete_by_row_id_condition(
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
     for mut data_file_record in data_file_records {
         let row_id_array = read_row_id_array_from_data_file(
-            &table.storage,
+            table.storage.as_ref(),
             &data_file_record.relative_path,
             data_file_record.format,
         )
@@ -158,7 +158,7 @@ pub(crate) async fn process_delete_by_row_id_condition(
 }
 
 pub(crate) async fn parallel_find_matched_data_file_row_ids(
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     table_schema: SchemaRef,
     condition: Expr,
     data_file_records: Vec<DataFileRecord>,
@@ -173,7 +173,7 @@ pub(crate) async fn parallel_find_matched_data_file_row_ids(
 
         let handle: JoinHandle<ILResult<(Uuid, HashSet<Uuid>)>> = tokio::spawn(async move {
             let matched_row_ids = find_matched_row_ids_from_data_file(
-                &storage,
+                storage.as_ref(),
                 &table_schema,
                 &condition,
                 &data_file_record,

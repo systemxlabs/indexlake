@@ -14,7 +14,7 @@ async fn create_namespace(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new(catalog, storage);
 
@@ -40,7 +40,7 @@ async fn duplicated_namespace_name(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new(catalog, storage);
 
@@ -62,7 +62,7 @@ async fn rename_namespace_name(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new(catalog, storage);
 

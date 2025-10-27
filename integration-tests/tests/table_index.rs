@@ -20,7 +20,7 @@ async fn duplicated_index_name(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -64,7 +64,7 @@ async fn unsupported_index_kind(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -99,7 +99,7 @@ async fn drop_index(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 

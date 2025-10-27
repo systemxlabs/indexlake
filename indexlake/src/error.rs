@@ -63,13 +63,6 @@ impl std::error::Error for ILError {
     }
 }
 
-impl From<opendal::Error> for ILError {
-    #[track_caller]
-    fn from(err: opendal::Error) -> Self {
-        ILError::StorageError(err.to_string(), Location::caller())
-    }
-}
-
 impl From<parquet::errors::ParquetError> for ILError {
     #[track_caller]
     fn from(err: parquet::errors::ParquetError) -> Self {

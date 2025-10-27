@@ -25,7 +25,7 @@ async fn create_table(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -75,7 +75,7 @@ async fn create_table_with_invalid_schema(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -121,7 +121,7 @@ async fn table_data_types(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -412,7 +412,7 @@ async fn duplicated_table_name(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -455,7 +455,7 @@ async fn create_table_with_invalid_column_default_value(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -498,7 +498,7 @@ async fn truncate_table(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -525,7 +525,7 @@ async fn drop_table(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 

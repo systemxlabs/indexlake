@@ -75,7 +75,7 @@ pub(crate) struct DumpTask {
     index_manager: Arc<IndexManager>,
     table_config: Arc<TableConfig>,
     catalog: Arc<dyn Catalog>,
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 }
 
 impl DumpTask {
@@ -141,7 +141,7 @@ impl DumpTask {
                 &self.table_id,
                 &index_file_id,
             );
-            let output_file = self.storage.create_file(&relative_path).await?;
+            let output_file = self.storage.create(&relative_path).await?;
             index_builder.write_file(output_file).await?;
             index_file_records.push(IndexFileRecord {
                 index_file_id,
@@ -189,7 +189,7 @@ impl DumpTask {
         tx_helper.commit().await?;
 
         debug!(
-            "[indexlake] dump table {} {} inline rows in {} ms",
+            "[indexlake] dumped table {} {} inline rows in {} ms",
             self.table_id,
             self.table_config.inline_row_count_limit,
             now.elapsed().as_millis()
@@ -206,7 +206,7 @@ impl DumpTask {
     ) -> ILResult<Vec<Uuid>> {
         let mut row_ids = Vec::new();
 
-        let output_file = self.storage.create_file(relative_path).await?;
+        let output_file = self.storage.create(relative_path).await?;
         let mut arrow_writer = build_parquet_writer(
             output_file,
             self.table_schema.clone(),

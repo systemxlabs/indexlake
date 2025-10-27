@@ -22,7 +22,6 @@ hex = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 num_cpus = { workspace = true }
-opendal = { workspace = true, features = ["services-fs", "services-s3"] }
 parquet = { workspace = true, features = ["async"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -219,7 +219,7 @@ pub(crate) async fn process_create_index(
     for data_file_record in data_file_records {
         let mut index_builder = index_kind.builder(&index_def)?;
         let mut stream = read_data_file_by_record(
-            &table.storage,
+            table.storage.as_ref(),
             &table.schema,
             &data_file_record,
             Some(projection.clone()),
@@ -239,7 +239,7 @@ pub(crate) async fn process_create_index(
             &table.table_id,
             &index_file_id,
         );
-        let output_file = table.storage.create_file(&relative_path).await?;
+        let output_file = table.storage.create(&relative_path).await?;
         index_builder.write_file(output_file).await?;
         index_file_records.push(IndexFileRecord {
             index_file_id,

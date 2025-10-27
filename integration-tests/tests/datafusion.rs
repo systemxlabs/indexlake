@@ -31,7 +31,7 @@ async fn datafusion_full_scan(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -69,7 +69,7 @@ async fn datafusion_scan_with_projection(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -129,7 +129,7 @@ async fn datafusion_scan_with_filters(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -165,7 +165,7 @@ async fn datafusion_scan_hide_row_id_with_filters(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -207,7 +207,7 @@ async fn datafusion_scan_with_row_id_filter(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -252,7 +252,7 @@ async fn datafusion_scan_with_projection_filter(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -292,7 +292,7 @@ async fn datafusion_scan_with_limit(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -327,7 +327,7 @@ async fn datafusion_full_insert(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -398,7 +398,7 @@ async fn datafusion_partial_insert(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -472,7 +472,7 @@ async fn datafusion_scan_serialization(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -532,7 +532,7 @@ async fn datafusion_insert_serialization(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -608,7 +608,7 @@ async fn datafusion_count1_with_filter(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();

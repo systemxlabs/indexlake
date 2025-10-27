@@ -17,6 +17,8 @@ indexlake-index-bm25 = { workspace = true }
 indexlake-index-btree = { workspace = true }
 indexlake-index-hnsw = { workspace = true }
 indexlake-index-rstar = { workspace = true }
+indexlake-storage-fs = { workspace = true }
+indexlake-storage-s3 = { workspace = true }
 
 arrow = { workspace = true, features = ["prettyprint"] }
 bytes = { workspace = true }

@@ -1,142 +1,55 @@
-mod fs;
 mod parquet;
-mod s3;
 
 use arrow::array::FixedSizeBinaryArray;
-pub use opendal::services::S3Config;
+use bytes::Bytes;
 pub(crate) use parquet::*;
 use uuid::Uuid;
 
 use crate::catalog::DataFileRecord;
 use crate::expr::{Expr, row_ids_in_list_expr};
-use crate::storage::fs::FsStorage;
-use crate::storage::s3::S3Storage;
 use crate::{ILError, ILResult, RecordBatchStream};
 use arrow_schema::Schema;
-use opendal::Operator;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::fmt::Debug;
+use std::ops::Range;
 
-#[derive(Debug, Clone)]
-pub enum Storage {
-    Fs(FsStorage),
-    S3(Box<S3Storage>),
+#[async_trait::async_trait]
+pub trait File: Debug + Send + Sync + 'static {
+    async fn metadata(&self) -> ILResult<FileMetadata>;
+    async fn read(&self, range: Range<u64>) -> ILResult<Bytes>;
+    async fn write(&mut self, bs: Bytes) -> ILResult<()>;
+    async fn close(&mut self) -> ILResult<()>;
 }
 
-impl Storage {
-    pub fn new_fs(root: impl Into<PathBuf>) -> Self {
-        Storage::Fs(FsStorage::new(root.into()))
-    }
+#[derive(Debug)]
+pub struct FileMetadata {
+    pub size: u64,
+}
 
-    pub fn new_s3(config: S3Config, bucket: impl Into<String>) -> Self {
-        Storage::S3(Box::new(S3Storage::new(config, bucket.into())))
+#[async_trait::async_trait]
+impl File for Box<dyn File> {
+    async fn metadata(&self) -> ILResult<FileMetadata> {
+        self.as_ref().metadata().await
     }
-
-    pub async fn delete(&self, relative_path: &str) -> ILResult<()> {
-        let op = self.new_operator()?;
-        Ok(op.delete(relative_path).await?)
+    async fn read(&self, range: Range<u64>) -> ILResult<Bytes> {
+        self.as_ref().read(range).await
     }
-
-    pub async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()> {
-        let op = self.new_operator()?;
-        let relative_path = if relative_path.ends_with('/') {
-            relative_path.to_string()
-        } else {
-            format!("{relative_path}/")
-        };
-        Ok(op.remove_all(&relative_path).await?)
+    async fn write(&mut self, bs: Bytes) -> ILResult<()> {
+        self.as_mut().write(bs).await
     }
-
-    pub async fn exists(&self, relative_path: &str) -> ILResult<bool> {
-        let op = self.new_operator()?;
-        Ok(op.exists(relative_path).await?)
-    }
-
-    pub(crate) fn new_operator(&self) -> ILResult<Operator> {
-        match self {
-            Storage::Fs(fs) => fs.new_operator(),
-            Storage::S3(s3) => s3.new_operator(),
-        }
-    }
-
-    pub async fn create_file(&self, relative_path: &str) -> ILResult<OutputFile> {
-        let op = self.new_operator()?;
-        let writer = op.writer(relative_path).await?;
-        Ok(OutputFile {
-            op,
-            relative_path: relative_path.to_string(),
-            writer,
-        })
-    }
-
-    pub async fn open_file(&self, relative_path: &str) -> ILResult<InputFile> {
-        let op = self.new_operator()?;
-        let reader = op.reader(relative_path).await?;
-        Ok(InputFile {
-            op,
-            relative_path: relative_path.to_string(),
-            reader,
-        })
-    }
-
-    pub async fn connectivity_check(&self) -> ILResult<()> {
-        let op = self.new_operator()?;
-        op.list("").await?;
-        Ok(())
+    async fn close(&mut self) -> ILResult<()> {
+        self.as_mut().close().await
     }
 }
 
-/// Output file is used for writing to files.
-pub struct OutputFile {
-    op: Operator,
-    relative_path: String,
-    writer: opendal::Writer,
-}
-
-impl OutputFile {
-    pub async fn file_size_bytes(&self) -> ILResult<u64> {
-        let meta = self.op.stat(&self.relative_path).await?;
-        Ok(meta.content_length())
-    }
-
-    pub async fn delete(&self) -> ILResult<()> {
-        Ok(self.op.delete(&self.relative_path).await?)
-    }
-
-    pub fn writer(&mut self) -> &mut opendal::Writer {
-        &mut self.writer
-    }
-
-    pub async fn close(&mut self) -> ILResult<()> {
-        self.writer.close().await?;
-        Ok(())
-    }
-}
-
-pub struct InputFile {
-    op: Operator,
-    relative_path: String,
-    reader: opendal::Reader,
-}
-
-impl InputFile {
-    pub async fn file_size_bytes(&self) -> ILResult<u64> {
-        let meta = self.op.stat(&self.relative_path).await?;
-        Ok(meta.content_length())
-    }
-
-    pub async fn delete(&self) -> ILResult<()> {
-        Ok(self.op.delete(&self.relative_path).await?)
-    }
-
-    pub async fn read(&self) -> ILResult<bytes::Bytes> {
-        Ok(self.op.read(&self.relative_path).await?.to_bytes())
-    }
-
-    pub fn reader(&self) -> &opendal::Reader {
-        &self.reader
-    }
+#[async_trait::async_trait]
+pub trait Storage: Debug + Send + Sync + 'static {
+    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn File>>;
+    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn File>>;
+    async fn delete(&self, relative_path: &str) -> ILResult<()>;
+    async fn exists(&self, relative_path: &str) -> ILResult<bool>;
+    async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()>;
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -169,7 +82,7 @@ impl std::str::FromStr for DataFileFormat {
 }
 
 pub(crate) async fn read_data_file_by_record(
-    storage: &Storage,
+    storage: &dyn Storage,
     table_schema: &Schema,
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
@@ -197,7 +110,7 @@ pub(crate) async fn read_data_file_by_record(
 }
 
 pub(crate) async fn find_matched_row_ids_from_data_file(
-    storage: &Storage,
+    storage: &dyn Storage,
     table_schema: &Schema,
     condition: &Expr,
     data_file_record: &DataFileRecord,
@@ -216,7 +129,7 @@ pub(crate) async fn find_matched_row_ids_from_data_file(
 }
 
 pub(crate) async fn read_row_id_array_from_data_file(
-    storage: &Storage,
+    storage: &dyn Storage,
     relative_path: &str,
     format: DataFileFormat,
 ) -> ILResult<FixedSizeBinaryArray> {

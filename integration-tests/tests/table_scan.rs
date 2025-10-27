@@ -32,7 +32,7 @@ async fn scan_with_projection(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -69,7 +69,7 @@ async fn scan_with_filters(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -104,7 +104,7 @@ async fn auto_partition_scan(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -238,7 +238,7 @@ async fn scan_with_catalog_unsupported_filter(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -281,7 +281,7 @@ async fn scan_with_metadata_columns(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();

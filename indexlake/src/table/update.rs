@@ -149,7 +149,7 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
         process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
     }
     let row_id_array = read_row_id_array_from_data_file(
-        &table.storage,
+        table.storage.as_ref(),
         &data_file_record.relative_path,
         data_file_record.format,
     )
@@ -169,7 +169,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
     data_file_record: DataFileRecord,
 ) -> ILResult<()> {
     let mut stream = read_data_file_by_record(
-        &table.storage,
+        table.storage.as_ref(),
         &table.schema,
         &data_file_record,
         None,
@@ -190,7 +190,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
     }
 
     let row_id_array = read_row_id_array_from_data_file(
-        &table.storage,
+        table.storage.as_ref(),
         &data_file_record.relative_path,
         data_file_record.format,
     )
@@ -204,7 +204,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
 }
 
 pub(crate) async fn parallel_find_matched_data_file_rows(
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     table_schema: SchemaRef,
     condition: Expr,
     data_file_records: Vec<DataFileRecord>,
@@ -216,7 +216,7 @@ pub(crate) async fn parallel_find_matched_data_file_rows(
         let condition = condition.clone();
         let handle: JoinHandle<ILResult<(Uuid, RecordBatchStream)>> = tokio::spawn(async move {
             let mut stream = read_data_file_by_record(
-                &storage,
+                storage.as_ref(),
                 &table_schema,
                 &data_file_record,
                 None,

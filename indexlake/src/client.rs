@@ -16,12 +16,12 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct Client {
     pub catalog: Arc<dyn Catalog>,
-    pub storage: Arc<Storage>,
+    pub storage: Arc<dyn Storage>,
     pub index_kinds: HashMap<String, Arc<dyn IndexKind>>,
 }
 
 impl Client {
-    pub fn new(catalog: Arc<dyn Catalog>, storage: Arc<Storage>) -> Self {
+    pub fn new(catalog: Arc<dyn Catalog>, storage: Arc<dyn Storage>) -> Self {
         Self {
             catalog,
             storage,

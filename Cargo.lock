@@ -2521,7 +2521,6 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "num_cpus",
- "opendal",
  "parquet",
  "serde",
  "serde_json",
@@ -2630,6 +2629,7 @@ dependencies = [
  "arrow",
  "async-trait",
  "bincode",
+ "bytes",
  "hnsw",
  "indexlake",
  "rand_pcg",
@@ -2677,11 +2677,33 @@ dependencies = [
  "indexlake-index-btree",
  "indexlake-index-hnsw",
  "indexlake-index-rstar",
+ "indexlake-storage-fs",
+ "indexlake-storage-s3",
  "opendal",
  "rstest",
  "rusqlite",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "indexlake-storage-fs"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "indexlake",
+ "opendal",
+]
+
+[[package]]
+name = "indexlake-storage-s3"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "indexlake",
+ "opendal",
 ]
 
 [[package]]

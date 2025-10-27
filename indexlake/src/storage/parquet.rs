@@ -18,22 +18,19 @@ use uuid::Uuid;
 
 use crate::catalog::DataFileRecord;
 use crate::expr::{Expr, ExprPredicate, visited_columns};
-use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
+use crate::storage::{DataFileFormat, File, Storage};
 use crate::utils::{build_projection_from_condition, extract_row_ids_from_record_batch};
 use crate::{ILError, ILResult, RecordBatchStream};
 
-impl AsyncFileReader for InputFile {
+impl AsyncFileReader for Box<dyn File> {
     fn get_bytes(
         &mut self,
         range: Range<u64>,
     ) -> BoxFuture<'_, parquet::errors::Result<bytes::Bytes>> {
         Box::pin(async move {
-            let buffer = self
-                .reader
-                .read(range.start..range.end)
+            self.read(range.start..range.end)
                 .await
-                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))?;
-            Ok(buffer.to_bytes())
+                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))
         })
     }
 
@@ -49,9 +46,10 @@ impl AsyncFileReader for InputFile {
                 .with_page_indexes(false)
                 .with_offset_indexes(false);
             let size = self
-                .file_size_bytes()
+                .metadata()
                 .await
-                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))?;
+                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))?
+                .size;
             let meta = reader.load_and_finish(self, size).await?;
 
             Ok(Arc::new(meta))
@@ -59,11 +57,10 @@ impl AsyncFileReader for InputFile {
     }
 }
 
-impl AsyncFileWriter for OutputFile {
+impl AsyncFileWriter for Box<dyn File> {
     fn write(&mut self, bs: bytes::Bytes) -> BoxFuture<'_, parquet::errors::Result<()>> {
         Box::pin(async {
-            self.writer
-                .write(bs)
+            File::write(self, bs)
                 .await
                 .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))
         })
@@ -71,12 +68,9 @@ impl AsyncFileWriter for OutputFile {
 
     fn complete(&mut self) -> BoxFuture<'_, parquet::errors::Result<()>> {
         Box::pin(async {
-            let _ = self
-                .writer
-                .close()
+            self.close()
                 .await
-                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))?;
-            Ok(())
+                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))
         })
     }
 }
@@ -102,7 +96,7 @@ pub(crate) fn build_parquet_writer<W: AsyncFileWriter>(
 }
 
 pub(crate) async fn read_parquet_file_by_record(
-    storage: &Storage,
+    storage: &dyn Storage,
     table_schema: &Schema,
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
@@ -135,7 +129,7 @@ pub(crate) async fn read_parquet_file_by_record(
         Some(ExprPredicate::try_new(filters, predicate_projection_mask)?)
     };
 
-    let input_file = storage.open_file(&data_file_record.relative_path).await?;
+    let input_file = storage.open(&data_file_record.relative_path).await?;
     let mut arrow_reader_builder = ParquetRecordBatchStreamBuilder::new(input_file).await?;
 
     if let Some(arrow_predicate) = &arrow_predicate_opt {
@@ -153,7 +147,7 @@ pub(crate) async fn read_parquet_file_by_record(
 }
 
 pub(crate) async fn find_matched_row_ids_from_parquet_file(
-    storage: &Storage,
+    storage: &dyn Storage,
     table_schema: &Schema,
     condition: &Expr,
     data_file_record: &DataFileRecord,
@@ -184,10 +178,10 @@ pub(crate) async fn find_matched_row_ids_from_parquet_file(
 }
 
 pub(crate) async fn read_row_id_array_from_parquet(
-    storage: &Storage,
+    storage: &dyn Storage,
     relative_path: &str,
 ) -> ILResult<FixedSizeBinaryArray> {
-    let input_file = storage.open_file(relative_path).await?;
+    let input_file = storage.open(relative_path).await?;
     let arrow_reader_builder = ParquetRecordBatchStreamBuilder::new(input_file).await?;
     let parquet_schema = arrow_reader_builder.parquet_schema();
 

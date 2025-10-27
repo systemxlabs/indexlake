@@ -11,6 +11,8 @@ members = [
   "integration-tests",
   "integrations/datafusion",
   "integrations/datafusion/gen",
+  "storages/fs",
+  "storages/s3"
 ]
 resolver = "3"
 
@@ -32,6 +34,8 @@ indexlake-index-btree = { path = "indexes/btree", version = "0.1.0" }
 indexlake-index-hnsw = { path = "indexes/hnsw", version = "0.1.0" }
 indexlake-index-rstar = { path = "indexes/rstar", version = "0.1.0" }
 indexlake-integration-tests = { path = "integration-tests", version = "0.1.0" }
+indexlake-storage-fs = { path = "storages/fs", version = "0.1.0" }
+indexlake-storage-s3 = { path = "storages/s3", version = "0.1.0" }
 
 arrow = "55"
 arrow-schema = "55"

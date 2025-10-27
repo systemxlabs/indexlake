@@ -220,7 +220,7 @@ async fn process_table_scan(
         let location = format!("data_file_{}", data_file_record.data_file_id);
         let fut = async move {
             let stream = read_data_file_by_record(
-                &storage,
+                storage.as_ref(),
                 &table_schema,
                 &data_file_record,
                 projection,
@@ -545,7 +545,7 @@ async fn index_scan_data_file(
         .collect::<Vec<_>>();
 
     read_data_file_by_record(
-        &table.storage,
+        table.storage.as_ref(),
         &table.schema,
         data_file_record,
         scan_projection,
@@ -585,10 +585,7 @@ async fn filter_index_files_row_ids(
             .map(|idx| filters[*idx].clone())
             .collect::<Vec<_>>();
 
-        let input_file = table
-            .storage
-            .open_file(&index_file_record.relative_path)
-            .await?;
+        let input_file = table.storage.open(&index_file_record.relative_path).await?;
 
         let mut index_builder = index_kind.builder(index_def)?;
         index_builder.read_file(input_file).await?;
