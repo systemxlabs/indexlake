@@ -15,7 +15,7 @@ use crate::{ILError, ILResult, RecordBatchStream};
 use arrow_schema::Schema;
 use opendal::Operator;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -57,54 +57,6 @@ impl Storage {
         match self {
             Storage::Fs(fs) => fs.new_operator(),
             Storage::S3(s3) => s3.new_operator(),
-        }
-    }
-
-    pub fn root_path(&self) -> ILResult<String> {
-        match self {
-            Storage::Fs(fs) => Ok(fs.root.to_string_lossy().to_string()),
-            Storage::S3(s3) => Ok(format!("s3://{}/", s3.bucket)),
-        }
-    }
-
-    pub fn storage_options(&self) -> ILResult<HashMap<String, String>> {
-        match self {
-            Storage::Fs(_fs) => Ok(HashMap::new()),
-            Storage::S3(s3) => {
-                let mut options = HashMap::new();
-                options.insert(
-                    "aws_access_key_id".to_string(),
-                    s3.config
-                        .access_key_id
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Access key id is not set"))?,
-                );
-                options.insert(
-                    "aws_secret_access_key".to_string(),
-                    s3.config
-                        .secret_access_key
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Secret access key is not set"))?,
-                );
-                options.insert(
-                    "aws_endpoint".to_string(),
-                    s3.config
-                        .endpoint
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Endpoint is not set"))?,
-                );
-                options.insert("aws_allow_http".to_string(), "true".to_string());
-                options.insert(
-                    "aws_region".to_string(),
-                    s3.config
-                        .region
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Region is not set"))?,
-                );
-                options.insert("AWS_EC2_METADATA_DISABLED".to_string(), "true".to_string());
-                options.insert("AWS_S3_ALLOW_UNSAFE_RENAME".to_string(), "true".to_string());
-                Ok(options)
-            }
         }
     }
 
