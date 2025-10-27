@@ -318,7 +318,7 @@ impl RowValidity {
             .enumerate()
             .flat_map(|(byte_idx, byte)| {
                 let bit_len = if byte_idx == self.validity.len() - 1 {
-                    self.num_rows % 8
+                    self.num_rows - byte_idx * 8
                 } else {
                     8
                 };
@@ -488,6 +488,14 @@ mod tests {
         let mut row_validity = RowValidity::new(5);
         row_validity.set(2, false);
         let bool_vec = row_validity.iter().collect::<Vec<bool>>();
-        assert_eq!(bool_vec, vec![true, true, false, true, true])
+        assert_eq!(bool_vec, vec![true, true, false, true, true]);
+
+        let mut row_validity = RowValidity::new(8);
+        row_validity.set(2, false);
+        let bool_vec = row_validity.iter().collect::<Vec<bool>>();
+        assert_eq!(
+            bool_vec,
+            vec![true, true, false, true, true, true, true, true]
+        );
     }
 }

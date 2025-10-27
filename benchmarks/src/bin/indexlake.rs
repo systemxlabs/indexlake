@@ -72,6 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
+    let table_count = table.count(TableScanPartition::single_partition()).await?;
+    assert_eq!(table_count, total_rows);
+
     let start_time = Instant::now();
     let mut handles = Vec::new();
     for i in 0..num_tasks {
@@ -95,6 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for handle in handles {
         count += handle.await??;
     }
+
+    assert_eq!(count, total_rows);
 
     let scan_cost_time = start_time.elapsed();
     println!(

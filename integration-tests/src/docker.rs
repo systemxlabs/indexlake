@@ -99,7 +99,7 @@ impl DockerCompose {
         run_command(
             cmd,
             format!(
-                "Starting docker compose in {}, project name: {}",
+                "docker compose in {}, project name: {}",
                 self.docker_compose_dir, self.project_name
             ),
         )

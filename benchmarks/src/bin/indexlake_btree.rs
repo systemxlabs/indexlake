@@ -166,7 +166,7 @@ impl BenchmarkContext {
         let table_config = TableConfig {
             inline_row_count_limit: config.batch_size,
             parquet_row_group_size: 128,
-            preferred_data_file_format: DataFileFormat::ParquetV1,
+            preferred_data_file_format: DataFileFormat::ParquetV2,
         };
         let table_creation = TableCreation {
             namespace_name: namespace_name.clone(),
