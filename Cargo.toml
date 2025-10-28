@@ -17,7 +17,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 homepage = "https://github.com/lewiszlw/indexlake"
 license = "MIT"
@@ -25,17 +25,17 @@ repository = "https://github.com/lewiszlw/indexlake"
 rust-version = "1.88.0"
 
 [workspace.dependencies]
-indexlake = { path = "indexlake", version = "0.1.0" }
-indexlake-catalog-postgres = { path = "catalogs/postgres", version = "0.1.0" }
-indexlake-catalog-sqlite = { path = "catalogs/sqlite", version = "0.1.0" }
-indexlake-datafusion = { path = "integrations/datafusion", version = "0.1.0" }
-indexlake-index-bm25 = { path = "indexes/bm25", version = "0.1.0" }
-indexlake-index-btree = { path = "indexes/btree", version = "0.1.0" }
-indexlake-index-hnsw = { path = "indexes/hnsw", version = "0.1.0" }
-indexlake-index-rstar = { path = "indexes/rstar", version = "0.1.0" }
-indexlake-integration-tests = { path = "integration-tests", version = "0.1.0" }
-indexlake-storage-fs = { path = "storages/fs", version = "0.1.0" }
-indexlake-storage-s3 = { path = "storages/s3", version = "0.1.0" }
+indexlake = { path = "indexlake", version = "0.2.0" }
+indexlake-catalog-postgres = { path = "catalogs/postgres", version = "0.2.0" }
+indexlake-catalog-sqlite = { path = "catalogs/sqlite", version = "0.2.0" }
+indexlake-datafusion = { path = "integrations/datafusion", version = "0.2.0" }
+indexlake-index-bm25 = { path = "indexes/bm25", version = "0.2.0" }
+indexlake-index-btree = { path = "indexes/btree", version = "0.2.0" }
+indexlake-index-hnsw = { path = "indexes/hnsw", version = "0.2.0" }
+indexlake-index-rstar = { path = "indexes/rstar", version = "0.2.0" }
+indexlake-integration-tests = { path = "integration-tests", version = "0.2.0" }
+indexlake-storage-fs = { path = "storages/fs", version = "0.2.0" }
+indexlake-storage-s3 = { path = "storages/s3", version = "0.2.0" }
 
 arrow = "55"
 arrow-schema = "55"

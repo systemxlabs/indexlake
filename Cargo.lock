@@ -2506,7 +2506,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -2530,7 +2530,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-benchmarks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "futures",
@@ -2546,7 +2546,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-catalog-postgres"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bb8",
@@ -2560,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-catalog-sqlite"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -2571,7 +2571,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-datafusion"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "datafusion",
@@ -2587,14 +2587,14 @@ dependencies = [
 
 [[package]]
 name = "indexlake-datafusion-gen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost-build",
 ]
 
 [[package]]
 name = "indexlake-index-bm25"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2610,7 +2610,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-index-btree"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2624,7 +2624,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-index-hnsw"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2641,7 +2641,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-index-rstar"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2658,7 +2658,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-integration-tests"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arrow",
  "bytes",
@@ -2688,7 +2688,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-storage-fs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2698,7 +2698,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-storage-s3"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
