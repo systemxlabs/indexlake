@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{fmt::Debug, ops::Range};
 
 use bytes::Bytes;
 use indexlake::{
@@ -7,10 +7,19 @@ use indexlake::{
 };
 use opendal::Operator;
 
-#[derive(Debug)]
 pub struct S3File {
     pub op: Operator,
     pub relative_path: String,
+    pub writer: Option<opendal::Writer>,
+}
+
+impl Debug for S3File {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3File")
+            .field("op", &self.op)
+            .field("relative_path", &self.relative_path)
+            .finish_non_exhaustive()
+    }
 }
 
 #[async_trait::async_trait]
@@ -41,23 +50,27 @@ impl File for S3File {
     }
 
     async fn write(&mut self, data: Bytes) -> ILResult<()> {
-        let mut writer = self
-            .op
-            .writer(&self.relative_path)
-            .await
-            .map_err(|e| ILError::storage(format!("Failed to create opendal writer: {e}")))?;
+        if self.writer.is_none() {
+            self.writer =
+                Some(self.op.writer(&self.relative_path).await.map_err(|e| {
+                    ILError::storage(format!("Failed to create opendal writer: {e}"))
+                })?);
+        }
+        let writer = self.writer.as_mut().unwrap();
         writer
             .write(data)
             .await
             .map_err(|e| ILError::storage(format!("Failed to write data: {e}")))?;
-        writer
-            .close()
-            .await
-            .map_err(|e| ILError::storage(format!("Failed to close writer: {e}")))?;
         Ok(())
     }
 
     async fn close(&mut self) -> ILResult<()> {
+        if let Some(writer) = self.writer.as_mut() {
+            writer
+                .close()
+                .await
+                .map_err(|e| ILError::storage(format!("Failed to close writer: {e}")))?;
+        }
         Ok(())
     }
 }

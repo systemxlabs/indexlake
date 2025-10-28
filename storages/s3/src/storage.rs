@@ -42,23 +42,28 @@ impl Storage for S3Storage {
         let s3_file = S3File {
             op,
             relative_path: relative_path.to_string(),
+            writer: None,
         };
         Ok(Box::new(s3_file))
     }
+
     async fn open(&self, relative_path: &str) -> ILResult<Box<dyn File>> {
         let op = self.new_operator()?;
         let s3_file = S3File {
             op,
             relative_path: relative_path.to_string(),
+            writer: None,
         };
         Ok(Box::new(s3_file))
     }
+
     async fn delete(&self, relative_path: &str) -> ILResult<()> {
         let op = self.new_operator()?;
         op.delete(relative_path)
             .await
             .map_err(|e| ILError::storage(format!("Failed to delete file {relative_path}, e: {e}")))
     }
+
     async fn exists(&self, relative_path: &str) -> ILResult<bool> {
         let op = self.new_operator()?;
         op.exists(relative_path).await.map_err(|e| {
@@ -67,6 +72,7 @@ impl Storage for S3Storage {
             ))
         })
     }
+
     async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()> {
         let op = self.new_operator()?;
         let relative_path = if relative_path.ends_with('/') {

@@ -142,7 +142,7 @@ pub(crate) async fn read_parquet_file_by_record(
         .with_projection(projection_mask.clone())
         .with_batch_size(batch_size)
         .build()?
-        .map_err(ILError::from);
+        .map_err(|e| ILError::storage(format!("Failed to read stream: {e:?}")));
     Ok(Box::pin(stream))
 }
 
