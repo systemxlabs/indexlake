@@ -75,4 +75,4 @@ serde_json = "1.0"
 space = "0.17"
 tokio = "1"
 url = "2.5"
-uuid = "1.18"
+uuid = { version = "1.18", features = ["serde"] }
