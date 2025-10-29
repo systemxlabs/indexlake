@@ -71,7 +71,7 @@ pub async fn catalog_postgres() -> Arc<dyn Catalog> {
     let _ = POSTGRES_DB.get_or_init(setup_postgres_db);
     let builder = PostgresCatalogBuilder::new("localhost", 5432, "postgres", "password")
         .dbname("postgres")
-        .pool_size(50);
+        .pool_max_size(50);
     let catalog = Arc::new(builder.build().await.unwrap());
 
     let schema = Arc::new(CatalogSchema::new(vec![Column::new(

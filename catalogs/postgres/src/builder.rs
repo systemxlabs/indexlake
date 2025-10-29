@@ -11,7 +11,8 @@ pub struct PostgresCatalogBuilder {
     user: String,
     password: String,
     dbname: Option<String>,
-    pool_size: usize,
+    pool_max_size: u32,
+    pool_min_idle: Option<u32>,
 }
 
 impl PostgresCatalogBuilder {
@@ -27,7 +28,8 @@ impl PostgresCatalogBuilder {
             user: user.into(),
             password: password.into(),
             dbname: None,
-            pool_size: 100,
+            pool_max_size: 100,
+            pool_min_idle: Some(5),
         }
     }
 
@@ -36,8 +38,13 @@ impl PostgresCatalogBuilder {
         self
     }
 
-    pub fn pool_size(mut self, pool_size: usize) -> Self {
-        self.pool_size = pool_size;
+    pub fn pool_max_size(mut self, pool_max_size: u32) -> Self {
+        self.pool_max_size = pool_max_size;
+        self
+    }
+
+    pub fn pool_min_idle(mut self, pool_min_idle: Option<u32>) -> Self {
+        self.pool_min_idle = pool_min_idle;
         self
     }
 
@@ -53,7 +60,8 @@ impl PostgresCatalogBuilder {
         }
         let manager = PostgresConnectionManager::new(config, NoTls);
         let pool = Pool::builder()
-            .max_size(self.pool_size as u32)
+            .max_size(self.pool_max_size)
+            .min_idle(self.pool_min_idle)
             .build(manager)
             .await
             .map_err(|e| ILError::catalog(format!("failed to build postgres pool: {e}")))?;

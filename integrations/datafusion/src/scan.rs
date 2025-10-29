@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::ops::Range;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{RecordBatch, RecordBatchOptions};
@@ -33,6 +34,7 @@ pub struct IndexLakeScanExec {
     pub projection: Option<Vec<usize>>,
     pub filters: Vec<Expr>,
     pub limit: Option<usize>,
+    pub data_file_partition_ranges: Option<Vec<Option<Range<usize>>>>,
     properties: PlanProperties,
 }
 
@@ -53,6 +55,9 @@ impl IndexLakeScanExec {
             EmissionType::Incremental,
             Boundedness::Bounded,
         );
+        let data_file_partition_ranges = data_files
+            .as_ref()
+            .map(|files| calc_data_file_partition_ranges(partition_count, files.len()));
         Ok(Self {
             table,
             partition_count,
@@ -61,6 +66,7 @@ impl IndexLakeScanExec {
             projection,
             filters,
             limit,
+            data_file_partition_ranges,
             properties,
         })
     }
@@ -68,17 +74,17 @@ impl IndexLakeScanExec {
     pub fn get_scan_partition(&self, partition: Option<usize>) -> TableScanPartition {
         match partition {
             Some(partition) => {
-                if let Some(data_files) = self.data_files.as_ref() {
-                    let data_file_count = data_files.len();
-                    let partition_size = std::cmp::max(data_file_count / self.partition_count, 1);
-                    let start = std::cmp::min(partition * partition_size, data_file_count);
-                    let end = std::cmp::min(start + partition_size, data_file_count);
+                if let Some(data_files) = self.data_files.as_ref()
+                    && let Some(data_file_partition_ranges) =
+                        self.data_file_partition_ranges.as_ref()
+                {
+                    let range = data_file_partition_ranges[partition].clone();
                     TableScanPartition::Provided {
                         contains_inline_rows: partition == 0,
-                        data_file_records: if start == data_file_count {
-                            vec![]
+                        data_file_records: if let Some(range) = range {
+                            data_files[range].to_vec()
                         } else {
-                            data_files[start..end].to_vec()
+                            vec![]
                         },
                     }
                 } else {
@@ -311,4 +317,64 @@ async fn get_batch_stream(
     let metrics = BaselineMetrics::new(&ExecutionPlanMetricsSet::new(), 0);
     let limit_stream = LimitStream::new(stream, 0, limit, metrics);
     Ok(Box::pin(limit_stream))
+}
+
+fn calc_data_file_partition_ranges(
+    partition_count: usize,
+    data_file_count: usize,
+) -> Vec<Option<Range<usize>>> {
+    let mut partition_allocations = vec![0; partition_count];
+
+    if partition_count > data_file_count {
+        for partition_allocation in partition_allocations.iter_mut().take(data_file_count) {
+            *partition_allocation = 1;
+        }
+    } else {
+        let partition_size = data_file_count / partition_count;
+        for partition_allocation in partition_allocations.iter_mut() {
+            *partition_allocation = partition_size;
+        }
+
+        let left = data_file_count - partition_count * partition_size;
+        for partition_allocation in partition_allocations.iter_mut().take(left) {
+            *partition_allocation += 1;
+        }
+    }
+
+    let mut ranges = Vec::with_capacity(partition_count);
+    let mut start = 0usize;
+    for partition_allocation in partition_allocations.iter() {
+        if *partition_allocation == 0 {
+            ranges.push(None);
+        } else {
+            let partition_range = start..start + *partition_allocation;
+            ranges.push(Some(partition_range));
+            start += *partition_allocation;
+        }
+    }
+
+    ranges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_partition_data_file_range() {
+        let ranges = calc_data_file_partition_ranges(2, 0);
+        assert_eq!(ranges, vec![None, None]);
+
+        let ranges = calc_data_file_partition_ranges(2, 1);
+        assert_eq!(ranges, vec![Some(0..1), None]);
+
+        let ranges = calc_data_file_partition_ranges(2, 2);
+        assert_eq!(ranges, vec![Some(0..1), Some(1..2)]);
+
+        let ranges = calc_data_file_partition_ranges(2, 3);
+        assert_eq!(ranges, vec![Some(0..2), Some(2..3)]);
+
+        let ranges = calc_data_file_partition_ranges(2, 4);
+        assert_eq!(ranges, vec![Some(0..2), Some(2..4)]);
+    }
 }
