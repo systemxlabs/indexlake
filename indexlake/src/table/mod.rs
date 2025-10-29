@@ -157,7 +157,7 @@ impl Table {
         Ok(correct_batch_stream)
     }
 
-    pub async fn update(&self, update: TableUpdate) -> ILResult<()> {
+    pub async fn update(&self, update: TableUpdate) -> ILResult<usize> {
         let update = update.rewrite_columns(&self.field_name_id_map)?;
         // TODO update all rows
         update
@@ -176,10 +176,12 @@ impl Table {
         .await?;
 
         let mut tx_helper = self.transaction_helper().await?;
-        process_update_by_condition(&mut tx_helper, self, update, matched_data_file_rows).await?;
+        let update_count =
+            process_update_by_condition(&mut tx_helper, self, update, matched_data_file_rows)
+                .await?;
         tx_helper.commit().await?;
 
-        Ok(())
+        Ok(update_count)
     }
 
     pub async fn delete(&self, condition: Expr) -> ILResult<()> {
@@ -192,6 +194,7 @@ impl Table {
             return self.truncate().await;
         }
 
+        // TODO waiting https://github.com/apache/arrow-rs/issues/7299 to use file row position, so we can merge below two branches
         if condition.only_visit_row_id_column() {
             let mut tx_helper = self.transaction_helper().await?;
             process_delete_by_row_id_condition(&mut tx_helper, self, &condition).await?;

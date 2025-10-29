@@ -45,11 +45,11 @@ pub(crate) async fn process_update_by_condition(
     table: &Table,
     update: TableUpdate,
     mut matched_data_file_rows: HashMap<Uuid, RecordBatchStream>,
-) -> ILResult<()> {
-    let updated_row_count = update_inline_rows(tx_helper, table, &update).await?;
+) -> ILResult<usize> {
+    let inline_update_count = update_inline_rows(tx_helper, table, &update).await?;
 
     // TODO this could be optimized into update_inline_rows function
-    if updated_row_count != 0 {
+    if inline_update_count != 0 {
         rebuild_inline_indexes(
             tx_helper,
             &table.table_id,
@@ -61,29 +61,32 @@ pub(crate) async fn process_update_by_condition(
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
+    let mut file_update_count = 0;
     for data_file_record in data_file_records {
-        if let Some(stream) = matched_data_file_rows.get_mut(&data_file_record.data_file_id) {
-            update_data_file_rows_by_matched_rows(
-                tx_helper,
-                table,
-                &update.set_map,
-                stream,
-                data_file_record,
-            )
-            .await?;
-        } else {
-            update_data_file_rows_by_condition(
-                tx_helper,
-                table,
-                &update.set_map,
-                &update.condition,
-                data_file_record,
-            )
-            .await?;
-        }
+        let update_count =
+            if let Some(stream) = matched_data_file_rows.get_mut(&data_file_record.data_file_id) {
+                update_data_file_rows_by_matched_rows(
+                    tx_helper,
+                    table,
+                    &update.set_map,
+                    stream,
+                    data_file_record,
+                )
+                .await?
+            } else {
+                update_data_file_rows_by_condition(
+                    tx_helper,
+                    table,
+                    &update.set_map,
+                    &update.condition,
+                    data_file_record,
+                )
+                .await?
+            };
+        file_update_count += update_count;
     }
 
-    Ok(())
+    Ok(inline_update_count + file_update_count)
 }
 
 pub(crate) async fn update_inline_rows(
@@ -136,7 +139,7 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
     set_map: &HashMap<String, Expr>,
     matched_data_file_rows: &mut RecordBatchStream,
     data_file_record: DataFileRecord,
-) -> ILResult<()> {
+) -> ILResult<usize> {
     let mut updated_row_ids = HashSet::new();
     while let Some(batch) = matched_data_file_rows.next().await {
         let batch = batch?;
@@ -158,7 +161,7 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
     tx_helper
         .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)
         .await?;
-    Ok(())
+    Ok(updated_row_ids.len())
 }
 
 pub(crate) async fn update_data_file_rows_by_condition(
@@ -167,7 +170,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
     set_map: &HashMap<String, Expr>,
     condition: &Expr,
     data_file_record: DataFileRecord,
-) -> ILResult<()> {
+) -> ILResult<usize> {
     let mut stream = read_data_file_by_record(
         table.storage.as_ref(),
         &table.schema,
@@ -200,7 +203,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
     tx_helper
         .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)
         .await?;
-    Ok(())
+    Ok(updated_row_ids.len())
 }
 
 pub(crate) async fn parallel_find_matched_data_file_rows(

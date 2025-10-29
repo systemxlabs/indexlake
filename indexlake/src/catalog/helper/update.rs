@@ -91,17 +91,18 @@ impl TransactionHelper {
     pub(crate) async fn update_data_file_rows_as_invalid(
         &mut self,
         mut data_file_record: DataFileRecord,
-        row_ids: &[Uuid],
+        sorted_row_ids: &[Uuid],
         invalid_row_ids: &HashSet<Uuid>,
     ) -> ILResult<usize> {
+        debug_assert!(sorted_row_ids.is_sorted());
+
         if invalid_row_ids.is_empty() {
             return Ok(1);
         }
 
-        // TODO accelerate this by binary search
-        for (i, row_id) in row_ids.iter().enumerate() {
-            if invalid_row_ids.contains(row_id) {
-                data_file_record.validity.set(i, false);
+        for invalid_row_id in invalid_row_ids {
+            if let Ok(idx) = sorted_row_ids.binary_search(invalid_row_id) {
+                data_file_record.validity.set(idx, false);
             }
         }
 
