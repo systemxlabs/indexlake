@@ -33,7 +33,8 @@ async fn delete_table_by_condition(
     let table = prepare_simple_testing_table(&client, format).await?;
 
     let condition = col("age").gt(lit(21i32));
-    table.delete(condition).await?;
+    let delete_count = table.delete(condition).await?;
+    assert_eq!(delete_count, 2);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -74,7 +75,8 @@ async fn delete_table_by_row_id(
         16,
         Some(first_row_id_bytes.to_vec()),
     )));
-    table.delete(condition).await?;
+    let delete_count = table.delete(condition).await?;
+    assert_eq!(delete_count, 1);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -112,7 +114,8 @@ async fn delete_table_by_constant_condition(
     let table = prepare_simple_testing_table(&client, format).await?;
 
     let false_condition = lit(1i32).eq(lit(2i32));
-    table.delete(false_condition).await?;
+    let delete_count = table.delete(false_condition).await?;
+    assert_eq!(delete_count, 0);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -129,7 +132,8 @@ async fn delete_table_by_constant_condition(
     );
 
     let true_condition = lit(1i32).eq(lit(1i32));
-    table.delete(true_condition).await?;
+    let delete_count = table.delete(true_condition).await?;
+    assert_eq!(delete_count, 4);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -171,7 +175,8 @@ async fn delete_table_by_catalog_unsupported_condition(
     let scalar = Scalar::List(Arc::new(list_array));
 
     let condition = col("vector").gt(lit(scalar));
-    table.delete(condition).await?;
+    let delete_count = table.delete(condition).await?;
+    assert_eq!(delete_count, 2);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);

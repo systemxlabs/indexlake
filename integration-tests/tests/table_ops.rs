@@ -505,7 +505,8 @@ async fn truncate_table(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, DataFileFormat::ParquetV2).await?;
 
-    table.truncate().await?;
+    let truncate_count = table.truncate().await?;
+    assert_eq!(truncate_count, 4);
 
     let scan = TableScan::default();
     let stream = table.scan(scan).await?;

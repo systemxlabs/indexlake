@@ -184,7 +184,7 @@ impl Table {
         Ok(update_count)
     }
 
-    pub async fn delete(&self, condition: Expr) -> ILResult<()> {
+    pub async fn delete(&self, condition: Expr) -> ILResult<usize> {
         let condition = condition.rewrite_columns(&self.field_name_id_map)?;
         condition.check_data_type(&self.schema, &DataType::Boolean)?;
 
@@ -197,8 +197,10 @@ impl Table {
         // TODO waiting https://github.com/apache/arrow-rs/issues/7299 to use file row position, so we can merge below two branches
         if condition.only_visit_row_id_column() {
             let mut tx_helper = self.transaction_helper().await?;
-            process_delete_by_row_id_condition(&mut tx_helper, self, &condition).await?;
+            let delete_count =
+                process_delete_by_row_id_condition(&mut tx_helper, self, &condition).await?;
             tx_helper.commit().await?;
+            Ok(delete_count)
         } else {
             let catalog_helper = CatalogHelper::new(self.catalog.clone());
             let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
@@ -211,7 +213,7 @@ impl Table {
             .await?;
 
             let mut tx_helper = self.transaction_helper().await?;
-            process_delete_by_condition(
+            let delete_count = process_delete_by_condition(
                 &mut tx_helper,
                 self,
                 &condition,
@@ -219,29 +221,34 @@ impl Table {
             )
             .await?;
             tx_helper.commit().await?;
+            Ok(delete_count)
         }
-
-        Ok(())
     }
 
     // Delete all rows in the table
-    pub async fn truncate(&self) -> ILResult<()> {
+    pub async fn truncate(&self) -> ILResult<usize> {
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
         let index_file_records = catalog_helper.get_table_index_files(&self.table_id).await?;
 
         let mut tx_helper = self.transaction_helper().await?;
 
-        tx_helper.truncate_inline_row_table(&self.table_id).await?;
+        let inline_truncate_count = tx_helper.truncate_inline_row_table(&self.table_id).await?;
 
         tx_helper.delete_all_data_files(&self.table_id).await?;
         tx_helper.delete_table_index_files(&self.table_id).await?;
 
         tx_helper.commit().await?;
 
+        let file_truncate_count = data_file_records
+            .iter()
+            .map(|record| record.valid_row_count())
+            .sum::<usize>();
+
         spawn_storage_data_files_clean_task(self.storage.clone(), data_file_records);
         spawn_storage_index_files_clean_task(self.storage.clone(), index_file_records);
-        Ok(())
+
+        Ok(inline_truncate_count + file_truncate_count)
     }
 
     // Drop the table

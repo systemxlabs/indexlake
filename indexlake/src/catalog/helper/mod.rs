@@ -63,20 +63,20 @@ impl TransactionHelper {
         self.transaction.rollback().await
     }
 
-    pub(crate) async fn truncate_inline_row_table(&mut self, table_id: &Uuid) -> ILResult<()> {
+    pub(crate) async fn truncate_inline_row_table(&mut self, table_id: &Uuid) -> ILResult<usize> {
+        let table_name = inline_row_table_name(table_id);
         match self.database {
             CatalogDatabase::Sqlite => {
                 self.transaction
-                    .execute_batch(&[format!("DELETE FROM {}", inline_row_table_name(table_id))])
+                    .execute(&format!("DELETE FROM {table_name}"))
                     .await
             }
             CatalogDatabase::Postgres => {
+                let count = self.count_inline_rows(table_id).await?;
                 self.transaction
-                    .execute_batch(&[format!(
-                        "TRUNCATE TABLE {}",
-                        inline_row_table_name(table_id)
-                    )])
-                    .await
+                    .execute(&format!("TRUNCATE TABLE {table_name}"))
+                    .await?;
+                Ok(count as usize)
             }
         }
     }

@@ -38,7 +38,8 @@ async fn update_table_by_condition(
         set_map: HashMap::from([("age".to_string(), lit(30i32))]),
         condition: col("name").eq(lit("Alice")),
     };
-    table.update(update).await?;
+    let update_count = table.update(update).await?;
+    assert_eq!(update_count, 1);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -86,8 +87,8 @@ async fn update_table_by_row_id(
         set_map: HashMap::from([("age".to_string(), lit(30i32))]),
         condition,
     };
-
-    table.update(update).await?;
+    let update_count = table.update(update).await?;
+    assert_eq!(update_count, 1);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);
@@ -137,7 +138,8 @@ async fn update_table_by_catalog_unsupported_condition(
         set_map: HashMap::from([("id".to_string(), lit(10i32))]),
         condition: col("vector").gt(lit(scalar)),
     };
-    table.update(update).await?;
+    let update_count = table.update(update).await?;
+    assert_eq!(update_count, 2);
 
     let table_str = full_table_scan(&table).await?;
     println!("{}", table_str);

@@ -112,13 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start_time = Instant::now();
     let condition = col("id").eq(lit(100i32));
-    table.delete(condition).await?;
-    let delete_cost_time = start_time.elapsed();
-    println!(
-        "IndexLake: deleted {} rows in {}ms",
-        total_rows / insert_batch_size,
-        delete_cost_time.as_millis()
-    );
+    let delete_count = table.delete(condition).await?;
+    let delete_cost_time = start_time.elapsed().as_millis();
+    println!("IndexLake: deleted {delete_count} rows in {delete_cost_time}ms",);
 
     Ok(())
 }
