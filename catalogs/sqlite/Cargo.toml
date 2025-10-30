@@ -11,7 +11,10 @@ description = "IndexLake sqlite catalog"
 [dependencies]
 indexlake = { workspace = true }
 
+arrow = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
+hex = { workspace = true }
 log = { workspace = true }
 rusqlite = { workspace = true }
+uuid = { workspace = true }

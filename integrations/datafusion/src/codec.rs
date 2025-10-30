@@ -98,7 +98,6 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     insert_op,
                 )?))
             }
-            // TODO upstream this to datafusion
             IndexLakePhysicalPlanType::MemoryDatasource(node) => {
                 let partitions = parse_partitions(&node.partitions)?;
                 let schema = Schema::try_from(&node.schema.unwrap())?;

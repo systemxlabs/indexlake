@@ -9,12 +9,12 @@ use std::sync::Arc;
 use futures::TryStreamExt;
 use uuid::Uuid;
 
-use crate::catalog::{Catalog, CatalogDatabase, CatalogSchemaRef, Row, Transaction};
+use crate::catalog::{Catalog, CatalogSchemaRef, Row, Transaction};
 use crate::{ILError, ILResult};
 
 pub(crate) struct TransactionHelper {
     pub(crate) transaction: Box<dyn Transaction>,
-    pub(crate) database: CatalogDatabase,
+    pub(crate) catalog: Arc<dyn Catalog>,
 }
 
 impl TransactionHelper {
@@ -22,7 +22,7 @@ impl TransactionHelper {
         let transaction = catalog.transaction().await?;
         Ok(Self {
             transaction,
-            database: catalog.database(),
+            catalog: catalog.clone(),
         })
     }
 
@@ -61,24 +61,6 @@ impl TransactionHelper {
     #[allow(dead_code)]
     pub(crate) async fn rollback(&mut self) -> ILResult<()> {
         self.transaction.rollback().await
-    }
-
-    pub(crate) async fn truncate_inline_row_table(&mut self, table_id: &Uuid) -> ILResult<usize> {
-        let table_name = inline_row_table_name(table_id);
-        match self.database {
-            CatalogDatabase::Sqlite => {
-                self.transaction
-                    .execute(&format!("DELETE FROM {table_name}"))
-                    .await
-            }
-            CatalogDatabase::Postgres => {
-                let count = self.count_inline_rows(table_id).await?;
-                self.transaction
-                    .execute(&format!("TRUNCATE TABLE {table_name}"))
-                    .await?;
-                Ok(count as usize)
-            }
-        }
     }
 
     pub(crate) async fn drop_inline_row_table(&mut self, table_id: &Uuid) -> ILResult<()> {

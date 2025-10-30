@@ -297,11 +297,13 @@ async fn scan_inline_rows(
     let projected_schema = Arc::new(project_schema(table_schema, scan.projection.as_ref())?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
-    let database = catalog_helper.catalog.database();
     let mut db_filters = Vec::new();
     let mut arrow_filters = Vec::new();
     for filter in scan.filters.iter() {
-        if database.supports_filter(filter, table_schema)? {
+        if catalog_helper
+            .catalog
+            .supports_filter(filter, table_schema)?
+        {
             db_filters.push(filter.clone());
         } else {
             arrow_filters.push(filter.clone());

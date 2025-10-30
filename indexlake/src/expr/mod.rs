@@ -29,7 +29,7 @@ use parquet::arrow::arrow_reader::ArrowPredicate;
 
 use derive_visitor::{Drive, DriveMut};
 
-use crate::catalog::{CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
+use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use crate::{ILError, ILResult};
 
 pub const DEFAULT_CAST_OPTIONS: CastOptions<'static> = CastOptions {
@@ -252,42 +252,6 @@ impl Expr {
             Expr::TryCast(try_cast) => Ok(try_cast.cast_type.clone()),
             Expr::Negative(expr) => expr.data_type(schema),
             Expr::Case(case) => case.data_type(schema),
-        }
-    }
-
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
-        match self {
-            Expr::Column(name) => Ok(database.sql_identifier(name)),
-            Expr::Literal(literal) => literal.value.to_sql(database),
-            Expr::BinaryExpr(binary_expr) => binary_expr.to_sql(database),
-            Expr::Not(expr) => Ok(format!("NOT {}", expr.to_sql(database)?)),
-            Expr::IsNull(expr) => Ok(format!("{} IS NULL", expr.to_sql(database)?)),
-            Expr::IsNotNull(expr) => Ok(format!("{} IS NOT NULL", expr.to_sql(database)?)),
-            Expr::InList(in_list) => {
-                let list = in_list
-                    .list
-                    .iter()
-                    .map(|expr| expr.to_sql(database))
-                    .collect::<ILResult<Vec<_>>>()?
-                    .join(", ");
-                Ok(format!("{} IN ({})", in_list.expr.to_sql(database)?, list))
-            }
-            Expr::Function(_) => Err(ILError::invalid_input(
-                "Function can only be used for index",
-            )),
-            Expr::Like(like) => like.to_sql(database),
-            Expr::Cast(cast) => {
-                let catalog_datatype = CatalogDataType::from_arrow(&cast.cast_type)?;
-                let expr_sql = cast.expr.to_sql(database)?;
-                Ok(format!(
-                    "CAST({} AS {})",
-                    expr_sql,
-                    catalog_datatype.to_sql(database)
-                ))
-            }
-            Expr::TryCast(_) => Err(ILError::invalid_input("TRY_CAST is not supported in SQL")),
-            Expr::Negative(expr) => Ok(format!("-{}", expr.to_sql(database)?)),
-            Expr::Case(case) => case.to_sql(database),
         }
     }
 

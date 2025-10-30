@@ -1,11 +1,10 @@
-mod database;
 mod helper;
 mod record;
 mod row;
 mod scalar;
 mod schema;
 
-pub use database::*;
+use arrow_schema::Schema;
 pub(crate) use helper::*;
 pub use record::*;
 pub use row::*;
@@ -13,8 +12,10 @@ pub use scalar::*;
 pub use schema::*;
 
 use futures::Stream;
+use uuid::Uuid;
 
 use crate::ILResult;
+use crate::expr::Expr;
 use arrow::datatypes::{DataType, Field, FieldRef};
 use std::fmt::Debug;
 use std::pin::Pin;
@@ -33,12 +34,26 @@ pub static INTERNAL_ROW_ID_FIELD_REF: LazyLock<FieldRef> = LazyLock::new(|| {
 
 #[async_trait::async_trait]
 pub trait Catalog: Debug + Send + Sync {
-    fn database(&self) -> CatalogDatabase;
-
     async fn query(&self, sql: &str, schema: CatalogSchemaRef) -> ILResult<RowStream<'static>>;
 
     /// Begin a new transaction.
     async fn transaction(&self) -> ILResult<Box<dyn Transaction>>;
+
+    async fn truncate(&self, table_name: &str) -> ILResult<()>;
+
+    fn sql_identifier(&self, ident: &str) -> String;
+
+    fn sql_binary_literal(&self, value: &[u8]) -> String;
+
+    fn sql_uuid_literal(&self, value: &Uuid) -> String;
+
+    fn sql_string_literal(&self, value: &str) -> String;
+
+    fn supports_filter(&self, filter: &Expr, schema: &Schema) -> ILResult<bool>;
+
+    fn unparse_expr(&self, expr: &Expr) -> ILResult<String>;
+
+    fn unparse_catalog_data_type(&self, data_type: CatalogDataType) -> String;
 }
 
 // Transaction should be rolled back when dropped.

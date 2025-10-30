@@ -95,7 +95,7 @@ pub(crate) async fn update_inline_rows(
     update: &TableUpdate,
 ) -> ILResult<usize> {
     if tx_helper
-        .database
+        .catalog
         .supports_filter(&update.condition, &table.schema)?
     {
         tx_helper
@@ -151,6 +151,7 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
         let updated_batch = update_record_batch(&batch, set_map)?;
         process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
     }
+    // TODO we count emit this after parquet reader supports row position
     let row_id_array = read_row_id_array_from_data_file(
         table.storage.as_ref(),
         &data_file_record.relative_path,

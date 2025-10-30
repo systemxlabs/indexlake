@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogDataType, CatalogDatabase, CatalogSchema, Column, Row, Scalar, deserialize_scalar,
+    Catalog, CatalogDataType, CatalogSchema, Column, Row, Scalar, deserialize_scalar,
     serialize_scalar,
 };
 use crate::storage::DataFileFormat;
@@ -24,7 +24,7 @@ pub(crate) struct TableRecord {
 }
 
 impl TableRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> ILResult<String> {
         let config_str = serde_json::to_string(&self.config)
             .map_err(|e| ILError::internal(format!("Failed to serialize table config: {e:?}")))?;
         let schema_metadata_str = serde_json::to_string(&self.schema_metadata).map_err(|e| {
@@ -32,9 +32,9 @@ impl TableRecord {
         })?;
         Ok(format!(
             "({}, '{}', {}, '{}', '{}')",
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.table_name,
-            database.sql_uuid_literal(&self.namespace_id),
+            catalog.sql_uuid_literal(&self.namespace_id),
             config_str,
             schema_metadata_str,
         ))
@@ -103,13 +103,13 @@ impl FieldRecord {
         }
     }
 
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> ILResult<String> {
         let data_type_str = serde_json::to_string(&self.data_type)
             .map_err(|e| ILError::internal(format!("Failed to serialize data type: {e:?}")))?;
         let default_value_sql = match self.default_value.as_ref() {
             Some(value) => {
                 let bytes = serialize_scalar(value)?;
-                database.sql_binary_literal(&bytes)
+                catalog.sql_binary_literal(&bytes)
             }
             None => "null".to_string(),
         };
@@ -117,8 +117,8 @@ impl FieldRecord {
             .map_err(|e| ILError::internal(format!("Failed to serialize field metadata: {e:?}")))?;
         Ok(format!(
             "({}, {}, '{}', '{}', {}, {}, '{}')",
-            database.sql_uuid_literal(&self.field_id),
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.field_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.field_name,
             data_type_str,
             self.nullable,
@@ -181,16 +181,16 @@ pub struct DataFileRecord {
 }
 
 impl DataFileRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         let validity_bytes = self.validity.bytes();
         format!(
             "({}, {}, '{}', '{}', {}, {})",
-            database.sql_uuid_literal(&self.data_file_id),
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.data_file_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.format,
             self.relative_path,
             self.record_count,
-            database.sql_binary_literal(validity_bytes),
+            catalog.sql_binary_literal(validity_bytes),
         )
     }
 
@@ -342,7 +342,7 @@ pub(crate) struct IndexRecord {
 }
 
 impl IndexRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         let key_field_ids_str = self
             .key_field_ids
             .iter()
@@ -351,8 +351,8 @@ impl IndexRecord {
             .join(",");
         format!(
             "({}, {}, '{}', '{}', '{}', '{}')",
-            database.sql_uuid_literal(&self.index_id),
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.index_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.index_name,
             self.index_kind,
             key_field_ids_str,
@@ -403,13 +403,13 @@ pub(crate) struct IndexFileRecord {
 }
 
 impl IndexFileRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         format!(
             "({}, {}, {}, {}, '{}')",
-            database.sql_uuid_literal(&self.index_file_id),
-            database.sql_uuid_literal(&self.table_id),
-            database.sql_uuid_literal(&self.index_id),
-            database.sql_uuid_literal(&self.data_file_id),
+            catalog.sql_uuid_literal(&self.index_file_id),
+            catalog.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.index_id),
+            catalog.sql_uuid_literal(&self.data_file_id),
             self.relative_path
         )
     }
@@ -454,11 +454,11 @@ pub(crate) struct InlineIndexRecord {
 }
 
 impl InlineIndexRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         format!(
             "({}, {})",
-            database.sql_uuid_literal(&self.index_id),
-            database.sql_binary_literal(&self.index_data)
+            catalog.sql_uuid_literal(&self.index_id),
+            catalog.sql_binary_literal(&self.index_data)
         )
     }
 

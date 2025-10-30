@@ -71,10 +71,7 @@ pub(crate) async fn delete_inline_rows(
     condition: &Expr,
 ) -> ILResult<usize> {
     // TODO improve performance through projection
-    if tx_helper
-        .database
-        .supports_filter(condition, table_schema)?
-    {
+    if tx_helper.catalog.supports_filter(condition, table_schema)? {
         tx_helper
             .delete_inline_rows(table_id, std::slice::from_ref(condition), None)
             .await

@@ -18,7 +18,7 @@ pub use update::*;
 
 use crate::catalog::{
     Catalog, CatalogHelper, DataFileRecord, FieldRecord, INTERNAL_ROW_ID_FIELD_NAME,
-    INTERNAL_ROW_ID_FIELD_REF, IndexFileRecord, Scalar, TransactionHelper,
+    INTERNAL_ROW_ID_FIELD_REF, IndexFileRecord, Scalar, TransactionHelper, inline_row_table_name,
 };
 use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
@@ -228,16 +228,16 @@ impl Table {
     // Delete all rows in the table
     pub async fn truncate(&self) -> ILResult<usize> {
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
+        let inline_truncate_count = catalog_helper.count_inline_rows(&self.table_id).await?;
         let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
         let index_file_records = catalog_helper.get_table_index_files(&self.table_id).await?;
 
+        let table_name = inline_row_table_name(&self.table_id);
+        self.catalog.truncate(&table_name).await?;
+
         let mut tx_helper = self.transaction_helper().await?;
-
-        let inline_truncate_count = tx_helper.truncate_inline_row_table(&self.table_id).await?;
-
         tx_helper.delete_all_data_files(&self.table_id).await?;
         tx_helper.delete_table_index_files(&self.table_id).await?;
-
         tx_helper.commit().await?;
 
         let file_truncate_count = data_file_records
@@ -248,7 +248,7 @@ impl Table {
         spawn_storage_data_files_clean_task(self.storage.clone(), data_file_records);
         spawn_storage_index_files_clean_task(self.storage.clone(), index_file_records);
 
-        Ok(inline_truncate_count + file_truncate_count)
+        Ok(inline_truncate_count as usize + file_truncate_count)
     }
 
     // Drop the table
@@ -277,12 +277,13 @@ impl Table {
 
     pub async fn drop_index(self, index_name: &str, if_exists: bool) -> ILResult<()> {
         let Some(index_def) = self.index_manager.get_index(index_name) else {
-            if if_exists {
-                return Ok(());
-            }
-            return Err(ILError::invalid_input(format!(
-                "Index {index_name} not found"
-            )));
+            return if if_exists {
+                Ok(())
+            } else {
+                Err(ILError::invalid_input(format!(
+                    "Index {index_name} not found"
+                )))
+            };
         };
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());

@@ -11,6 +11,7 @@ description = "IndexLake postgres catalog"
 [dependencies]
 indexlake = { workspace = true }
 
+arrow = { workspace = true }
 async-trait = { workspace = true }
 bb8 = { workspace = true }
 bb8-postgres = { workspace = true, features = [
@@ -19,6 +20,7 @@ bb8-postgres = { workspace = true, features = [
   "with-uuid-1",
 ] }
 futures = { workspace = true }
+hex = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 uuid = { workspace = true }

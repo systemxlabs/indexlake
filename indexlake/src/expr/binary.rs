@@ -7,7 +7,7 @@ use arrow::error::ArrowError;
 use arrow_schema::SortOptions;
 use derive_visitor::{Drive, DriveMut};
 
-use crate::catalog::{CatalogDatabase, Scalar};
+use crate::catalog::Scalar;
 use crate::expr::{ColumnarValue, Expr};
 use crate::{ILError, ILResult};
 
@@ -77,12 +77,6 @@ pub struct BinaryExpr {
 }
 
 impl BinaryExpr {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
-        let left_sql = self.left.to_sql(database)?;
-        let right_sql = self.right.to_sql(database)?;
-        Ok(format!("({} {} {})", left_sql, self.op, right_sql))
-    }
-
     pub(crate) fn eval(&self, batch: &RecordBatch) -> ILResult<ColumnarValue> {
         let lhs = self.left.eval(batch)?;
         let rhs = self.right.eval(batch)?;

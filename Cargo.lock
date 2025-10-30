@@ -2548,10 +2548,12 @@ dependencies = [
 name = "indexlake-catalog-postgres"
 version = "0.2.0"
 dependencies = [
+ "arrow",
  "async-trait",
  "bb8",
  "bb8-postgres",
  "futures",
+ "hex",
  "indexlake",
  "log",
  "tokio",
@@ -2562,11 +2564,14 @@ dependencies = [
 name = "indexlake-catalog-sqlite"
 version = "0.2.0"
 dependencies = [
+ "arrow",
  "async-trait",
  "futures",
+ "hex",
  "indexlake",
  "log",
  "rusqlite",
+ "uuid",
 ]
 
 [[package]]
