@@ -35,6 +35,53 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub type TableSchemaRef = Arc<TableSchema>;
+
+#[derive(Debug, Clone)]
+pub struct TableSchema {
+    pub arrow_schema: SchemaRef,
+    pub field_name_id_map: HashMap<String, Uuid>,
+    pub field_id_name_map: HashMap<Uuid, String>,
+    pub field_id_default_value_map: HashMap<Uuid, Scalar>,
+}
+
+impl TableSchema {
+    pub fn new(field_records: &[FieldRecord], schema_metadata: HashMap<String, String>) -> Self {
+        let field_name_id_map = field_records
+            .iter()
+            .map(|record| (record.field_name.clone(), record.field_id))
+            .collect::<HashMap<String, Uuid>>();
+        let field_id_name_map = field_records
+            .iter()
+            .map(|record| (record.field_id, record.field_name.clone()))
+            .collect::<HashMap<Uuid, String>>();
+        let field_id_default_value_map = field_records
+            .iter()
+            .filter(|record| record.default_value.is_some())
+            .map(|record| (record.field_id, record.default_value.clone().unwrap()))
+            .collect::<HashMap<_, _>>();
+
+        let mut fields = field_records
+            .iter()
+            .map(|f| {
+                Arc::new(
+                    Field::new(hex::encode(f.field_id), f.data_type.clone(), f.nullable)
+                        .with_metadata(f.metadata.clone()),
+                )
+            })
+            .collect::<Vec<_>>();
+        fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
+        let schema = Arc::new(Schema::new_with_metadata(fields, schema_metadata));
+
+        Self {
+            arrow_schema: schema,
+            field_name_id_map,
+            field_id_name_map,
+            field_id_default_value_map,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Table {
     pub namespace_id: Uuid,
@@ -42,11 +89,8 @@ pub struct Table {
     pub table_id: Uuid,
     pub table_name: String,
     pub field_records: Arc<Vec<FieldRecord>>,
-    pub(crate) schema: SchemaRef,
+    pub(crate) table_schema: TableSchemaRef,
     pub output_schema: SchemaRef,
-    pub field_name_id_map: HashMap<String, Uuid>,
-    pub field_id_name_map: HashMap<Uuid, String>,
-    pub field_id_default_value_map: HashMap<Uuid, Scalar>,
     pub config: Arc<TableConfig>,
     pub catalog: Arc<dyn Catalog>,
     pub storage: Arc<dyn Storage>,
@@ -59,7 +103,8 @@ impl Table {
     }
 
     pub async fn create_index(self, index_creation: IndexCreation) -> ILResult<()> {
-        let index_creation = index_creation.rewrite_columns(&self.field_name_id_map)?;
+        let index_creation =
+            index_creation.rewrite_columns(&self.table_schema.field_name_id_map)?;
         let mut tx_helper = self.transaction_helper().await?;
         process_create_index(&mut tx_helper, self, index_creation).await?;
         tx_helper.commit().await?;
@@ -67,11 +112,10 @@ impl Table {
     }
 
     pub async fn insert(&self, insert: TableInsertion) -> ILResult<()> {
-        let insert = insert.rewrite_columns(&self.field_name_id_map)?;
+        let insert = insert.rewrite_columns(&self.table_schema.field_name_id_map)?;
         let mut rewritten_batches = check_and_rewrite_insert_batches(
             &insert.data,
-            self.schema.clone(),
-            &self.field_id_default_value_map,
+            &self.table_schema,
             insert.ignore_row_id,
         )?;
         let total_rows = rewritten_batches
@@ -99,13 +143,13 @@ impl Table {
     }
 
     pub async fn scan(&self, scan: TableScan) -> ILResult<RecordBatchStream> {
-        let scan = scan.rewrite_columns(&self.field_name_id_map)?;
+        let scan = scan.rewrite_columns(&self.table_schema.field_name_id_map)?;
         scan.validate()?;
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let batch_stream = process_scan(&catalog_helper, self, scan).await?;
 
-        let field_id_name_map = self.field_id_name_map.clone();
+        let field_id_name_map = self.table_schema.field_id_name_map.clone();
         let correct_batch_stream = batch_stream
             .map(move |batch| {
                 let batch = batch?;
@@ -146,7 +190,7 @@ impl Table {
     pub async fn search(&self, search: TableSearch) -> ILResult<RecordBatchStream> {
         let batch_stream = process_search(self, search).await?;
 
-        let field_id_name_map = self.field_id_name_map.clone();
+        let field_id_name_map = self.table_schema.field_id_name_map.clone();
         let correct_batch_stream = batch_stream
             .map(move |batch| {
                 let batch = batch?;
@@ -158,18 +202,18 @@ impl Table {
     }
 
     pub async fn update(&self, update: TableUpdate) -> ILResult<usize> {
-        let update = update.rewrite_columns(&self.field_name_id_map)?;
+        let update = update.rewrite_columns(&self.table_schema.field_name_id_map)?;
         // TODO update all rows
         update
             .condition
-            .check_data_type(&self.schema, &DataType::Boolean)?;
+            .check_data_type(&self.table_schema.arrow_schema, &DataType::Boolean)?;
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
 
         let matched_data_file_rows = parallel_find_matched_data_file_rows(
             self.storage.clone(),
-            self.schema.clone(),
+            self.table_schema.clone(),
             update.condition.clone(),
             data_file_records,
         )
@@ -185,8 +229,8 @@ impl Table {
     }
 
     pub async fn delete(&self, condition: Expr) -> ILResult<usize> {
-        let condition = condition.rewrite_columns(&self.field_name_id_map)?;
-        condition.check_data_type(&self.schema, &DataType::Boolean)?;
+        let condition = condition.rewrite_columns(&self.table_schema.field_name_id_map)?;
+        condition.check_data_type(&self.table_schema.arrow_schema, &DataType::Boolean)?;
 
         if let Ok(scalar) = condition.constant_eval()
             && matches!(scalar, Scalar::Boolean(Some(true)))
@@ -206,7 +250,7 @@ impl Table {
             let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
             let matched_data_file_row_ids = parallel_find_matched_data_file_row_ids(
                 self.storage.clone(),
-                self.schema.clone(),
+                self.table_schema.clone(),
                 condition.clone(),
                 data_file_records,
             )
@@ -318,7 +362,7 @@ impl Table {
     }
 
     pub fn supports_filter(&self, filter: Expr) -> ILResult<FilterSupport> {
-        let filter = filter.rewrite_columns(&self.field_name_id_map)?;
+        let filter = filter.rewrite_columns(&self.table_schema.field_name_id_map)?;
         match filter {
             Expr::Function(_) => self.index_manager.supports_filter(&filter),
             _ => Ok(FilterSupport::Exact),
@@ -389,18 +433,17 @@ impl Default for TableConfig {
 
 pub fn check_and_rewrite_insert_batches(
     batches: &[RecordBatch],
-    table_schema: SchemaRef,
-    field_id_default_value_map: &HashMap<Uuid, Scalar>,
+    table_schema: &TableSchemaRef,
     ignore_row_id: bool,
 ) -> ILResult<Vec<RecordBatch>> {
     let mut rewritten_batches = Vec::with_capacity(batches.len());
     for batch in batches {
         let batch_schema = batch.schema_ref();
 
-        let mut fields = Vec::with_capacity(table_schema.fields().len());
-        let mut arrays = Vec::with_capacity(table_schema.fields().len());
+        let mut fields = Vec::with_capacity(table_schema.arrow_schema.fields().len());
+        let mut arrays = Vec::with_capacity(table_schema.arrow_schema.fields().len());
 
-        for table_field in table_schema.fields() {
+        for table_field in table_schema.arrow_schema.fields() {
             let table_field_name = table_field.name();
 
             if table_field_name == INTERNAL_ROW_ID_FIELD_NAME {
@@ -431,7 +474,7 @@ pub fn check_and_rewrite_insert_batches(
                 fields.push(batch_field);
                 arrays.push(batch.column(batch_field_idx).clone());
             } else if let Ok(field_id) = Uuid::parse_str(table_field_name)
-                && let Some(default_value) = field_id_default_value_map.get(&field_id)
+                && let Some(default_value) = table_schema.field_id_default_value_map.get(&field_id)
             {
                 fields.push(table_field.clone());
                 arrays.push(default_value.to_array_of_size(batch.num_rows())?);

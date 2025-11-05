@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::datatypes::SchemaRef;
 use futures::StreamExt;
 use log::{debug, error};
 use uuid::Uuid;
@@ -14,13 +13,13 @@ use crate::catalog::{
 use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
-use crate::table::{Table, TableConfig};
+use crate::table::{Table, TableConfig, TableSchemaRef};
 use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
     let namespace_id = table.namespace_id;
     let table_id = table.table_id;
-    let table_schema = table.schema.clone();
+    let table_schema = table.table_schema.clone();
     let index_manager = table.index_manager.clone();
     let table_config = table.config.clone();
     let catalog = table.catalog.clone();
@@ -71,7 +70,7 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
 pub(crate) struct DumpTask {
     namespace_id: Uuid,
     table_id: Uuid,
-    table_schema: SchemaRef,
+    table_schema: TableSchemaRef,
     index_manager: Arc<IndexManager>,
     table_config: Arc<TableConfig>,
     catalog: Arc<dyn Catalog>,
@@ -96,7 +95,7 @@ impl DumpTask {
             return Ok(false);
         }
 
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&self.table_schema)?);
+        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&self.table_schema.arrow_schema)?);
         let row_stream = tx_helper
             .scan_inline_rows(
                 &self.table_id,
@@ -209,7 +208,7 @@ impl DumpTask {
         let output_file = self.storage.create(relative_path).await?;
         let mut arrow_writer = build_parquet_writer(
             output_file,
-            self.table_schema.clone(),
+            self.table_schema.arrow_schema.clone(),
             self.table_config.parquet_row_group_size,
             self.table_config.preferred_data_file_format,
         )?;
@@ -224,7 +223,7 @@ impl DumpTask {
                 row_ids.push(row_id);
                 rows.push(row);
             }
-            let record_batch = rows_to_record_batch(&self.table_schema, &rows)?;
+            let record_batch = rows_to_record_batch(&self.table_schema.arrow_schema, &rows)?;
 
             for index_builder in index_builders.iter_mut() {
                 index_builder.append(&record_batch)?;
@@ -242,21 +241,21 @@ impl DumpTask {
 pub(crate) async fn rebuild_inline_indexes(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
-    table_schema: &SchemaRef,
+    table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
 ) -> ILResult<()> {
     // index builders
     let mut index_builders = index_manager.new_index_builders()?;
 
     // append index builders
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
         .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
         .await?;
     let mut chunk_stream = row_stream.chunks(100);
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let record_batch = rows_to_record_batch(table_schema, &rows)?;
+        let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         for index_builder in index_builders.iter_mut() {
             index_builder.append(&record_batch)?;
         }

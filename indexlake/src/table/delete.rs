@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow::array::RecordBatch;
-use arrow::datatypes::{DataType, Schema, SchemaRef};
+use arrow::datatypes::{DataType, Schema};
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -16,7 +16,7 @@ use crate::expr::Expr;
 use crate::storage::{
     Storage, find_matched_row_ids_from_data_file, read_row_id_array_from_data_file,
 };
-use crate::table::Table;
+use crate::table::{Table, TableSchemaRef};
 use crate::utils::fixed_size_binary_array_to_uuids;
 
 pub(crate) async fn process_delete_by_condition(
@@ -27,7 +27,7 @@ pub(crate) async fn process_delete_by_condition(
 ) -> ILResult<usize> {
     // Directly delete inline rows
     let inline_delete_count =
-        delete_inline_rows(tx_helper, &table.table_id, &table.schema, condition).await?;
+        delete_inline_rows(tx_helper, &table.table_id, &table.table_schema, condition).await?;
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
@@ -67,16 +67,19 @@ pub(crate) async fn process_delete_by_condition(
 pub(crate) async fn delete_inline_rows(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
-    table_schema: &SchemaRef,
+    table_schema: &TableSchemaRef,
     condition: &Expr,
 ) -> ILResult<usize> {
     // TODO improve performance through projection
-    if tx_helper.catalog.supports_filter(condition, table_schema)? {
+    if tx_helper
+        .catalog
+        .supports_filter(condition, &table_schema.arrow_schema)?
+    {
         tx_helper
             .delete_inline_rows(table_id, std::slice::from_ref(condition), None)
             .await
     } else {
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
+        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
         let row_stream = tx_helper
             .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
             .await?;
@@ -84,7 +87,7 @@ pub(crate) async fn delete_inline_rows(
         let mut matched_row_ids = Vec::new();
         while let Some(row_chunk) = chunk_stream.next().await {
             let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
-            let record_batch = rows_to_record_batch(table_schema, &rows)?;
+            let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
             let bool_array = condition.condition_eval(&record_batch)?;
             for (i, v) in bool_array.iter().enumerate() {
                 if let Some(v) = v
@@ -110,7 +113,7 @@ pub(crate) async fn delete_data_file_rows_by_condition(
 ) -> ILResult<usize> {
     let deleted_row_ids = find_matched_row_ids_from_data_file(
         table.storage.as_ref(),
-        &table.schema,
+        &table.table_schema,
         condition,
         &data_file_record,
     )
@@ -127,8 +130,13 @@ pub(crate) async fn process_delete_by_row_id_condition(
     table: &Table,
     row_id_condition: &Expr,
 ) -> ILResult<usize> {
-    let inline_delete_count =
-        delete_inline_rows(tx_helper, &table.table_id, &table.schema, row_id_condition).await?;
+    let inline_delete_count = delete_inline_rows(
+        tx_helper,
+        &table.table_id,
+        &table.table_schema,
+        row_id_condition,
+    )
+    .await?;
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
@@ -167,11 +175,11 @@ pub(crate) async fn process_delete_by_row_id_condition(
 
 pub(crate) async fn parallel_find_matched_data_file_row_ids(
     storage: Arc<dyn Storage>,
-    table_schema: SchemaRef,
+    table_schema: TableSchemaRef,
     condition: Expr,
     data_file_records: Vec<DataFileRecord>,
 ) -> ILResult<HashMap<Uuid, HashSet<Uuid>>> {
-    condition.check_data_type(&table_schema, &DataType::Boolean)?;
+    condition.check_data_type(&table_schema.arrow_schema, &DataType::Boolean)?;
 
     let mut handles = Vec::new();
     for data_file_record in data_file_records {

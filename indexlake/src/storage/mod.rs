@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use crate::catalog::DataFileRecord;
 use crate::expr::{Expr, row_ids_in_list_expr};
+use crate::table::TableSchemaRef;
 use crate::{ILError, ILResult, RecordBatchStream};
-use arrow_schema::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -83,7 +83,7 @@ impl std::str::FromStr for DataFileFormat {
 
 pub(crate) async fn read_data_file_by_record(
     storage: &dyn Storage,
-    table_schema: &Schema,
+    table_schema: &TableSchemaRef,
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
     mut filters: Vec<Expr>,
@@ -111,7 +111,7 @@ pub(crate) async fn read_data_file_by_record(
 
 pub(crate) async fn find_matched_row_ids_from_data_file(
     storage: &dyn Storage,
-    table_schema: &Schema,
+    table_schema: &TableSchemaRef,
     condition: &Expr,
     data_file_record: &DataFileRecord,
 ) -> ILResult<HashSet<Uuid>> {

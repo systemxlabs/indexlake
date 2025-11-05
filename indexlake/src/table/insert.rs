@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
-use arrow_schema::SchemaRef;
 use futures::StreamExt;
 use uuid::Uuid;
 
@@ -13,7 +12,7 @@ use crate::catalog::{
 };
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, build_parquet_writer};
-use crate::table::Table;
+use crate::table::{Table, TableSchemaRef};
 use crate::utils::{
     extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, rewrite_batch_schema,
     serialize_array,
@@ -90,7 +89,7 @@ pub(crate) async fn process_insert_into_inline_rows(
     append_non_mergeable_index_builders(
         tx_helper,
         &table.table_id,
-        &table.schema,
+        &table.table_schema,
         &mut non_mergeable_index_builders,
     )
     .await?;
@@ -200,7 +199,7 @@ async fn write_parquet_file(
 
     let mut arrow_writer = build_parquet_writer(
         output_file,
-        table.schema.clone(),
+        table.table_schema.arrow_schema.clone(),
         table.config.parquet_row_group_size,
         table.config.preferred_data_file_format,
     )?;
@@ -456,17 +455,17 @@ pub(crate) fn record_batch_to_sql_values(
 pub(crate) async fn append_non_mergeable_index_builders(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
-    table_schema: &SchemaRef,
+    table_schema: &TableSchemaRef,
     index_builders: &mut Vec<Box<dyn IndexBuilder>>,
 ) -> ILResult<()> {
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
 
     let row_stream = tx_helper
         .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
         .await?;
     let mut inline_stream = row_stream.chunks(100).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(table_schema, &rows)?;
+        let batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         Ok::<_, ILError>(batch)
     });
 

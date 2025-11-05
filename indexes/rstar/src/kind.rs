@@ -35,7 +35,10 @@ impl IndexKind for RStarIndexKind {
             ));
         }
         let key_column_name = &index_def.key_columns[0];
-        let key_field = index_def.table_schema.field_with_name(key_column_name)?;
+        let key_field = index_def
+            .table_schema
+            .arrow_schema
+            .field_with_name(key_column_name)?;
         if !matches!(
             key_field.data_type(),
             DataType::Binary | DataType::LargeBinary | DataType::BinaryView
@@ -94,7 +97,10 @@ fn check_intersects_function(
         return Ok(FilterSupport::Unsupported);
     };
     let key_column_name = &index_def.key_columns[0];
-    let key_field = index_def.table_schema.field_with_name(key_column_name)?;
+    let key_field = index_def
+        .table_schema
+        .arrow_schema
+        .field_with_name(key_column_name)?;
     if key_field.name() != col {
         return Ok(FilterSupport::Unsupported);
     }

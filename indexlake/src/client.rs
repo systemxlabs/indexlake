@@ -8,7 +8,7 @@ use crate::catalog::{
 };
 use crate::index::{IndexDefinition, IndexKind, IndexManager};
 use crate::storage::Storage;
-use crate::table::{MetadataColumn, Table, TableCreation, process_create_table};
+use crate::table::{MetadataColumn, Table, TableCreation, TableSchema, process_create_table};
 use crate::{ILError, ILResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,10 +86,7 @@ impl Client {
     }
 
     pub async fn create_table(&self, table_creation: TableCreation) -> ILResult<Uuid> {
-        if table_creation.schema.fields().is_empty() {
-            return Err(ILError::invalid_input("Schema is empty"));
-        }
-        check_schema_contains_system_column(&table_creation.schema)?;
+        table_creation.validate()?;
 
         let mut tx_helper = self.transaction_helper().await?;
         let table_id = process_create_table(&mut tx_helper, table_creation.clone()).await?;
@@ -122,32 +119,9 @@ impl Client {
                 .get_table_fields(&table_record.table_id)
                 .await?,
         );
-        let field_name_id_map = field_records
-            .iter()
-            .map(|record| (record.field_name.clone(), record.field_id))
-            .collect::<HashMap<String, Uuid>>();
-        let field_id_name_map = field_records
-            .iter()
-            .map(|record| (record.field_id, record.field_name.clone()))
-            .collect::<HashMap<Uuid, String>>();
-        let field_id_default_value_map = field_records
-            .iter()
-            .filter(|record| record.default_value.is_some())
-            .map(|record| (record.field_id, record.default_value.clone().unwrap()))
-            .collect::<HashMap<_, _>>();
 
-        let mut fields = field_records
-            .iter()
-            .map(|f| {
-                Arc::new(
-                    Field::new(hex::encode(f.field_id), f.data_type.clone(), f.nullable)
-                        .with_metadata(f.metadata.clone()),
-                )
-            })
-            .collect::<Vec<_>>();
-        fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
-        let schema = Arc::new(Schema::new_with_metadata(
-            fields,
+        let schema = Arc::new(TableSchema::new(
+            &field_records,
             table_record.schema_metadata.clone(),
         ));
 
@@ -188,11 +162,8 @@ impl Client {
             table_id: table_record.table_id,
             table_name: table_name.to_string(),
             field_records,
-            schema,
+            table_schema: schema,
             output_schema,
-            field_name_id_map,
-            field_id_name_map,
-            field_id_default_value_map,
             config: Arc::new(table_record.config),
             catalog: self.catalog.clone(),
             storage: self.storage.clone(),
@@ -201,7 +172,7 @@ impl Client {
     }
 }
 
-fn check_schema_contains_system_column(schema: &Schema) -> ILResult<()> {
+pub(crate) fn check_schema_contains_system_column(schema: &Schema) -> ILResult<()> {
     if schema.field_with_name(INTERNAL_ROW_ID_FIELD_NAME).is_ok() {
         return Err(ILError::invalid_input(format!(
             "Schema contains system column: {INTERNAL_ROW_ID_FIELD_NAME}"

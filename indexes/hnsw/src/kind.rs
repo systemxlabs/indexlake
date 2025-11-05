@@ -31,7 +31,10 @@ impl IndexKind for HnswIndexKind {
             return Err(ILError::index("Hnsw index requires exactly one key column"));
         }
         let key_column_name = &index_def.key_columns[0];
-        let key_field = index_def.table_schema.field_with_name(key_column_name)?;
+        let key_field = index_def
+            .table_schema
+            .arrow_schema
+            .field_with_name(key_column_name)?;
         match key_field.data_type() {
             DataType::List(inner) => {
                 if !matches!(inner.data_type(), DataType::Float32) || inner.is_nullable() {

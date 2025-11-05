@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow::array::{RecordBatch, RecordBatchOptions};
-use arrow::datatypes::SchemaRef;
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -10,7 +9,9 @@ use uuid::Uuid;
 use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_record_batch};
 use crate::expr::Expr;
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
-use crate::table::{Table, process_insert_into_inline_rows, rebuild_inline_indexes};
+use crate::table::{
+    Table, TableSchemaRef, process_insert_into_inline_rows, rebuild_inline_indexes,
+};
 use crate::utils::{extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids};
 use crate::{ILError, ILResult, RecordBatchStream};
 
@@ -53,7 +54,7 @@ pub(crate) async fn process_update_by_condition(
         rebuild_inline_indexes(
             tx_helper,
             &table.table_id,
-            &table.schema,
+            &table.table_schema,
             &table.index_manager,
         )
         .await?;
@@ -96,13 +97,13 @@ pub(crate) async fn update_inline_rows(
 ) -> ILResult<usize> {
     if tx_helper
         .catalog
-        .supports_filter(&update.condition, &table.schema)?
+        .supports_filter(&update.condition, &table.table_schema.arrow_schema)?
     {
         tx_helper
             .update_inline_rows(&table.table_id, &update.set_map, &update.condition)
             .await
     } else {
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.schema)?);
+        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.table_schema.arrow_schema)?);
         let row_stream = tx_helper
             .scan_inline_rows(&table.table_id, &catalog_schema, &[], None, None)
             .await?;
@@ -111,7 +112,7 @@ pub(crate) async fn update_inline_rows(
         let mut updated_batches = Vec::new();
         while let Some(row_chunk) = chunk_stream.next().await {
             let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
-            let record_batch = rows_to_record_batch(&table.schema, &rows)?;
+            let record_batch = rows_to_record_batch(&table.table_schema.arrow_schema, &rows)?;
             let bool_array = update.condition.condition_eval(&record_batch)?;
             for (i, v) in bool_array.iter().enumerate() {
                 if let Some(v) = v
@@ -174,7 +175,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
 ) -> ILResult<usize> {
     let mut stream = read_data_file_by_record(
         table.storage.as_ref(),
-        &table.schema,
+        &table.table_schema,
         &data_file_record,
         None,
         vec![condition.clone()],
@@ -209,7 +210,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
 
 pub(crate) async fn parallel_find_matched_data_file_rows(
     storage: Arc<dyn Storage>,
-    table_schema: SchemaRef,
+    table_schema: TableSchemaRef,
     condition: Expr,
     data_file_records: Vec<DataFileRecord>,
 ) -> ILResult<HashMap<Uuid, RecordBatchStream>> {

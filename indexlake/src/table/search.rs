@@ -234,7 +234,10 @@ async fn read_inline_rows(
         .map(|(row_id_score, _)| row_id_score.row_id)
         .collect::<Vec<_>>();
 
-    let projected_schema = Arc::new(project_schema(&table.schema, projection.as_ref())?);
+    let projected_schema = Arc::new(project_schema(
+        &table.table_schema.arrow_schema,
+        projection.as_ref(),
+    )?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
     let row_stream = catalog_helper
@@ -275,7 +278,7 @@ async fn read_data_file_rows(
             )))?;
         let stream = read_data_file_by_record(
             table.storage.as_ref(),
-            &table.schema,
+            &table.table_schema,
             data_file_record,
             projection.clone(),
             vec![],

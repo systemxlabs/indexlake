@@ -3,7 +3,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use arrow::array::FixedSizeBinaryArray;
-use arrow::datatypes::{Schema, SchemaRef};
+use arrow::datatypes::SchemaRef;
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
 use parquet::arrow::arrow_reader::{ArrowReaderOptions, RowFilter};
@@ -19,6 +19,7 @@ use uuid::Uuid;
 use crate::catalog::DataFileRecord;
 use crate::expr::{Expr, ExprPredicate, visited_columns};
 use crate::storage::{DataFileFormat, File, Storage};
+use crate::table::TableSchemaRef;
 use crate::utils::{build_projection_from_condition, extract_row_ids_from_record_batch};
 use crate::{ILError, ILResult, RecordBatchStream};
 
@@ -97,7 +98,7 @@ pub(crate) fn build_parquet_writer<W: AsyncFileWriter>(
 
 pub(crate) async fn read_parquet_file_by_record(
     storage: &dyn Storage,
-    table_schema: &Schema,
+    table_schema: &TableSchemaRef,
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
     filters: Vec<Expr>,
@@ -105,7 +106,7 @@ pub(crate) async fn read_parquet_file_by_record(
 ) -> ILResult<RecordBatchStream> {
     let projection_mask = match projection {
         Some(projection) => {
-            let parquet_schema = ArrowSchemaConverter::new().convert(table_schema)?;
+            let parquet_schema = ArrowSchemaConverter::new().convert(&table_schema.arrow_schema)?;
             ProjectionMask::roots(&parquet_schema, projection)
         }
         None => ProjectionMask::all(),
@@ -120,10 +121,10 @@ pub(crate) async fn read_parquet_file_by_record(
             .collect::<HashSet<_>>();
         let mut predicate_projection = Vec::new();
         for visited_column in visited_columns {
-            let index = table_schema.index_of(&visited_column)?;
+            let index = table_schema.arrow_schema.index_of(&visited_column)?;
             predicate_projection.push(index);
         }
-        let parquet_schema = ArrowSchemaConverter::new().convert(table_schema)?;
+        let parquet_schema = ArrowSchemaConverter::new().convert(&table_schema.arrow_schema)?;
         let predicate_projection_mask =
             ProjectionMask::roots(&parquet_schema, predicate_projection);
         Some(ExprPredicate::try_new(filters, predicate_projection_mask)?)
@@ -148,11 +149,11 @@ pub(crate) async fn read_parquet_file_by_record(
 
 pub(crate) async fn find_matched_row_ids_from_parquet_file(
     storage: &dyn Storage,
-    table_schema: &Schema,
+    table_schema: &TableSchemaRef,
     condition: &Expr,
     data_file_record: &DataFileRecord,
 ) -> ILResult<HashSet<Uuid>> {
-    let mut projection = build_projection_from_condition(table_schema, condition)?;
+    let mut projection = build_projection_from_condition(&table_schema.arrow_schema, condition)?;
     // If the condition does not contain the row id column, add it to the projection
     if !projection.contains(&0) {
         projection.insert(0, 0);
