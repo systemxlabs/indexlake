@@ -8,9 +8,10 @@ use arrow::array::{
 use arrow::datatypes::{FieldRef, Schema};
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
+use arrow_schema::SchemaRef;
 use uuid::Uuid;
 
-use crate::catalog::INTERNAL_ROW_ID_FIELD_NAME;
+use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use crate::expr::{Expr, visited_columns};
 use crate::table::MetadataColumn;
 use crate::{ILError, ILResult};
@@ -266,5 +267,39 @@ pub fn correct_batch_schema(
     let new_schema =
         Arc::new(Schema::new(new_fields).with_metadata(batch_schema.metadata().clone()));
     let new_batch = RecordBatch::try_new(new_schema, batch.columns().to_vec())?;
+    Ok(new_batch)
+}
+
+pub(crate) fn complete_batch_missing_fields(
+    batch: RecordBatch,
+    target_schema: SchemaRef,
+    field_id_default_value_map: &HashMap<Uuid, Scalar>,
+) -> ILResult<RecordBatch> {
+    let mut new_columns = Vec::with_capacity(target_schema.fields().len());
+
+    let batch_schema = batch.schema_ref();
+
+    for field in target_schema.fields() {
+        let field_name = field.name();
+
+        if let Ok(index) = batch_schema.index_of(field_name) {
+            new_columns.push(batch.column(index).clone());
+        } else {
+            let Ok(field_id) = Uuid::parse_str(field.name()) else {
+                return Err(ILError::internal(format!(
+                    "Failed to parse field name {field_name} as uuid",
+                )));
+            };
+            if let Some(default_value) = field_id_default_value_map.get(&field_id) {
+                let array = default_value.to_array_of_size(batch.num_rows())?;
+                new_columns.push(array);
+            } else {
+                return Err(ILError::internal(
+                    "No default value for field {field_name} to complete record batch",
+                ));
+            }
+        }
+    }
+    let new_batch = RecordBatch::try_new(target_schema, new_columns)?;
     Ok(new_batch)
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use arrow_schema::{FieldRef, Schema};
 use uuid::Uuid;
 
@@ -5,6 +7,7 @@ use crate::{
     ILError, ILResult,
     catalog::{FieldRecord, Scalar, TransactionHelper},
     check_schema_contains_system_column,
+    expr::lit,
     table::{Table, check_default_value},
 };
 
@@ -88,7 +91,22 @@ pub(crate) async fn alter_add_column(
     }
 
     let field_id = Uuid::now_v7();
-    let field_record = FieldRecord::new(field_id, *table_id, field.as_ref(), Some(default_value));
+    let field_record = FieldRecord::new(
+        field_id,
+        *table_id,
+        field.as_ref(),
+        Some(default_value.clone()),
+    );
     tx_helper.insert_fields(&[field_record]).await?;
+
+    tx_helper
+        .alter_add_column(table_id, &field_id, field.data_type())
+        .await?;
+
+    let set_map = HashMap::from([(hex::encode(field_id), lit(default_value))]);
+    tx_helper
+        .update_inline_rows(table_id, &set_map, &lit(true))
+        .await?;
+
     Ok(())
 }

@@ -22,10 +22,7 @@ use arrow::array::{ArrayRef, AsArray, BooleanArray, RecordBatch};
 use arrow::buffer::BooleanBuffer;
 use arrow::compute::CastOptions;
 use arrow::datatypes::{DataType, Schema};
-use arrow::error::ArrowError;
 use arrow::util::display::{DurationFormat, FormatOptions};
-use parquet::arrow::ProjectionMask;
-use parquet::arrow::arrow_reader::ArrowPredicate;
 
 use derive_visitor::{Drive, DriveMut};
 
@@ -317,46 +314,6 @@ impl std::fmt::Display for Expr {
             }
             Expr::Negative(expr) => write!(f, "-{expr}"),
             Expr::Case(case) => write!(f, "{case}"),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ExprPredicate {
-    filter: Option<Expr>,
-    projection: ProjectionMask,
-}
-
-impl ExprPredicate {
-    pub(crate) fn try_new(filters: Vec<Expr>, projection: ProjectionMask) -> ILResult<Self> {
-        let filter = merge_filters(filters);
-        Ok(Self { filter, projection })
-    }
-}
-
-impl ArrowPredicate for ExprPredicate {
-    fn projection(&self) -> &ProjectionMask {
-        &self.projection
-    }
-
-    fn evaluate(&mut self, batch: RecordBatch) -> Result<BooleanArray, ArrowError> {
-        if let Some(filter) = &self.filter {
-            let array = filter
-                .eval(&batch)
-                .map_err(|e| ArrowError::from_external_error(Box::new(e)))?
-                .into_array(batch.num_rows())
-                .map_err(|e| ArrowError::from_external_error(Box::new(e)))?;
-            let bool_array = array.as_boolean_opt().ok_or_else(|| {
-                ArrowError::ComputeError(format!(
-                    "ExprPredicate evaluation expected boolean array, got {}",
-                    array.data_type()
-                ))
-            })?;
-
-            Ok(bool_array.clone())
-        } else {
-            let bool_array = BooleanArray::from(vec![true; batch.num_rows()]);
-            Ok(bool_array)
         }
     }
 }

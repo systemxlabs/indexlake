@@ -473,15 +473,21 @@ pub fn check_and_rewrite_insert_batches(
 
                 fields.push(batch_field);
                 arrays.push(batch.column(batch_field_idx).clone());
-            } else if let Ok(field_id) = Uuid::parse_str(table_field_name)
-                && let Some(default_value) = table_schema.field_id_default_value_map.get(&field_id)
-            {
-                fields.push(table_field.clone());
-                arrays.push(default_value.to_array_of_size(batch.num_rows())?);
             } else {
-                return Err(ILError::invalid_input(format!(
-                    "Not found field {table_field_name} in batch schema",
-                )));
+                let Ok(field_id) = Uuid::parse_str(table_field_name) else {
+                    return Err(ILError::internal(format!(
+                        "Failed to parse field name {table_field_name} to uuid"
+                    )));
+                };
+                if let Some(default_value) = table_schema.field_id_default_value_map.get(&field_id)
+                {
+                    fields.push(table_field.clone());
+                    arrays.push(default_value.to_array_of_size(batch.num_rows())?);
+                } else {
+                    return Err(ILError::invalid_input(format!(
+                        "Missing field {table_field_name} (no default value) in record batch",
+                    )));
+                }
             }
         }
 
