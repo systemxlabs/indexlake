@@ -444,9 +444,9 @@ pub fn check_and_rewrite_insert_batches(
         let mut arrays = Vec::with_capacity(table_schema.arrow_schema.fields().len());
 
         for table_field in table_schema.arrow_schema.fields() {
-            let table_field_name = table_field.name();
+            let internal_field_name = table_field.name();
 
-            if table_field_name == INTERNAL_ROW_ID_FIELD_NAME {
+            if internal_field_name == INTERNAL_ROW_ID_FIELD_NAME {
                 fields.push(INTERNAL_ROW_ID_FIELD_REF.clone());
                 if ignore_row_id {
                     let row_ids = (0..batch.num_rows())
@@ -463,7 +463,7 @@ pub fn check_and_rewrite_insert_batches(
                     };
                     arrays.push(batch.column(batch_field_idx).clone());
                 }
-            } else if let Ok(batch_field_idx) = batch_schema.index_of(table_field_name) {
+            } else if let Ok(batch_field_idx) = batch_schema.index_of(internal_field_name) {
                 let batch_field = batch_schema
                     .fields
                     .get(batch_field_idx)
@@ -474,9 +474,9 @@ pub fn check_and_rewrite_insert_batches(
                 fields.push(batch_field);
                 arrays.push(batch.column(batch_field_idx).clone());
             } else {
-                let Ok(field_id) = Uuid::parse_str(table_field_name) else {
+                let Ok(field_id) = Uuid::parse_str(internal_field_name) else {
                     return Err(ILError::internal(format!(
-                        "Failed to parse field name {table_field_name} to uuid"
+                        "Failed to parse internal field name {internal_field_name} to uuid"
                     )));
                 };
                 if let Some(default_value) = table_schema.field_id_default_value_map.get(&field_id)
@@ -485,7 +485,7 @@ pub fn check_and_rewrite_insert_batches(
                     arrays.push(default_value.to_array_of_size(batch.num_rows())?);
                 } else {
                     return Err(ILError::invalid_input(format!(
-                        "Missing field {table_field_name} (no default value) in record batch",
+                        "Missing field {internal_field_name} (no default value) in record batch",
                     )));
                 }
             }

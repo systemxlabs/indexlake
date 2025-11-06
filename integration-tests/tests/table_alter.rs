@@ -4,12 +4,15 @@ use arrow::datatypes::{DataType, Field};
 use indexlake::{
     Client,
     catalog::Catalog,
+    expr::{col, lit},
     storage::{DataFileFormat, Storage},
-    table::TableAlter,
+    table::{TableAlter, TableScan},
 };
 use indexlake_integration_tests::{
-    catalog_postgres, catalog_sqlite, data::prepare_simple_testing_table, init_env_logger,
-    storage_fs, storage_s3, utils::full_table_scan,
+    catalog_postgres, catalog_sqlite,
+    data::prepare_simple_testing_table,
+    init_env_logger, storage_fs, storage_s3,
+    utils::{full_table_scan, table_scan},
 };
 use uuid::Uuid;
 
@@ -136,9 +139,27 @@ async fn alter_add_column(
     table.alter(alter).await?;
 
     let table = client.load_table(&namespace_name, &table_name).await?;
+
     let table_str = full_table_scan(&table).await?;
     println!("{table_str}");
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+---------------+
+| name    | age | new_col       |
++---------+-----+---------------+
+| Alice   | 20  | default_value |
+| Bob     | 21  | default_value |
+| Charlie | 22  | default_value |
+| David   | 23  | default_value |
++---------+-----+---------------+"#
+    );
 
+    let scan = TableScan {
+        filters: vec![col("new_col").eq(lit("default_value"))],
+        ..Default::default()
+    };
+    let table_str = table_scan(&table, scan).await?;
+    println!("{table_str}");
     assert_eq!(
         table_str,
         r#"+---------+-----+---------------+
