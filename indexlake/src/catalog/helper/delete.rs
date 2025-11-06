@@ -95,6 +95,20 @@ impl TransactionHelper {
             .await
     }
 
+    pub(crate) async fn delete_field_by_name(
+        &mut self,
+        table_id: &Uuid,
+        field_name: &str,
+    ) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "DELETE FROM indexlake_field WHERE table_id = {} AND field_name = {}",
+                self.catalog.sql_uuid_literal(table_id),
+                self.catalog.sql_string_literal(field_name)
+            ))
+            .await
+    }
+
     pub(crate) async fn delete_table_indexes(&mut self, table_id: &Uuid) -> ILResult<usize> {
         self.transaction
             .execute(&format!(

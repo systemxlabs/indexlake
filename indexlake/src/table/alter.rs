@@ -24,6 +24,9 @@ pub enum TableAlter {
         field: FieldRef,
         default_value: Scalar,
     },
+    DropColumn {
+        name: String,
+    },
 }
 
 pub(crate) async fn process_table_alter(
@@ -38,7 +41,18 @@ pub(crate) async fn process_table_alter(
                 .await?;
         }
         TableAlter::RenameColumn { old_name, new_name } => {
-            alter_rename_column(tx_helper, &table.table_id, &old_name, &new_name).await?;
+            let Some(field_record) = tx_helper
+                .get_table_field(&table.table_id, &old_name)
+                .await?
+            else {
+                return Err(ILError::invalid_input(format!(
+                    "Field name {old_name} not found for table id {}",
+                    table.table_id
+                )));
+            };
+            tx_helper
+                .update_field_name(&field_record.field_id, &new_name)
+                .await?;
         }
         TableAlter::AddColumn {
             field,
@@ -46,24 +60,20 @@ pub(crate) async fn process_table_alter(
         } => {
             alter_add_column(tx_helper, &table.table_id, field, default_value).await?;
         }
+        TableAlter::DropColumn { name } => {
+            let Some(field_id) = table.table_schema.field_name_id_map.get(&name) else {
+                return Ok(());
+            };
+            if table.index_manager.any_index_contains_field(field_id) {
+                return Err(ILError::invalid_input(format!(
+                    "Cannot drop column {name} because it is used in an index"
+                )));
+            }
+            tx_helper
+                .delete_field_by_name(&table.table_id, &name)
+                .await?;
+        }
     }
-    Ok(())
-}
-
-pub(crate) async fn alter_rename_column(
-    tx_helper: &mut TransactionHelper,
-    table_id: &Uuid,
-    old_name: &str,
-    new_name: &str,
-) -> ILResult<()> {
-    let Some(field_record) = tx_helper.get_table_field(table_id, old_name).await? else {
-        return Err(ILError::invalid_input(format!(
-            "Field name {old_name} not found for table id {table_id}"
-        )));
-    };
-    tx_helper
-        .update_field_name(&field_record.field_id, new_name)
-        .await?;
     Ok(())
 }
 
