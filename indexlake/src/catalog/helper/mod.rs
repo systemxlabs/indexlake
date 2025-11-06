@@ -89,6 +89,22 @@ impl TransactionHelper {
             .await?;
         Ok(())
     }
+
+    pub(crate) async fn alter_drop_column(
+        &mut self,
+        table_id: &Uuid,
+        field_id: &Uuid,
+    ) -> ILResult<()> {
+        let table_name = inline_row_table_name(table_id);
+        let field_name = hex::encode(field_id);
+        self.transaction
+            .execute_batch(&[format!(
+                "ALTER TABLE {table_name} DROP COLUMN {}",
+                self.catalog.sql_identifier(&field_name),
+            )])
+            .await?;
+        Ok(())
+    }
 }
 
 #[derive(Clone)]

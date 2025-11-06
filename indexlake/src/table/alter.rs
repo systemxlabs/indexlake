@@ -72,6 +72,9 @@ pub(crate) async fn process_table_alter(
             tx_helper
                 .delete_field_by_name(&table.table_id, &name)
                 .await?;
+            tx_helper
+                .alter_drop_column(&table.table_id, field_id)
+                .await?;
         }
     }
     Ok(())
