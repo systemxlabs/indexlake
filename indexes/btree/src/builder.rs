@@ -8,7 +8,7 @@ use futures::StreamExt;
 use indexlake::ILResult;
 use indexlake::catalog::Scalar;
 use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
-use indexlake::storage::File;
+use indexlake::storage::{InputFile, OutputFile};
 use indexlake::utils::extract_row_id_array_from_record_batch;
 use parquet::arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder};
 use parquet::file::properties::WriterProperties;
@@ -69,7 +69,7 @@ impl IndexBuilder for BTreeIndexBuilder {
         Ok(())
     }
 
-    async fn read_file(&mut self, input_file: Box<dyn File>) -> ILResult<()> {
+    async fn read_file(&mut self, input_file: Box<dyn InputFile>) -> ILResult<()> {
         let arrow_reader_builder = ParquetRecordBatchStreamBuilder::new(input_file).await?;
         let mut batch_stream = arrow_reader_builder.build()?;
 
@@ -81,7 +81,7 @@ impl IndexBuilder for BTreeIndexBuilder {
         Ok(())
     }
 
-    async fn write_file(&mut self, output_file: Box<dyn File>) -> ILResult<()> {
+    async fn write_file(&mut self, output_file: Box<dyn OutputFile>) -> ILResult<()> {
         let writer_properties = WriterProperties::builder()
             .set_max_row_group_size(4096)
             .build();

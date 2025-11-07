@@ -1,10 +1,10 @@
 use indexlake::{
     ILError, ILResult,
-    storage::{File, Storage},
+    storage::{InputFile, OutputFile, Storage},
 };
 use opendal::{Configurator, Operator, layers::RetryLayer, services::S3Config};
 
-use crate::S3File;
+use crate::{S3InputFile, S3OutputFile};
 
 #[derive(Debug)]
 pub struct S3Storage {
@@ -37,9 +37,9 @@ impl S3Storage {
 
 #[async_trait::async_trait]
 impl Storage for S3Storage {
-    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn File>> {
+    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn OutputFile>> {
         let op = self.new_operator()?;
-        let s3_file = S3File {
+        let s3_file = S3OutputFile {
             op,
             relative_path: relative_path.to_string(),
             writer: None,
@@ -47,12 +47,11 @@ impl Storage for S3Storage {
         Ok(Box::new(s3_file))
     }
 
-    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn File>> {
+    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>> {
         let op = self.new_operator()?;
-        let s3_file = S3File {
+        let s3_file = S3InputFile {
             op,
             relative_path: relative_path.to_string(),
-            writer: None,
         };
         Ok(Box::new(s3_file))
     }

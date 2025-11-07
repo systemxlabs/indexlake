@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use indexlake::{
     ILError, ILResult,
-    storage::{File, Storage},
+    storage::{InputFile, OutputFile, Storage},
 };
 use opendal::{Operator, layers::RetryLayer, services::FsConfig};
 
-use crate::LocalFile;
+use crate::{LocalInputFile, LocalOutputFile};
 
 #[derive(Debug)]
 pub struct FsStorage {
@@ -31,21 +31,21 @@ impl FsStorage {
 
 #[async_trait::async_trait]
 impl Storage for FsStorage {
-    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn File>> {
+    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn OutputFile>> {
         let op = self.new_operator()?;
-        let s3_file = LocalFile {
+        let file = LocalOutputFile {
             op,
             relative_path: relative_path.to_string(),
         };
-        Ok(Box::new(s3_file))
+        Ok(Box::new(file))
     }
-    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn File>> {
+    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>> {
         let op = self.new_operator()?;
-        let s3_file = LocalFile {
+        let file = LocalInputFile {
             op,
             relative_path: relative_path.to_string(),
         };
-        Ok(Box::new(s3_file))
+        Ok(Box::new(file))
     }
     async fn delete(&self, relative_path: &str) -> ILResult<()> {
         let op = self.new_operator()?;

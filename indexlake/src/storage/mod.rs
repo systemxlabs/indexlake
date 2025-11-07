@@ -15,11 +15,9 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 #[async_trait::async_trait]
-pub trait File: Debug + Send + Sync + 'static {
+pub trait InputFile: Debug + Send + Sync + 'static {
     async fn metadata(&self) -> ILResult<FileMetadata>;
     async fn read(&self, range: Range<u64>) -> ILResult<Bytes>;
-    async fn write(&mut self, bs: Bytes) -> ILResult<()>;
-    async fn close(&mut self) -> ILResult<()>;
 }
 
 #[derive(Debug)]
@@ -28,13 +26,23 @@ pub struct FileMetadata {
 }
 
 #[async_trait::async_trait]
-impl File for Box<dyn File> {
+impl InputFile for Box<dyn InputFile> {
     async fn metadata(&self) -> ILResult<FileMetadata> {
         self.as_ref().metadata().await
     }
     async fn read(&self, range: Range<u64>) -> ILResult<Bytes> {
         self.as_ref().read(range).await
     }
+}
+
+#[async_trait::async_trait]
+pub trait OutputFile: Debug + Send + Sync + 'static {
+    async fn write(&mut self, bs: Bytes) -> ILResult<()>;
+    async fn close(&mut self) -> ILResult<()>;
+}
+
+#[async_trait::async_trait]
+impl OutputFile for Box<dyn OutputFile> {
     async fn write(&mut self, bs: Bytes) -> ILResult<()> {
         self.as_mut().write(bs).await
     }
@@ -45,8 +53,8 @@ impl File for Box<dyn File> {
 
 #[async_trait::async_trait]
 pub trait Storage: Debug + Send + Sync + 'static {
-    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn File>>;
-    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn File>>;
+    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn OutputFile>>;
+    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>>;
     async fn delete(&self, relative_path: &str) -> ILResult<()>;
     async fn exists(&self, relative_path: &str) -> ILResult<bool>;
     async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()>;

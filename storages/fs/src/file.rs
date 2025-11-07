@@ -3,18 +3,18 @@ use std::ops::Range;
 use bytes::Bytes;
 use indexlake::{
     ILError, ILResult,
-    storage::{File, FileMetadata},
+    storage::{FileMetadata, InputFile, OutputFile},
 };
 use opendal::Operator;
 
 #[derive(Debug)]
-pub struct LocalFile {
+pub struct LocalInputFile {
     pub op: Operator,
     pub relative_path: String,
 }
 
 #[async_trait::async_trait]
-impl File for LocalFile {
+impl InputFile for LocalInputFile {
     async fn metadata(&self) -> ILResult<FileMetadata> {
         let file_metadata = self.op.stat(&self.relative_path).await.map_err(|e| {
             ILError::storage(format!(
@@ -39,7 +39,16 @@ impl File for LocalFile {
             .map_err(|e| ILError::storage(format!("Failed to read range: {e}")))?;
         Ok(buffer.to_bytes())
     }
+}
 
+#[derive(Debug)]
+pub struct LocalOutputFile {
+    pub op: Operator,
+    pub relative_path: String,
+}
+
+#[async_trait::async_trait]
+impl OutputFile for LocalOutputFile {
     async fn write(&mut self, data: Bytes) -> ILResult<()> {
         let mut writer = self
             .op

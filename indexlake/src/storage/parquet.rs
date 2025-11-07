@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use crate::expr::{Expr, merge_filters, visited_columns};
-use crate::storage::{DataFileFormat, File, Storage};
+use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
 use crate::table::TableSchemaRef;
 use crate::utils::{
     build_projection_from_condition, complete_batch_missing_fields,
@@ -94,7 +94,7 @@ impl ArrowPredicate for ExprPredicate {
     }
 }
 
-impl AsyncFileReader for Box<dyn File> {
+impl AsyncFileReader for Box<dyn InputFile> {
     fn get_bytes(
         &mut self,
         range: Range<u64>,
@@ -129,10 +129,10 @@ impl AsyncFileReader for Box<dyn File> {
     }
 }
 
-impl AsyncFileWriter for Box<dyn File> {
+impl AsyncFileWriter for Box<dyn OutputFile> {
     fn write(&mut self, bs: bytes::Bytes) -> BoxFuture<'_, parquet::errors::Result<()>> {
         Box::pin(async {
-            File::write(self, bs)
+            OutputFile::write(self, bs)
                 .await
                 .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))
         })

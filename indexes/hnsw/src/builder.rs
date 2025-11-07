@@ -3,7 +3,7 @@ use arrow::record_batch::RecordBatch;
 use bytes::Bytes;
 use hnsw::{Hnsw, Params, Searcher};
 use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
-use indexlake::storage::File;
+use indexlake::storage::{InputFile, OutputFile};
 use indexlake::utils::extract_row_id_array_from_record_batch;
 use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
@@ -81,7 +81,7 @@ impl IndexBuilder for HnswIndexBuilder {
         Ok(())
     }
 
-    async fn read_file(&mut self, input_file: Box<dyn File>) -> ILResult<()> {
+    async fn read_file(&mut self, input_file: Box<dyn InputFile>) -> ILResult<()> {
         let file_meta = input_file.metadata().await?;
         let data = input_file.read(0..file_meta.size).await?;
         let hnsw_with_row_ids: HnswWithRowIds = bincode::deserialize(&data)
@@ -91,7 +91,7 @@ impl IndexBuilder for HnswIndexBuilder {
         Ok(())
     }
 
-    async fn write_file(&mut self, mut output_file: Box<dyn File>) -> ILResult<()> {
+    async fn write_file(&mut self, mut output_file: Box<dyn OutputFile>) -> ILResult<()> {
         let hnsw_with_row_ids = HnswWithRowIds {
             hnsw: std::mem::take(&mut self.hnsw),
             row_ids: std::mem::take(&mut self.row_ids),
