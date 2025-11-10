@@ -41,11 +41,11 @@ impl TransactionHelper {
             .await
     }
 
-    pub(crate) async fn delete_dump_task(&mut self, table_id: &Uuid) -> ILResult<usize> {
+    pub(crate) async fn delete_task(&mut self, task_id: &str) -> ILResult<usize> {
         self.transaction
             .execute(&format!(
-                "DELETE FROM indexlake_dump_task WHERE table_id = {}",
-                self.catalog.sql_uuid_literal(table_id)
+                "DELETE FROM indexlake_task WHERE task_id = {}",
+                self.catalog.sql_string_literal(task_id)
             ))
             .await
     }

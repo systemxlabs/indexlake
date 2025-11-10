@@ -102,11 +102,11 @@ impl TransactionHelper {
         Ok(())
     }
 
-    pub(crate) async fn insert_dump_task(&mut self, table_id: &Uuid) -> ILResult<usize> {
+    pub(crate) async fn insert_task(&mut self, task_id: &str) -> ILResult<usize> {
         self.transaction
             .execute(&format!(
-                "INSERT INTO indexlake_dump_task (table_id) VALUES ({})",
-                self.catalog.sql_uuid_literal(table_id)
+                "INSERT INTO indexlake_task VALUES ({})",
+                self.catalog.sql_string_literal(task_id)
             ))
             .await
     }

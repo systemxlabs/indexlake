@@ -31,11 +31,13 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
             if inline_row_count < table_config.inline_row_count_limit as i64 {
                 return Ok(false);
             }
-            if catalog_helper.dump_task_exists(&table_id).await? {
+            let task_id = format!("dump-table-{}", table_id);
+            if catalog_helper.task_exists(&task_id).await? {
                 return Ok(false);
             }
 
             let dump_task = DumpTask {
+                task_id,
                 namespace_id,
                 table_id,
                 table_schema: table_schema.clone(),
@@ -68,6 +70,7 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
 }
 
 pub(crate) struct DumpTask {
+    task_id: String,
     namespace_id: Uuid,
     table_id: Uuid,
     table_schema: TableSchemaRef,
@@ -82,7 +85,7 @@ impl DumpTask {
         let now = Instant::now();
 
         let mut tx_helper = TransactionHelper::new(&self.catalog).await?;
-        if tx_helper.insert_dump_task(&self.table_id).await.is_err() {
+        if tx_helper.insert_task(&self.task_id).await.is_err() {
             debug!(
                 "[indexlake] Table {} already has a dump task",
                 self.table_id
@@ -183,7 +186,7 @@ impl DumpTask {
         )
         .await?;
 
-        tx_helper.delete_dump_task(&self.table_id).await?;
+        tx_helper.delete_task(&self.task_id).await?;
 
         tx_helper.commit().await?;
 

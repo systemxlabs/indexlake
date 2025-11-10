@@ -22,9 +22,10 @@ CREATE TABLE IF NOT EXISTS indexlake_field (
     metadata VARCHAR NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS indexlake_dump_task (
-    table_id BLOB PRIMARY KEY
+CREATE TABLE IF NOT EXISTS indexlake_task (
+    task_id VARCHAR PRIMARY KEY
 );
+
 
 CREATE TABLE IF NOT EXISTS indexlake_data_file (
     data_file_id BLOB PRIMARY KEY,

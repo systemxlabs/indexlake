@@ -475,17 +475,17 @@ impl CatalogHelper {
         }
     }
 
-    pub(crate) async fn dump_task_exists(&self, table_id: &Uuid) -> ILResult<bool> {
+    pub(crate) async fn task_exists(&self, task_id: &str) -> ILResult<bool> {
         let schema = Arc::new(CatalogSchema::new(vec![Column::new(
-            "table_id",
-            CatalogDataType::Int64,
+            "task_id",
+            CatalogDataType::Utf8,
             false,
         )]));
         let rows = self
             .query_rows(
                 &format!(
-                    "SELECT table_id FROM indexlake_dump_task WHERE table_id = {}",
-                    self.catalog.sql_uuid_literal(table_id)
+                    "SELECT task_id FROM indexlake_task WHERE task_id = {}",
+                    self.catalog.sql_string_literal(task_id)
                 ),
                 schema,
             )
