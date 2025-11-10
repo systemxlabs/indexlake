@@ -333,6 +333,7 @@ fn serialize_data_files(
                     table_id: record.table_id.as_bytes().to_vec(),
                     format: serialize_data_file_format(record.format),
                     relative_path: record.relative_path.clone(),
+                    size: record.size,
                     record_count: record.record_count,
                     validity: record.validity.bytes().to_vec(),
                 });
@@ -361,6 +362,7 @@ fn parse_data_files(
                     })?,
                     format: parse_data_file_format(proto_data_file.format)?,
                     relative_path: proto_data_file.relative_path,
+                    size: proto_data_file.size,
                     record_count: proto_data_file.record_count,
                     validity: RowValidity::from(
                         proto_data_file.validity,

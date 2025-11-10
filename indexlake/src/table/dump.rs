@@ -125,6 +125,13 @@ impl DumpTask {
                     .await?
             }
         };
+        let size = self
+            .storage
+            .open(&relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
 
         if row_ids.len() != self.table_config.inline_row_count_limit {
             self.storage.delete(&relative_path).await?;
@@ -145,12 +152,20 @@ impl DumpTask {
             );
             let output_file = self.storage.create(&relative_path).await?;
             index_builder.write_file(output_file).await?;
+            let size = self
+                .storage
+                .open(&relative_path)
+                .await?
+                .metadata()
+                .await?
+                .size;
             index_file_records.push(IndexFileRecord {
                 index_file_id,
                 table_id: self.table_id,
                 index_id: index_builder.index_def().index_id,
                 data_file_id,
                 relative_path,
+                size: size as i64,
             });
         }
 
@@ -160,6 +175,7 @@ impl DumpTask {
                 table_id: self.table_id,
                 format: self.table_config.preferred_data_file_format,
                 relative_path: relative_path.clone(),
+                size: size as i64,
                 record_count: row_ids.len() as i64,
                 validity: RowValidity::new(row_ids.len()),
             }])

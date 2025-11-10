@@ -263,12 +263,20 @@ pub(crate) async fn process_create_index(
         );
         let output_file = table.storage.create(&relative_path).await?;
         index_builder.write_file(output_file).await?;
+        let size = table
+            .storage
+            .open(&relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
         index_file_records.push(IndexFileRecord {
             index_file_id,
             table_id: table.table_id,
             index_id,
             data_file_id: data_file_record.data_file_id,
             relative_path,
+            size: size as i64,
         });
     }
 

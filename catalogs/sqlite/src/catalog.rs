@@ -90,6 +90,28 @@ impl Catalog for SqliteCatalog {
         Ok(())
     }
 
+    async fn size(&self, table_name: &str) -> ILResult<usize> {
+        let conn = rusqlite::Connection::open_with_flags(
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .map_err(|e| ILError::catalog(format!("failed to open sqlite db: {e}")))?;
+        let size: usize = conn
+            .query_row(
+                &format!("SELECT SUM(pgsize) FROM dbstat WHERE name='{table_name}'"),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                ILError::catalog(format!(
+                    "failed to get size of table {table_name} on sqlite: {e}"
+                ))
+            })?;
+        Ok(size)
+    }
+
     fn sql_identifier(&self, ident: &str) -> String {
         format!("`{ident}`")
     }

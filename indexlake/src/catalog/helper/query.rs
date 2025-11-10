@@ -408,6 +408,30 @@ impl CatalogHelper {
         Ok(data_files)
     }
 
+    pub(crate) async fn get_data_files_size(&self, table_id: &Uuid) -> ILResult<i64> {
+        let schema = Arc::new(CatalogSchema::new(vec![Column::new(
+            "size",
+            CatalogDataType::Int64,
+            true,
+        )]));
+        let row = self
+            .query_single(
+                &format!(
+                    "SELECT SUM(size) FROM indexlake_data_file WHERE table_id = {}",
+                    self.catalog.sql_uuid_literal(table_id)
+                ),
+                schema,
+            )
+            .await?;
+        match row {
+            Some(row) => {
+                let size = row.int64(0)?.unwrap_or(0);
+                Ok(size)
+            }
+            None => Ok(0),
+        }
+    }
+
     pub(crate) async fn get_table_index_files(
         &self,
         table_id: &Uuid,
@@ -494,6 +518,30 @@ impl CatalogHelper {
         match row {
             Some(row) => Ok(Some(IndexFileRecord::from_row(row)?)),
             None => Ok(None),
+        }
+    }
+
+    pub(crate) async fn get_index_files_size(&self, table_id: &Uuid) -> ILResult<i64> {
+        let schema = Arc::new(CatalogSchema::new(vec![Column::new(
+            "size",
+            CatalogDataType::Int64,
+            true,
+        )]));
+        let row = self
+            .query_single(
+                &format!(
+                    "SELECT SUM(size) FROM indexlake_index_file WHERE table_id = {}",
+                    self.catalog.sql_uuid_literal(table_id)
+                ),
+                schema,
+            )
+            .await?;
+        match row {
+            Some(row) => {
+                let size = row.int64(0)?.unwrap_or(0);
+                Ok(size)
+            }
+            None => Ok(0),
         }
     }
 

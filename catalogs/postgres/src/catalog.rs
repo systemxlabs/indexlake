@@ -76,6 +76,27 @@ impl Catalog for PostgresCatalog {
         Ok(())
     }
 
+    async fn size(&self, table_name: &str) -> ILResult<usize> {
+        let conn = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| ILError::catalog(format!("failed to get postgres connection: {e}")))?;
+        let row = conn
+            .query_one(
+                &format!("SELECT pg_total_relation_size('{table_name}')"),
+                &[],
+            )
+            .await
+            .map_err(|e| {
+                ILError::catalog(format!(
+                    "failed to get size of table {table_name} on postgres: {e}"
+                ))
+            })?;
+        let size = row.get::<_, i64>(0);
+        Ok(size as usize)
+    }
+
     fn sql_identifier(&self, ident: &str) -> String {
         format!("\"{ident}\"")
     }

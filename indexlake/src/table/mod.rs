@@ -382,6 +382,17 @@ impl Table {
         let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
         Ok(data_file_records)
     }
+
+    pub async fn size(&self) -> ILResult<usize> {
+        let inline_table_name = inline_row_table_name(&self.table_id);
+        let inline_table_size = self.catalog.size(&inline_table_name).await?;
+
+        let catalog_helper = CatalogHelper::new(self.catalog.clone());
+        let data_files_size = catalog_helper.get_data_files_size(&self.table_id).await?;
+        let index_files_size = catalog_helper.get_index_files_size(&self.table_id).await?;
+
+        Ok(inline_table_size + data_files_size as usize + index_files_size as usize)
+    }
 }
 
 fn spawn_storage_data_files_clean_task(

@@ -152,6 +152,13 @@ pub(crate) async fn process_bypass_insert(
         }
     };
     let record_count = row_ids.len();
+    let size = table
+        .storage
+        .open(&relative_path)
+        .await?
+        .metadata()
+        .await?
+        .size;
 
     tx_helper
         .insert_data_files(&[DataFileRecord {
@@ -159,6 +166,7 @@ pub(crate) async fn process_bypass_insert(
             table_id: table.table_id,
             format: table.config.preferred_data_file_format,
             relative_path: relative_path.clone(),
+            size: size as i64,
             record_count: record_count as i64,
             validity: RowValidity::new(record_count),
         }])
@@ -175,12 +183,20 @@ pub(crate) async fn process_bypass_insert(
         );
         let output_file = table.storage.create(&relative_path).await?;
         index_builder.write_file(output_file).await?;
+        let size = table
+            .storage
+            .open(&relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
         index_file_records.push(IndexFileRecord {
             index_file_id,
             table_id: table.table_id,
             index_id: index_builder.index_def().index_id,
             data_file_id,
             relative_path,
+            size: size as i64,
         });
     }
 

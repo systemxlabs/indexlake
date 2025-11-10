@@ -26,12 +26,12 @@ CREATE TABLE IF NOT EXISTS indexlake_task (
     task_id VARCHAR PRIMARY KEY
 );
 
-
 CREATE TABLE IF NOT EXISTS indexlake_data_file (
     data_file_id BLOB PRIMARY KEY,
     table_id BLOB NOT NULL,
     format VARCHAR NOT NULL,
     relative_path VARCHAR NOT NULL,
+    size BIGINT NOT NULL,
     record_count BIGINT NOT NULL,
     validity BLOB NOT NULL
 );
@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS indexlake_index_file (
     table_id BLOB NOT NULL,
     index_id BLOB NOT NULL,
     data_file_id BLOB NOT NULL,
-    relative_path VARCHAR NOT NULL
+    relative_path VARCHAR NOT NULL,
+    size BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS indexlake_inline_index (

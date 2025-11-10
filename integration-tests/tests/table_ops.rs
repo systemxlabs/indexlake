@@ -586,3 +586,24 @@ async fn drop_table(
 
     Ok(())
 }
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() })]
+#[case(async { catalog_postgres().await }, async { storage_s3().await })]
+#[tokio::test(flavor = "multi_thread")]
+async fn table_size(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, DataFileFormat::ParquetV2).await?;
+    let size = table.size().await?;
+    assert!(size > 0);
+    Ok(())
+}

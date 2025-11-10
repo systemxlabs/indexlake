@@ -41,6 +41,8 @@ pub trait Catalog: Debug + Send + Sync {
 
     async fn truncate(&self, table_name: &str) -> ILResult<()>;
 
+    async fn size(&self, table_name: &str) -> ILResult<usize>;
+
     fn sql_identifier(&self, ident: &str) -> String;
 
     fn sql_binary_literal(&self, value: &[u8]) -> String;

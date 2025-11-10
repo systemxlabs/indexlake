@@ -176,6 +176,7 @@ pub struct DataFileRecord {
     pub table_id: Uuid,
     pub format: DataFileFormat,
     pub relative_path: String,
+    pub size: i64,
     pub record_count: i64,
     pub validity: RowValidity,
 }
@@ -184,11 +185,12 @@ impl DataFileRecord {
     pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         let validity_bytes = self.validity.bytes();
         format!(
-            "({}, {}, '{}', '{}', {}, {})",
+            "({}, {}, '{}', '{}', {}, {}, {})",
             catalog.sql_uuid_literal(&self.data_file_id),
             catalog.sql_uuid_literal(&self.table_id),
             self.format,
             self.relative_path,
+            self.size,
             self.record_count,
             catalog.sql_binary_literal(validity_bytes),
         )
@@ -200,6 +202,7 @@ impl DataFileRecord {
             Column::new("table_id", CatalogDataType::Uuid, false),
             Column::new("format", CatalogDataType::Utf8, false),
             Column::new("relative_path", CatalogDataType::Utf8, false),
+            Column::new("size", CatalogDataType::Int64, false),
             Column::new("record_count", CatalogDataType::Int64, false),
             Column::new("validity", CatalogDataType::Binary, false),
         ])
@@ -228,9 +231,10 @@ impl DataFileRecord {
             .parse::<DataFileFormat>()
             .map_err(|e| ILError::internal(format!("Failed to parse data file format: {e:?}")))?;
         let relative_path = row.utf8_owned(3)?.expect("relative_path is not null");
-        let record_count = row.int64(4)?.expect("record_count is not null");
+        let size = row.int64(4)?.expect("size is not null");
+        let record_count = row.int64(5)?.expect("record_count is not null");
 
-        let validity_bytes = row.binary_owned(5)?.expect("validity is not null");
+        let validity_bytes = row.binary_owned(6)?.expect("validity is not null");
         let validity = RowValidity::from(validity_bytes, record_count as usize);
 
         Ok(DataFileRecord {
@@ -238,6 +242,7 @@ impl DataFileRecord {
             table_id,
             format,
             relative_path,
+            size,
             record_count,
             validity,
         })
@@ -400,17 +405,19 @@ pub(crate) struct IndexFileRecord {
     pub(crate) index_id: Uuid,
     pub(crate) data_file_id: Uuid,
     pub(crate) relative_path: String,
+    pub(crate) size: i64,
 }
 
 impl IndexFileRecord {
     pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         format!(
-            "({}, {}, {}, {}, '{}')",
+            "({}, {}, {}, {}, '{}', {})",
             catalog.sql_uuid_literal(&self.index_file_id),
             catalog.sql_uuid_literal(&self.table_id),
             catalog.sql_uuid_literal(&self.index_id),
             catalog.sql_uuid_literal(&self.data_file_id),
-            self.relative_path
+            self.relative_path,
+            self.size,
         )
     }
 
@@ -421,6 +428,7 @@ impl IndexFileRecord {
             Column::new("index_id", CatalogDataType::Uuid, false),
             Column::new("data_file_id", CatalogDataType::Uuid, false),
             Column::new("relative_path", CatalogDataType::Utf8, false),
+            Column::new("size", CatalogDataType::Int64, false),
         ])
     }
 
@@ -438,12 +446,14 @@ impl IndexFileRecord {
         let index_id = row.uuid(2)?.expect("index_id is not null");
         let data_file_id = row.uuid(3)?.expect("data_file_id is not null");
         let relative_path = row.utf8_owned(4)?.expect("relative_path is not null");
+        let size = row.int64(5)?.expect("size is not null");
         Ok(Self {
             index_file_id,
             table_id,
             index_id,
             data_file_id,
             relative_path,
+            size,
         })
     }
 }

@@ -111,11 +111,20 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
         stream_merge_group_files(&files, &relative_path).await?;
 
         let record_count: usize = files.iter().map(|f| f.valid_row_count()).sum();
+        let size = table
+            .storage
+            .open(&relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
+
         new_data_files.push(DataFileRecord {
             data_file_id,
             table_id: table.table_id,
             format: table.config.preferred_data_file_format,
             relative_path,
+            size: size as i64,
             record_count: record_count as i64,
             validity: RowValidity::new(record_count),
         });

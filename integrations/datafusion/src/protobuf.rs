@@ -85,8 +85,10 @@ pub struct DataFile {
     #[prost(string, tag = "4")]
     pub relative_path: ::prost::alloc::string::String,
     #[prost(int64, tag = "5")]
+    pub size: i64,
+    #[prost(int64, tag = "6")]
     pub record_count: i64,
-    #[prost(bytes = "vec", tag = "6")]
+    #[prost(bytes = "vec", tag = "7")]
     pub validity: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

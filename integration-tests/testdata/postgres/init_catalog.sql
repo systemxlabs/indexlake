@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS indexlake_data_file (
     table_id UUID NOT NULL,
     format VARCHAR NOT NULL,
     relative_path VARCHAR NOT NULL,
+    size BIGINT NOT NULL,
     record_count BIGINT NOT NULL,
     validity BYTEA NOT NULL
 );
@@ -49,7 +50,8 @@ CREATE TABLE IF NOT EXISTS indexlake_index_file (
     table_id UUID NOT NULL,
     index_id UUID NOT NULL,
     data_file_id UUID NOT NULL,
-    relative_path VARCHAR NOT NULL
+    relative_path VARCHAR NOT NULL,
+    size BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS indexlake_inline_index (
