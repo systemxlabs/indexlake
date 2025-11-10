@@ -417,7 +417,7 @@ impl CatalogHelper {
         let row = self
             .query_single(
                 &format!(
-                    "SELECT SUM(size) FROM indexlake_data_file WHERE table_id = {}",
+                    "SELECT CAST(SUM(size) AS BIGINT) FROM indexlake_data_file WHERE table_id = {}",
                     self.catalog.sql_uuid_literal(table_id)
                 ),
                 schema,
@@ -530,7 +530,7 @@ impl CatalogHelper {
         let row = self
             .query_single(
                 &format!(
-                    "SELECT SUM(size) FROM indexlake_index_file WHERE table_id = {}",
+                    "SELECT CAST(SUM(size) AS BIGINT) FROM indexlake_index_file WHERE table_id = {}",
                     self.catalog.sql_uuid_literal(table_id)
                 ),
                 schema,

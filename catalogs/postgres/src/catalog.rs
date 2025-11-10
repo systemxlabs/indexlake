@@ -93,8 +93,10 @@ impl Catalog for PostgresCatalog {
                     "failed to get size of table {table_name} on postgres: {e}"
                 ))
             })?;
-        let size = row.get::<_, i64>(0);
-        Ok(size as usize)
+        let size = row
+            .try_get::<_, Option<i64>>(0)
+            .map_err(|e| ILError::storage(format!("Failed to get size from row: {e}")))?;
+        Ok(size.unwrap_or(0) as usize)
     }
 
     fn sql_identifier(&self, ident: &str) -> String {
