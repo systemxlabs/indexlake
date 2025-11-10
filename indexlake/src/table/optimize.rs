@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::{
     ILError, ILResult,
     catalog::{DataFileRecord, RowValidity, TransactionHelper},
+    storage::EntryMode,
     table::Table,
 };
 
@@ -51,9 +52,11 @@ async fn cleanup_orphan_files(table: &Table) -> ILResult<()> {
     let mut dir_entry_stream = table.storage.list(&table_dir).await?;
     while let Some(entry) = dir_entry_stream.next().await {
         let entry = entry?;
-        let relative_path = format!("{}/{}", table_dir, entry.name);
-        if !existing_files.contains(&relative_path) {
-            table.storage.delete(&relative_path).await?;
+        if matches!(entry.mode, EntryMode::File) {
+            let relative_path = format!("{}/{}", table_dir, entry.name);
+            if !existing_files.contains(&relative_path) {
+                table.storage.delete(&relative_path).await?;
+            }
         }
     }
 
