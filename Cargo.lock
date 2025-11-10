@@ -2697,6 +2697,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "futures",
  "indexlake",
  "opendal",
 ]
@@ -2707,6 +2708,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "futures",
  "indexlake",
  "opendal",
 ]

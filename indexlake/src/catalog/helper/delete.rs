@@ -59,6 +59,22 @@ impl TransactionHelper {
             .await
     }
 
+    pub(crate) async fn delete_data_files(&mut self, data_file_ids: &[Uuid]) -> ILResult<usize> {
+        if data_file_ids.is_empty() {
+            return Ok(0);
+        }
+        self.transaction
+            .execute(&format!(
+                "DELETE FROM indexlake_data_file WHERE data_file_id IN ({})",
+                data_file_ids
+                    .iter()
+                    .map(|id| self.catalog.sql_uuid_literal(id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+            .await
+    }
+
     pub(crate) async fn delete_table_index_files(&mut self, table_id: &Uuid) -> ILResult<usize> {
         self.transaction
             .execute(&format!(

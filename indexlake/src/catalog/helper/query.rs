@@ -174,6 +174,28 @@ impl TransactionHelper {
             None => Ok(None),
         }
     }
+
+    pub(crate) async fn get_table_index_files(
+        &mut self,
+        table_id: &Uuid,
+    ) -> ILResult<Vec<IndexFileRecord>> {
+        let schema = Arc::new(IndexFileRecord::catalog_schema());
+        let rows = self
+            .query_rows(
+                &format!(
+                    "SELECT {} FROM indexlake_index_file WHERE table_id = {}",
+                    schema.select_items(self.catalog.as_ref()).join(", "),
+                    self.catalog.sql_uuid_literal(table_id)
+                ),
+                schema,
+            )
+            .await?;
+        let mut index_files = Vec::with_capacity(rows.len());
+        for row in rows {
+            index_files.push(IndexFileRecord::from_row(row)?);
+        }
+        Ok(index_files)
+    }
 }
 
 impl CatalogHelper {

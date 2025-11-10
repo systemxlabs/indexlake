@@ -13,4 +13,5 @@ indexlake = { workspace = true }
 
 async-trait = { workspace = true }
 bytes = { workspace = true }
+futures = { workspace = true }
 opendal = { workspace = true, features = ["services-fs"] }

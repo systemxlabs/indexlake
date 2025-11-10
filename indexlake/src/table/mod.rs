@@ -3,6 +3,7 @@ mod create;
 mod delete;
 mod dump;
 mod insert;
+mod optimize;
 mod scan;
 mod search;
 mod update;
@@ -12,6 +13,7 @@ pub use create::*;
 pub(crate) use delete::*;
 pub(crate) use dump::*;
 pub use insert::*;
+pub use optimize::*;
 pub use scan::*;
 pub use search::*;
 pub use update::*;
@@ -356,8 +358,8 @@ impl Table {
         Ok(())
     }
 
-    pub async fn optimize(&self) -> ILResult<()> {
-        // TODO
+    pub async fn optimize(&self, optimization: TableOptimization) -> ILResult<()> {
+        process_table_optimization(self, optimization).await?;
         Ok(())
     }
 

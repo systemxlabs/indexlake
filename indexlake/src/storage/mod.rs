@@ -2,6 +2,7 @@ mod parquet;
 
 use arrow::array::FixedSizeBinaryArray;
 use bytes::Bytes;
+use futures::Stream;
 pub(crate) use parquet::*;
 use uuid::Uuid;
 
@@ -13,16 +14,22 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::ops::Range;
+use std::pin::Pin;
+
+#[async_trait::async_trait]
+pub trait Storage: Debug + Send + Sync + 'static {
+    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn OutputFile>>;
+    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>>;
+    async fn delete(&self, relative_path: &str) -> ILResult<()>;
+    async fn exists(&self, relative_path: &str) -> ILResult<bool>;
+    async fn list(&self, relative_path: &str) -> ILResult<DirEntryStream>;
+    async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()>;
+}
 
 #[async_trait::async_trait]
 pub trait InputFile: Debug + Send + Sync + 'static {
     async fn metadata(&self) -> ILResult<FileMetadata>;
     async fn read(&self, range: Range<u64>) -> ILResult<Bytes>;
-}
-
-#[derive(Debug)]
-pub struct FileMetadata {
-    pub size: u64,
 }
 
 #[async_trait::async_trait]
@@ -51,13 +58,23 @@ impl OutputFile for Box<dyn OutputFile> {
     }
 }
 
-#[async_trait::async_trait]
-pub trait Storage: Debug + Send + Sync + 'static {
-    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn OutputFile>>;
-    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>>;
-    async fn delete(&self, relative_path: &str) -> ILResult<()>;
-    async fn exists(&self, relative_path: &str) -> ILResult<bool>;
-    async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()>;
+#[derive(Debug)]
+pub struct FileMetadata {
+    pub size: u64,
+}
+
+pub type DirEntryStream = Pin<Box<dyn Stream<Item = ILResult<DirEntry>> + Send>>;
+
+#[derive(Debug)]
+pub struct DirEntry {
+    pub name: String,
+    pub mode: EntryMode,
+}
+
+#[derive(Debug)]
+pub enum EntryMode {
+    File,
+    Directory,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
