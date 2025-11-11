@@ -98,7 +98,11 @@ impl Storage for FsStorage {
         Ok(stream)
     }
 
-    async fn remove_dir_all(&self, _relative_path: &str) -> ILResult<()> {
-        todo!()
+    async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()> {
+        let path = self.absolute_path(relative_path);
+        tokio::fs::remove_dir_all(path).await.map_err(|e| {
+            ILError::storage(format!("Failed to remove dir all {relative_path}: {e}"))
+        })?;
+        Ok(())
     }
 }

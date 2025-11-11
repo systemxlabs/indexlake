@@ -261,5 +261,8 @@ async fn stream_merge_group_files(
             break;
         }
     }
+
+    parquet_writer.close().await?;
+
     Ok(())
 }
