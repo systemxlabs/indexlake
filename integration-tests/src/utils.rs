@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use arrow::array::{ArrayRef, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions};
 use arrow::util::pretty::pretty_format_batches_with_schema;
@@ -168,4 +169,11 @@ pub async fn assert_data_file_count(table: &Table, check: impl Fn(usize) -> bool
         return Err(ILError::internal("table data file count check failed"));
     }
     Ok(())
+}
+
+pub fn timestamp_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis() as i64
 }

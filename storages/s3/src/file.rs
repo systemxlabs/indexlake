@@ -7,6 +7,8 @@ use indexlake::{
 };
 use opendal::Operator;
 
+use crate::parse_opendal_metadata;
+
 #[derive(Debug)]
 pub struct S3InputFile {
     pub op: Operator,
@@ -16,15 +18,13 @@ pub struct S3InputFile {
 #[async_trait::async_trait]
 impl InputFile for S3InputFile {
     async fn metadata(&self) -> ILResult<FileMetadata> {
-        let file_metadata = self.op.stat(&self.relative_path).await.map_err(|e| {
+        let metadata = self.op.stat(&self.relative_path).await.map_err(|e| {
             ILError::storage(format!(
                 "Failed to read stat of file {}, e: {e}",
                 self.relative_path
             ))
         })?;
-        Ok(FileMetadata {
-            size: file_metadata.content_length(),
-        })
+        parse_opendal_metadata(&metadata)
     }
 
     async fn read(&self, range: Range<u64>) -> ILResult<Bytes> {

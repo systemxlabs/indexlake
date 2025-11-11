@@ -340,7 +340,9 @@ impl Table {
         let mut tx_helper = self.transaction_helper().await?;
 
         tx_helper.delete_index(&index_def.index_id).await?;
-        tx_helper.delete_index_files(&index_def.index_id).await?;
+        tx_helper
+            .delete_index_files_by_index_id(&index_def.index_id)
+            .await?;
 
         tx_helper.commit().await?;
 

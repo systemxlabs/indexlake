@@ -1,19 +1,22 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
+use arrow::array::RecordBatch;
 use futures::StreamExt;
 use log::debug;
 use uuid::Uuid;
 
 use crate::{
-    ILError, ILResult,
-    catalog::{DataFileRecord, RowValidity, TransactionHelper},
-    storage::EntryMode,
+    ILError, ILResult, RecordBatchStream,
+    catalog::{DataFileRecord, IndexFileRecord, RowValidity, TransactionHelper},
+    index::IndexBuilder,
+    storage::{EntryMode, build_parquet_writer, read_data_file_by_record},
     table::Table,
+    utils::extract_row_ids_from_record_batch,
 };
 
 #[derive(Debug, Clone)]
 pub enum TableOptimization {
-    CleanupOrphanFiles,
+    CleanupOrphanFiles { last_modified_before: i64 },
     MergeDataFiles { valid_row_threshold: usize },
 }
 
@@ -22,14 +25,16 @@ pub(crate) async fn process_table_optimization(
     optimization: TableOptimization,
 ) -> ILResult<()> {
     match optimization {
-        TableOptimization::CleanupOrphanFiles => cleanup_orphan_files(table).await,
+        TableOptimization::CleanupOrphanFiles {
+            last_modified_before,
+        } => cleanup_orphan_files(table, last_modified_before).await,
         TableOptimization::MergeDataFiles {
             valid_row_threshold,
         } => merge_data_files(table, valid_row_threshold).await,
     }
 }
 
-async fn cleanup_orphan_files(table: &Table) -> ILResult<()> {
+async fn cleanup_orphan_files(table: &Table, last_modified_before: i64) -> ILResult<()> {
     let task_id = format!("cleanup-orphan-files-{}", table.table_id);
     let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
     if tx_helper.insert_task(&task_id).await.is_err() {
@@ -52,7 +57,10 @@ async fn cleanup_orphan_files(table: &Table) -> ILResult<()> {
     let mut dir_entry_stream = table.storage.list(&table_dir).await?;
     while let Some(entry) = dir_entry_stream.next().await {
         let entry = entry?;
-        if matches!(entry.mode, EntryMode::File) {
+        if matches!(entry.metadata.mode, EntryMode::File)
+            && let Some(last_modified) = entry.metadata.last_modified
+            && last_modified < last_modified_before
+        {
             let relative_path = format!("{}/{}", table_dir, entry.name);
             if !existing_files.contains(&relative_path) {
                 table.storage.delete(&relative_path).await?;
@@ -98,11 +106,14 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
     }
 
     let mut new_data_files = Vec::with_capacity(merge_file_groups.len());
+    let mut index_file_records = Vec::new();
     for group in merge_file_groups.iter() {
         let files = group
             .iter()
             .map(|i| &matched_data_files[*i])
             .collect::<Vec<_>>();
+
+        let mut index_builders = table.index_manager.new_index_builders()?;
 
         let data_file_id = Uuid::now_v7();
         let relative_path = DataFileRecord::build_relative_path(
@@ -111,7 +122,7 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
             &data_file_id,
             table.config.preferred_data_file_format,
         );
-        stream_merge_group_files(&files, &relative_path).await?;
+        stream_merge_group_files(table, &files, &relative_path, &mut index_builders).await?;
 
         let record_count: usize = files.iter().map(|f| f.valid_row_count()).sum();
         let size = table
@@ -131,6 +142,32 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
             record_count: record_count as i64,
             validity: RowValidity::new(record_count),
         });
+
+        for index_builder in index_builders.iter_mut() {
+            let index_file_id = Uuid::now_v7();
+            let relative_path = IndexFileRecord::build_relative_path(
+                &table.namespace_id,
+                &table.table_id,
+                &index_file_id,
+            );
+            let output_file = table.storage.create(&relative_path).await?;
+            index_builder.write_file(output_file).await?;
+            let size = table
+                .storage
+                .open(&relative_path)
+                .await?
+                .metadata()
+                .await?
+                .size;
+            index_file_records.push(IndexFileRecord {
+                index_file_id,
+                table_id: table.table_id,
+                index_id: index_builder.index_def().index_id,
+                data_file_id,
+                relative_path,
+                size: size as i64,
+            });
+        }
     }
 
     let delete_data_file_ids = merge_file_groups
@@ -145,7 +182,12 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
         )));
     }
 
+    tx_helper
+        .delete_index_files_by_data_file_ids(&delete_data_file_ids)
+        .await?;
+
     tx_helper.insert_data_files(&new_data_files).await?;
+    tx_helper.insert_index_files(&index_file_records).await?;
 
     tx_helper.delete_task(&task_id).await?;
 
@@ -162,9 +204,62 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
 }
 
 async fn stream_merge_group_files(
-    _files: &[&DataFileRecord],
-    _relative_path: &str,
+    table: &Table,
+    files: &[&DataFileRecord],
+    relative_path: &str,
+    index_builders: &mut Vec<Box<dyn IndexBuilder>>,
 ) -> ILResult<()> {
-    // TODO stream merge group files
-    todo!()
+    let output_file = table.storage.create(relative_path).await?;
+    let mut parquet_writer = build_parquet_writer(
+        output_file,
+        table.table_schema.arrow_schema.clone(),
+        table.config.parquet_row_group_size,
+        table.config.preferred_data_file_format,
+    )?;
+
+    let mut streams: Vec<RecordBatchStream> = Vec::with_capacity(files.len());
+    for file in files {
+        let stream = read_data_file_by_record(
+            table.storage.as_ref(),
+            &table.table_schema,
+            file,
+            None,
+            vec![],
+            None,
+            1,
+        )
+        .await?;
+        streams.push(stream);
+    }
+
+    let mut stream_map: BTreeMap<Uuid, (usize, RecordBatch)> = BTreeMap::new();
+    for (index, stream) in streams.iter_mut().enumerate() {
+        if let Some(batch) = stream.next().await {
+            let batch = batch?;
+            let row_ids = extract_row_ids_from_record_batch(&batch)?;
+            debug_assert_eq!(row_ids.len(), 1);
+            stream_map.insert(row_ids[0], (index, batch));
+        }
+    }
+
+    loop {
+        if let Some((_, (stream_index, batch))) = stream_map.pop_first() {
+            parquet_writer.write(&batch).await?;
+            for builder in index_builders.iter_mut() {
+                builder.append(&batch)?;
+            }
+
+            if let Some(batch) = streams[stream_index].next().await {
+                let batch = batch?;
+                let row_ids = extract_row_ids_from_record_batch(&batch)?;
+                debug_assert_eq!(row_ids.len(), 1);
+                stream_map.insert(row_ids[0], (stream_index, batch));
+            }
+        }
+
+        if stream_map.is_empty() {
+            break;
+        }
+    }
+    Ok(())
 }

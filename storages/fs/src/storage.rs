@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use futures::StreamExt;
 use indexlake::{
     ILError, ILResult,
-    storage::{DirEntry, DirEntryStream, EntryMode, InputFile, OutputFile, Storage},
+    storage::{DirEntry, DirEntryStream, InputFile, OutputFile, Storage},
 };
 use opendal::{Operator, layers::RetryLayer, services::FsConfig};
 
-use crate::{LocalInputFile, LocalOutputFile};
+use crate::{LocalInputFile, LocalOutputFile, parse_opendal_metadata};
 
 #[derive(Debug)]
 pub struct FsStorage {
@@ -82,7 +82,7 @@ impl Storage for FsStorage {
                     entry.map_err(|e| ILError::storage(format!("Failed to read entry: {e}")))?;
                 let dir_entry = DirEntry {
                     name: entry.name().to_string(),
-                    mode: parse_opendal_entry_mode(entry.metadata().mode())?,
+                    metadata: parse_opendal_metadata(entry.metadata())?,
                 };
                 Ok::<_, ILError>(dir_entry)
             })
@@ -102,15 +102,5 @@ impl Storage for FsStorage {
                 "Failed to remove directory {relative_path}, e: {e}"
             ))
         })
-    }
-}
-
-fn parse_opendal_entry_mode(mode: opendal::EntryMode) -> ILResult<EntryMode> {
-    match mode {
-        opendal::EntryMode::DIR => Ok(EntryMode::Directory),
-        opendal::EntryMode::FILE => Ok(EntryMode::File),
-        opendal::EntryMode::Unknown => {
-            Err(ILError::storage("Unrecognized opendal entry mode: {mode}"))
-        }
     }
 }

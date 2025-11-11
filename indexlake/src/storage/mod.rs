@@ -61,6 +61,9 @@ impl OutputFile for Box<dyn OutputFile> {
 #[derive(Debug)]
 pub struct FileMetadata {
     pub size: u64,
+    pub mode: EntryMode,
+    // Timestamp in milliseconds
+    pub last_modified: Option<i64>,
 }
 
 pub type DirEntryStream = Pin<Box<dyn Stream<Item = ILResult<DirEntry>> + Send>>;
@@ -68,7 +71,7 @@ pub type DirEntryStream = Pin<Box<dyn Stream<Item = ILResult<DirEntry>> + Send>>
 #[derive(Debug)]
 pub struct DirEntry {
     pub name: String,
-    pub mode: EntryMode,
+    pub metadata: FileMetadata,
 }
 
 #[derive(Debug)]
