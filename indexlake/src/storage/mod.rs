@@ -29,7 +29,7 @@ pub trait Storage: Debug + Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait InputFile: Debug + Send + Sync + 'static {
     async fn metadata(&self) -> ILResult<FileMetadata>;
-    async fn read(&self, range: Range<u64>) -> ILResult<Bytes>;
+    async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes>;
 }
 
 #[async_trait::async_trait]
@@ -37,8 +37,8 @@ impl InputFile for Box<dyn InputFile> {
     async fn metadata(&self) -> ILResult<FileMetadata> {
         self.as_ref().metadata().await
     }
-    async fn read(&self, range: Range<u64>) -> ILResult<Bytes> {
-        self.as_ref().read(range).await
+    async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes> {
+        self.as_mut().read(range).await
     }
 }
 
@@ -78,6 +78,7 @@ pub struct DirEntry {
 pub enum EntryMode {
     File,
     Directory,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

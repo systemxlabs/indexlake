@@ -5,9 +5,10 @@ use indexlake::{
     ILError, ILResult,
     storage::{DirEntry, DirEntryStream, InputFile, OutputFile, Storage},
 };
-use opendal::{Operator, layers::RetryLayer, services::FsConfig};
+use tokio::fs::File;
+use tokio_stream::wrappers::ReadDirStream;
 
-use crate::{LocalInputFile, LocalOutputFile, parse_opendal_metadata};
+use crate::{LocalInputFile, LocalOutputFile, parse_std_fs_metadata};
 
 #[derive(Debug)]
 pub struct FsStorage {
@@ -19,88 +20,85 @@ impl FsStorage {
         FsStorage { root }
     }
 
-    pub fn new_operator(&self) -> ILResult<Operator> {
-        let mut cfg = FsConfig::default();
-        cfg.root = Some(self.root.to_string_lossy().to_string());
-        let op = Operator::from_config(cfg)
-            .map_err(|e| ILError::storage(format!("Failed to create fs operator: {e}")))?
-            .layer(RetryLayer::new())
-            .finish();
-        Ok(op)
+    pub fn absolute_path(&self, relative_path: &str) -> PathBuf {
+        self.root.join(relative_path)
     }
 }
 
 #[async_trait::async_trait]
 impl Storage for FsStorage {
     async fn create(&self, relative_path: &str) -> ILResult<Box<dyn OutputFile>> {
-        let op = self.new_operator()?;
+        let path = self.absolute_path(relative_path);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                ILError::storage(format!(
+                    "Failed to create directory for {relative_path}: {e}"
+                ))
+            })?;
+        }
+        let file = File::create(path)
+            .await
+            .map_err(|e| ILError::storage(format!("Failed to create file {relative_path}: {e}")))?;
         let file = LocalOutputFile {
-            op,
+            file,
             relative_path: relative_path.to_string(),
         };
         Ok(Box::new(file))
     }
 
     async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>> {
-        let op = self.new_operator()?;
+        let path = self.absolute_path(relative_path);
+        let file = File::open(path)
+            .await
+            .map_err(|e| ILError::storage(format!("Failed to open file {relative_path}: {e}")))?;
         let file = LocalInputFile {
-            op,
+            file,
             relative_path: relative_path.to_string(),
         };
         Ok(Box::new(file))
     }
 
     async fn delete(&self, relative_path: &str) -> ILResult<()> {
-        let op = self.new_operator()?;
-        op.delete(relative_path)
+        let path = self.absolute_path(relative_path);
+        tokio::fs::remove_file(path)
             .await
-            .map_err(|e| ILError::storage(format!("Failed to delete file {relative_path}, e: {e}")))
+            .map_err(|e| ILError::storage(format!("Failed to remove file {relative_path}: {e}")))
     }
 
     async fn exists(&self, relative_path: &str) -> ILResult<bool> {
-        let op = self.new_operator()?;
-        op.exists(relative_path).await.map_err(|e| {
+        let path = self.absolute_path(relative_path);
+        tokio::fs::try_exists(path).await.map_err(|e| {
             ILError::storage(format!(
-                "Failed to check existence of file {relative_path}, e: {e}"
+                "Failed to check file existing {relative_path}: {e}"
             ))
         })
     }
 
     async fn list(&self, relative_path: &str) -> ILResult<DirEntryStream> {
-        let op = self.new_operator()?;
-        let relative_path = if relative_path.ends_with('/') {
-            relative_path.to_string()
-        } else {
-            format!("{relative_path}/")
-        };
-        let lister = op.lister(&relative_path).await.map_err(|e| {
-            ILError::storage(format!("Failed to create lister for {relative_path}: {e}"))
+        let path = self.absolute_path(relative_path);
+        let read_dir = tokio::fs::read_dir(path).await.map_err(|e| {
+            ILError::storage(format!("Failed to read directory {relative_path}: {e}"))
         })?;
-        let stream = lister
-            .map(|entry| {
+        let stream = ReadDirStream::new(read_dir);
+        let stream = stream
+            .then(|entry| async move {
                 let entry =
                     entry.map_err(|e| ILError::storage(format!("Failed to read entry: {e}")))?;
+                let metadata = entry.metadata().await.map_err(|e| {
+                    ILError::storage(format!("Failed to read dir entry metadata: {e}"))
+                })?;
                 let dir_entry = DirEntry {
-                    name: entry.name().to_string(),
-                    metadata: parse_opendal_metadata(entry.metadata())?,
+                    name: entry.file_name().to_string_lossy().into_owned(),
+                    metadata: parse_std_fs_metadata(&metadata)?,
                 };
-                Ok::<_, ILError>(dir_entry)
+                Ok(dir_entry)
             })
             .boxed();
+
         Ok(stream)
     }
 
-    async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()> {
-        let op = self.new_operator()?;
-        let relative_path = if relative_path.ends_with('/') {
-            relative_path.to_string()
-        } else {
-            format!("{relative_path}/")
-        };
-        op.remove_all(&relative_path).await.map_err(|e| {
-            ILError::storage(format!(
-                "Failed to remove directory {relative_path}, e: {e}"
-            ))
-        })
+    async fn remove_dir_all(&self, _relative_path: &str) -> ILResult<()> {
+        todo!()
     }
 }

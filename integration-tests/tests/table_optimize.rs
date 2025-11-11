@@ -12,9 +12,8 @@ use indexlake_integration_tests::{
     storage_fs, storage_s3, utils::timestamp_millis,
 };
 
-// TODO fix
 #[rstest::rstest]
-// #[case(async { catalog_sqlite() }, async { storage_fs() })]
+#[case(async { catalog_sqlite() }, async { storage_fs() })]
 #[case(async { catalog_postgres().await }, async { storage_s3().await })]
 #[tokio::test(flavor = "multi_thread")]
 async fn cleanup_orphan_files(

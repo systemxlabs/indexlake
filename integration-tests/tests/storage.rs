@@ -21,7 +21,7 @@ async fn file_operations(
     output_file.write(expected.clone()).await?;
     output_file.close().await?;
 
-    let input_file = storage.open(file_path).await?;
+    let mut input_file = storage.open(file_path).await?;
     let file_meta = input_file.metadata().await?;
     let bytes = input_file.read(0..file_meta.size).await?;
     assert_eq!(bytes, expected);

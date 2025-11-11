@@ -81,7 +81,7 @@ impl IndexBuilder for HnswIndexBuilder {
         Ok(())
     }
 
-    async fn read_file(&mut self, input_file: Box<dyn InputFile>) -> ILResult<()> {
+    async fn read_file(&mut self, mut input_file: Box<dyn InputFile>) -> ILResult<()> {
         let file_meta = input_file.metadata().await?;
         let data = input_file.read(0..file_meta.size).await?;
         let hnsw_with_row_ids: HnswWithRowIds = bincode::deserialize(&data)

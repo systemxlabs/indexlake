@@ -27,7 +27,7 @@ impl InputFile for S3InputFile {
         parse_opendal_metadata(&metadata)
     }
 
-    async fn read(&self, range: Range<u64>) -> ILResult<Bytes> {
+    async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes> {
         let reader = self
             .op
             .reader(&self.relative_path)
