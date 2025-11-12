@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
+use derive_with::With;
 use futures::StreamExt;
 use uuid::Uuid;
 
@@ -19,6 +20,7 @@ use crate::utils::{
 };
 use crate::{ILError, ILResult};
 
+#[derive(Debug, With)]
 pub struct TableInsertion {
     pub data: Vec<RecordBatch>,
     pub force_inline: bool,
@@ -32,11 +34,6 @@ impl TableInsertion {
             force_inline: false,
             ignore_row_id: true,
         }
-    }
-
-    pub fn with_force_inline(mut self, force_inline: bool) -> Self {
-        self.force_inline = force_inline;
-        self
     }
 
     pub fn rewrite_columns(mut self, field_name_id_map: &HashMap<String, Uuid>) -> ILResult<Self> {

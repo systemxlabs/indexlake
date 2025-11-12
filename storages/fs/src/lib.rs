@@ -1,17 +1,13 @@
 mod file;
 mod storage;
 
-use std::time::UNIX_EPOCH;
-
 pub use file::*;
 pub use storage::*;
 
-use indexlake::{
-    ILResult,
-    storage::{EntryMode, FileMetadata},
-};
+use indexlake::storage::{EntryMode, FileMetadata};
+use std::time::UNIX_EPOCH;
 
-pub(crate) fn parse_std_fs_metadata(metadata: &std::fs::Metadata) -> ILResult<FileMetadata> {
+pub(crate) fn parse_std_fs_metadata(metadata: &std::fs::Metadata) -> FileMetadata {
     let size = metadata.len();
     let last_modified = if let Ok(modified) = metadata.modified() {
         Some(
@@ -30,9 +26,9 @@ pub(crate) fn parse_std_fs_metadata(metadata: &std::fs::Metadata) -> ILResult<Fi
     } else {
         EntryMode::Unknown
     };
-    Ok(FileMetadata {
+    FileMetadata {
         size,
         last_modified,
         mode,
-    })
+    }
 }

@@ -89,7 +89,7 @@ impl Storage for FsStorage {
                 })?;
                 let dir_entry = DirEntry {
                     name: entry.file_name().to_string_lossy().into_owned(),
-                    metadata: parse_std_fs_metadata(&metadata)?,
+                    metadata: parse_std_fs_metadata(&metadata),
                 };
                 Ok(dir_entry)
             })

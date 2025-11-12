@@ -23,7 +23,7 @@ impl InputFile for LocalInputFile {
             .metadata()
             .await
             .map_err(|e| ILError::storage(format!("Failed to get file metadata: {e}")))?;
-        parse_std_fs_metadata(&metadata)
+        Ok(parse_std_fs_metadata(&metadata))
     }
 
     async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes> {
