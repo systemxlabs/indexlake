@@ -52,9 +52,9 @@ message DataFile {
   bytes table_id = 2;
   DataFileFormat format = 3;
   string relative_path = 4;
-  int64 record_count = 5;
-  repeated bytes row_ids = 6;
-  repeated bool validity = 7;
+  int64 size = 5;
+  int64 record_count = 6;
+  bytes validity = 7;
 }
 
 enum DataFileFormat {

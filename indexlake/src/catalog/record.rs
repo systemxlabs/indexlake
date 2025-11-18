@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 use arrow::datatypes::{DataType, Field};
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogDataType, CatalogDatabase, CatalogSchema, Column, Row, Scalar, deserialize_scalar,
+    Catalog, CatalogDataType, CatalogSchema, Column, Row, Scalar, deserialize_scalar,
     serialize_scalar,
 };
 use crate::storage::DataFileFormat;
@@ -24,7 +24,7 @@ pub(crate) struct TableRecord {
 }
 
 impl TableRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> ILResult<String> {
         let config_str = serde_json::to_string(&self.config)
             .map_err(|e| ILError::internal(format!("Failed to serialize table config: {e:?}")))?;
         let schema_metadata_str = serde_json::to_string(&self.schema_metadata).map_err(|e| {
@@ -32,9 +32,9 @@ impl TableRecord {
         })?;
         Ok(format!(
             "({}, '{}', {}, '{}', '{}')",
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.table_name,
-            database.sql_uuid_literal(&self.namespace_id),
+            catalog.sql_uuid_literal(&self.namespace_id),
             config_str,
             schema_metadata_str,
         ))
@@ -103,13 +103,13 @@ impl FieldRecord {
         }
     }
 
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> ILResult<String> {
         let data_type_str = serde_json::to_string(&self.data_type)
             .map_err(|e| ILError::internal(format!("Failed to serialize data type: {e:?}")))?;
         let default_value_sql = match self.default_value.as_ref() {
             Some(value) => {
                 let bytes = serialize_scalar(value)?;
-                database.sql_binary_literal(&bytes)
+                catalog.sql_binary_literal(&bytes)
             }
             None => "null".to_string(),
         };
@@ -117,18 +117,14 @@ impl FieldRecord {
             .map_err(|e| ILError::internal(format!("Failed to serialize field metadata: {e:?}")))?;
         Ok(format!(
             "({}, {}, '{}', '{}', {}, {}, '{}')",
-            database.sql_uuid_literal(&self.field_id),
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.field_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.field_name,
             data_type_str,
             self.nullable,
             default_value_sql,
             metadata_str
         ))
-    }
-
-    pub(crate) fn into_field(self) -> Field {
-        Field::new(self.field_name, self.data_type, self.nullable).with_metadata(self.metadata)
     }
 
     pub(crate) fn catalog_schema() -> CatalogSchema {
@@ -180,36 +176,24 @@ pub struct DataFileRecord {
     pub table_id: Uuid,
     pub format: DataFileFormat,
     pub relative_path: String,
+    pub size: i64,
     pub record_count: i64,
-    pub row_ids: Vec<Uuid>,
-    pub validity: Vec<bool>,
+    pub validity: RowValidity,
 }
 
 impl DataFileRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
-        let row_ids_bytes = self
-            .row_ids
-            .iter()
-            .flat_map(|id| id.into_bytes())
-            .collect::<Vec<_>>();
-        let validity_bytes = Self::validity_to_bytes(&self.validity);
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
+        let validity_bytes = self.validity.bytes();
         format!(
             "({}, {}, '{}', '{}', {}, {}, {})",
-            database.sql_uuid_literal(&self.data_file_id),
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.data_file_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.format,
             self.relative_path,
+            self.size,
             self.record_count,
-            database.sql_binary_literal(&row_ids_bytes),
-            database.sql_binary_literal(&validity_bytes),
+            catalog.sql_binary_literal(validity_bytes),
         )
-    }
-
-    pub(crate) fn validity_to_bytes(validity: &[bool]) -> Vec<u8> {
-        validity
-            .iter()
-            .flat_map(|valid| if *valid { vec![1u8] } else { vec![0u8] })
-            .collect::<Vec<_>>()
     }
 
     pub(crate) fn catalog_schema() -> CatalogSchema {
@@ -218,8 +202,8 @@ impl DataFileRecord {
             Column::new("table_id", CatalogDataType::Uuid, false),
             Column::new("format", CatalogDataType::Utf8, false),
             Column::new("relative_path", CatalogDataType::Utf8, false),
+            Column::new("size", CatalogDataType::Int64, false),
             Column::new("record_count", CatalogDataType::Int64, false),
-            Column::new("row_ids", CatalogDataType::Binary, false),
             Column::new("validity", CatalogDataType::Binary, false),
         ])
     }
@@ -247,60 +231,33 @@ impl DataFileRecord {
             .parse::<DataFileFormat>()
             .map_err(|e| ILError::internal(format!("Failed to parse data file format: {e:?}")))?;
         let relative_path = row.utf8_owned(3)?.expect("relative_path is not null");
-        let record_count = row.int64(4)?.expect("record_count is not null");
+        let size = row.int64(4)?.expect("size is not null");
+        let record_count = row.int64(5)?.expect("record_count is not null");
 
-        let row_ids_bytes = row.binary(5)?.expect("row_ids is not null");
-        let row_ids_chunks = row_ids_bytes.chunks_exact(16);
-        let mut row_ids = Vec::with_capacity(record_count as usize);
-        for chunk in row_ids_chunks {
-            let row_id = Uuid::from_slice(chunk)?;
-            row_ids.push(row_id);
-        }
-
-        let validity_bytes = row.binary(6)?.expect("validity is not null");
-        let mut validity = Vec::with_capacity(record_count as usize);
-        for byte in validity_bytes {
-            validity.push(*byte == 1u8);
-        }
+        let validity_bytes = row.binary_owned(6)?.expect("validity is not null");
+        let validity = RowValidity::from(validity_bytes, record_count as usize);
 
         Ok(DataFileRecord {
             data_file_id,
             table_id,
             format,
             relative_path,
+            size,
             record_count,
-            row_ids,
             validity,
         })
     }
 
     pub(crate) fn valid_row_count(&self) -> usize {
-        self.validity.iter().filter(|valid| **valid).count()
+        self.validity.iter().filter(|valid| *valid).count()
     }
 
-    pub(crate) fn valid_row_ids(&self) -> impl Iterator<Item = Uuid> {
-        self.row_ids.iter().enumerate().filter_map(
-            |(i, id)| {
-                if self.validity[i] { Some(*id) } else { None }
-            },
-        )
-    }
-
-    pub(crate) fn row_ranges(
-        &self,
-        row_ids: Option<&HashSet<Uuid>>,
-    ) -> ILResult<Vec<Range<usize>>> {
+    pub(crate) fn row_ranges(&self) -> Vec<Range<usize>> {
         let offsets = self
             .validity
             .iter()
             .enumerate()
-            .filter(|(i, valid)| {
-                **valid
-                    && row_ids
-                        .as_ref()
-                        .map(|ids| ids.contains(&self.row_ids[*i]))
-                        .unwrap_or(true)
-            })
+            .filter(|(_, valid)| *valid)
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
 
@@ -317,15 +274,65 @@ impl DataFileRecord {
             ranges.push(current_offset..offsets[next_offset_idx - 1] + 1);
             offset_idx = next_offset_idx;
         }
-        Ok(ranges)
+        ranges
     }
 
-    pub(crate) fn row_selection(&self, row_ids: Option<&HashSet<Uuid>>) -> ILResult<RowSelection> {
-        let ranges = self.row_ranges(row_ids)?;
-        Ok(RowSelection::from_consecutive_ranges(
-            ranges.into_iter(),
-            self.validity.len(),
-        ))
+    pub(crate) fn row_selection(&self) -> RowSelection {
+        let ranges = self.row_ranges();
+        RowSelection::from_consecutive_ranges(ranges.into_iter(), self.record_count as usize)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RowValidity {
+    pub(crate) validity: Vec<u8>,
+    pub(crate) num_rows: usize,
+}
+
+impl RowValidity {
+    pub fn new(num_rows: usize) -> Self {
+        let num_bytes = num_rows.div_ceil(8);
+        let validity = vec![u8::MAX; num_bytes];
+        Self { validity, num_rows }
+    }
+
+    pub fn from(bytes: Vec<u8>, num_rows: usize) -> Self {
+        assert_eq!(bytes.len(), num_rows.div_ceil(8));
+        Self {
+            validity: bytes,
+            num_rows,
+        }
+    }
+
+    pub fn set(&mut self, row_idx: usize, valid: bool) {
+        assert!(row_idx < self.num_rows);
+
+        let byte_idx = row_idx / 8;
+        let bit_idx = row_idx % 8;
+
+        if valid {
+            self.validity[byte_idx] |= 1 << bit_idx;
+        } else {
+            self.validity[byte_idx] &= !(1 << bit_idx);
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+        self.validity
+            .iter()
+            .enumerate()
+            .flat_map(|(byte_idx, byte)| {
+                let bit_len = if byte_idx == self.validity.len() - 1 {
+                    self.num_rows - byte_idx * 8
+                } else {
+                    8
+                };
+                (0..bit_len).map(move |bit| (byte & (1 << bit)) != 0)
+            })
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.validity
     }
 }
 
@@ -340,7 +347,7 @@ pub(crate) struct IndexRecord {
 }
 
 impl IndexRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         let key_field_ids_str = self
             .key_field_ids
             .iter()
@@ -349,8 +356,8 @@ impl IndexRecord {
             .join(",");
         format!(
             "({}, {}, '{}', '{}', '{}', '{}')",
-            database.sql_uuid_literal(&self.index_id),
-            database.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.index_id),
+            catalog.sql_uuid_literal(&self.table_id),
             self.index_name,
             self.index_kind,
             key_field_ids_str,
@@ -398,17 +405,19 @@ pub(crate) struct IndexFileRecord {
     pub(crate) index_id: Uuid,
     pub(crate) data_file_id: Uuid,
     pub(crate) relative_path: String,
+    pub(crate) size: i64,
 }
 
 impl IndexFileRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         format!(
-            "({}, {}, {}, {}, '{}')",
-            database.sql_uuid_literal(&self.index_file_id),
-            database.sql_uuid_literal(&self.table_id),
-            database.sql_uuid_literal(&self.index_id),
-            database.sql_uuid_literal(&self.data_file_id),
-            self.relative_path
+            "({}, {}, {}, {}, '{}', {})",
+            catalog.sql_uuid_literal(&self.index_file_id),
+            catalog.sql_uuid_literal(&self.table_id),
+            catalog.sql_uuid_literal(&self.index_id),
+            catalog.sql_uuid_literal(&self.data_file_id),
+            self.relative_path,
+            self.size,
         )
     }
 
@@ -419,6 +428,7 @@ impl IndexFileRecord {
             Column::new("index_id", CatalogDataType::Uuid, false),
             Column::new("data_file_id", CatalogDataType::Uuid, false),
             Column::new("relative_path", CatalogDataType::Utf8, false),
+            Column::new("size", CatalogDataType::Int64, false),
         ])
     }
 
@@ -436,12 +446,14 @@ impl IndexFileRecord {
         let index_id = row.uuid(2)?.expect("index_id is not null");
         let data_file_id = row.uuid(3)?.expect("data_file_id is not null");
         let relative_path = row.utf8_owned(4)?.expect("relative_path is not null");
+        let size = row.int64(5)?.expect("size is not null");
         Ok(Self {
             index_file_id,
             table_id,
             index_id,
             data_file_id,
             relative_path,
+            size,
         })
     }
 }
@@ -452,11 +464,11 @@ pub(crate) struct InlineIndexRecord {
 }
 
 impl InlineIndexRecord {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> String {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         format!(
             "({}, {})",
-            database.sql_uuid_literal(&self.index_id),
-            database.sql_binary_literal(&self.index_data)
+            catalog.sql_uuid_literal(&self.index_id),
+            catalog.sql_binary_literal(&self.index_data)
         )
     }
 
@@ -474,5 +486,26 @@ impl InlineIndexRecord {
             index_id,
             index_data,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_row_validity() {
+        let mut row_validity = RowValidity::new(5);
+        row_validity.set(2, false);
+        let bool_vec = row_validity.iter().collect::<Vec<bool>>();
+        assert_eq!(bool_vec, vec![true, true, false, true, true]);
+
+        let mut row_validity = RowValidity::new(8);
+        row_validity.set(2, false);
+        let bool_vec = row_validity.iter().collect::<Vec<bool>>();
+        assert_eq!(
+            bool_vec,
+            vec![true, true, false, true, true, true, true, true]
+        );
     }
 }

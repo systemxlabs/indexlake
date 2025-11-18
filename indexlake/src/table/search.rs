@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{FixedSizeBinaryArray, Float64Array, RecordBatch};
@@ -76,7 +76,7 @@ pub(crate) async fn process_search(
                 )))?;
 
             let search_entries = search_index_file(
-                &storage,
+                storage.as_ref(),
                 index_kind.as_ref(),
                 &index_def,
                 search_query.as_ref(),
@@ -162,13 +162,13 @@ async fn search_inline_rows(
 }
 
 async fn search_index_file(
-    storage: &Storage,
+    storage: &dyn Storage,
     index_kind: &dyn IndexKind,
     index_def: &IndexDefinitionRef,
     search_query: &dyn SearchQuery,
     index_file_record: &IndexFileRecord,
 ) -> ILResult<SearchIndexEntries> {
-    let index_file = storage.open_file(&index_file_record.relative_path).await?;
+    let index_file = storage.open(&index_file_record.relative_path).await?;
 
     let mut index_builder = index_kind.builder(index_def)?;
     index_builder.read_file(index_file).await?;
@@ -234,7 +234,10 @@ async fn read_inline_rows(
         .map(|(row_id_score, _)| row_id_score.row_id)
         .collect::<Vec<_>>();
 
-    let projected_schema = Arc::new(project_schema(&table.schema, projection.as_ref())?);
+    let projected_schema = Arc::new(project_schema(
+        &table.table_schema.arrow_schema,
+        projection.as_ref(),
+    )?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
     let row_stream = catalog_helper
@@ -259,8 +262,8 @@ async fn read_data_file_rows(
             RowLocation::DataFile(data_file_id) => {
                 data_file_row_ids
                     .entry(*data_file_id)
-                    .or_insert(HashSet::new())
-                    .insert(row_id_score.row_id);
+                    .or_insert(Vec::new())
+                    .push(row_id_score.row_id);
             }
         }
     }
@@ -274,12 +277,12 @@ async fn read_data_file_rows(
                 "Data file record not found for data file id {data_file_id}"
             )))?;
         let stream = read_data_file_by_record(
-            &table.storage,
-            &table.schema,
+            table.storage.as_ref(),
+            &table.table_schema,
             data_file_record,
             projection.clone(),
             vec![],
-            Some(&row_ids),
+            Some(row_ids),
             1024,
         )
         .await?;

@@ -9,6 +9,8 @@ use indexlake::catalog::{Catalog, CatalogDataType, CatalogSchema, Column};
 use indexlake::storage::Storage;
 use indexlake_catalog_postgres::PostgresCatalogBuilder;
 use indexlake_catalog_sqlite::SqliteCatalog;
+use indexlake_storage_fs::FsStorage;
+use indexlake_storage_s3::S3Storage;
 use opendal::services::S3Config;
 
 use crate::docker::DockerCompose;
@@ -69,7 +71,7 @@ pub async fn catalog_postgres() -> Arc<dyn Catalog> {
     let _ = POSTGRES_DB.get_or_init(setup_postgres_db);
     let builder = PostgresCatalogBuilder::new("localhost", 5432, "postgres", "password")
         .dbname("postgres")
-        .pool_size(50);
+        .pool_max_size(50);
     let catalog = Arc::new(builder.build().await.unwrap());
 
     let schema = Arc::new(CatalogSchema::new(vec![Column::new(
@@ -90,12 +92,13 @@ pub async fn catalog_postgres() -> Arc<dyn Catalog> {
     catalog
 }
 
-pub fn storage_fs() -> Arc<Storage> {
+pub fn storage_fs() -> Arc<dyn Storage> {
     let home = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), "tmp/fs_storage");
-    Arc::new(Storage::new_fs(home))
+    let fs_storage = FsStorage::new(home.into());
+    Arc::new(fs_storage)
 }
 
-pub async fn storage_s3() -> Arc<Storage> {
+pub async fn storage_s3() -> Arc<dyn Storage> {
     let _ = MINIO.get_or_init(setup_minio);
     let mut config = S3Config::default();
     config.endpoint = Some("http://127.0.0.1:9000".to_string());
@@ -104,10 +107,11 @@ pub async fn storage_s3() -> Arc<Storage> {
     config.region = Some("us-east-1".to_string());
     config.disable_config_load = true;
     config.disable_ec2_metadata = true;
-    let storage = Arc::new(Storage::new_s3(config, "indexlake"));
+
+    let s3_storage = S3Storage::new(config, "indexlake".into());
 
     let mut retry_count = 0;
-    while let Err(_e) = storage.connectivity_check().await {
+    while let Err(_e) = s3_storage.connectivity_check().await {
         std::thread::sleep(std::time::Duration::from_secs(1));
         retry_count += 1;
         if retry_count > 100 {
@@ -115,5 +119,5 @@ pub async fn storage_s3() -> Arc<Storage> {
         }
     }
 
-    storage
+    Arc::new(s3_storage)
 }

@@ -6,15 +6,16 @@ mod update;
 
 use std::sync::Arc;
 
+use arrow_schema::DataType;
 use futures::TryStreamExt;
 use uuid::Uuid;
 
-use crate::catalog::{Catalog, CatalogDatabase, CatalogSchemaRef, Row, Transaction};
+use crate::catalog::{Catalog, CatalogDataType, CatalogSchemaRef, Row, Transaction};
 use crate::{ILError, ILResult};
 
 pub(crate) struct TransactionHelper {
     pub(crate) transaction: Box<dyn Transaction>,
-    pub(crate) database: CatalogDatabase,
+    pub(crate) catalog: Arc<dyn Catalog>,
 }
 
 impl TransactionHelper {
@@ -22,7 +23,7 @@ impl TransactionHelper {
         let transaction = catalog.transaction().await?;
         Ok(Self {
             transaction,
-            database: catalog.database(),
+            catalog: catalog.clone(),
         })
     }
 
@@ -63,27 +64,44 @@ impl TransactionHelper {
         self.transaction.rollback().await
     }
 
-    pub(crate) async fn truncate_inline_row_table(&mut self, table_id: &Uuid) -> ILResult<()> {
-        match self.database {
-            CatalogDatabase::Sqlite => {
-                self.transaction
-                    .execute_batch(&[format!("DELETE FROM {}", inline_row_table_name(table_id))])
-                    .await
-            }
-            CatalogDatabase::Postgres => {
-                self.transaction
-                    .execute_batch(&[format!(
-                        "TRUNCATE TABLE {}",
-                        inline_row_table_name(table_id)
-                    )])
-                    .await
-            }
-        }
-    }
-
     pub(crate) async fn drop_inline_row_table(&mut self, table_id: &Uuid) -> ILResult<()> {
         self.transaction
             .execute_batch(&[format!("DROP TABLE {}", inline_row_table_name(table_id))])
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn alter_add_column(
+        &mut self,
+        table_id: &Uuid,
+        field_id: &Uuid,
+        datatype: &DataType,
+    ) -> ILResult<()> {
+        let table_name = inline_row_table_name(table_id);
+        let field_name = hex::encode(field_id);
+        let catalog_datatype = CatalogDataType::from_arrow(datatype)?;
+        self.transaction
+            .execute_batch(&[format!(
+                "ALTER TABLE {table_name} ADD COLUMN {} {}",
+                self.catalog.sql_identifier(&field_name),
+                self.catalog.unparse_catalog_data_type(catalog_datatype),
+            )])
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn alter_drop_column(
+        &mut self,
+        table_id: &Uuid,
+        field_id: &Uuid,
+    ) -> ILResult<()> {
+        let table_name = inline_row_table_name(table_id);
+        let field_name = hex::encode(field_id);
+        self.transaction
+            .execute_batch(&[format!(
+                "ALTER TABLE {table_name} DROP COLUMN {}",
+                self.catalog.sql_identifier(&field_name),
+            )])
             .await?;
         Ok(())
     }
@@ -129,5 +147,5 @@ impl CatalogHelper {
 }
 
 pub(crate) fn inline_row_table_name(table_id: &Uuid) -> String {
-    format!("indexlake_inline_{}", hex::encode(table_id.as_bytes()))
+    format!("indexlake_inline_{}", hex::encode(table_id))
 }

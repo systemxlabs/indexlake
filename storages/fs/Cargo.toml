@@ -1,0 +1,18 @@
+[package]
+name = "indexlake-storage-fs"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "IndexLake local fs storage"
+
+[dependencies]
+indexlake = { workspace = true }
+
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["fs"] }

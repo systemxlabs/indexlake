@@ -12,22 +12,21 @@ pub use case::*;
 pub use compute::*;
 pub use like::*;
 pub use utils::*;
+use uuid::Uuid;
 pub use visitor::*;
 
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use arrow::array::{ArrayRef, AsArray, BooleanArray, RecordBatch};
 use arrow::buffer::BooleanBuffer;
 use arrow::compute::CastOptions;
 use arrow::datatypes::{DataType, Schema};
-use arrow::error::ArrowError;
 use arrow::util::display::{DurationFormat, FormatOptions};
-use parquet::arrow::ProjectionMask;
-use parquet::arrow::arrow_reader::ArrowPredicate;
 
 use derive_visitor::{Drive, DriveMut};
 
-use crate::catalog::{CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
+use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use crate::{ILError, ILResult};
 
 pub const DEFAULT_CAST_OPTIONS: CastOptions<'static> = CastOptions {
@@ -253,44 +252,23 @@ impl Expr {
         }
     }
 
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
-        match self {
-            Expr::Column(name) => Ok(database.sql_identifier(name)),
-            Expr::Literal(literal) => literal.value.to_sql(database),
-            Expr::BinaryExpr(binary_expr) => binary_expr.to_sql(database),
-            Expr::Not(expr) => Ok(format!("NOT {}", expr.to_sql(database)?)),
-            Expr::IsNull(expr) => Ok(format!("{} IS NULL", expr.to_sql(database)?)),
-            Expr::IsNotNull(expr) => Ok(format!("{} IS NOT NULL", expr.to_sql(database)?)),
-            Expr::InList(in_list) => {
-                let list = in_list
-                    .list
-                    .iter()
-                    .map(|expr| expr.to_sql(database))
-                    .collect::<ILResult<Vec<_>>>()?
-                    .join(", ");
-                Ok(format!("{} IN ({})", in_list.expr.to_sql(database)?, list))
-            }
-            Expr::Function(_) => Err(ILError::invalid_input(
-                "Function can only be used for index",
-            )),
-            Expr::Like(like) => like.to_sql(database),
-            Expr::Cast(cast) => {
-                let catalog_datatype = CatalogDataType::from_arrow(&cast.cast_type)?;
-                let expr_sql = cast.expr.to_sql(database)?;
-                Ok(format!(
-                    "CAST({} AS {})",
-                    expr_sql,
-                    catalog_datatype.to_sql(database)
-                ))
-            }
-            Expr::TryCast(_) => Err(ILError::invalid_input("TRY_CAST is not supported in SQL")),
-            Expr::Negative(expr) => Ok(format!("-{}", expr.to_sql(database)?)),
-            Expr::Case(case) => case.to_sql(database),
-        }
-    }
-
     pub(crate) fn only_visit_row_id_column(&self) -> bool {
         visited_columns(self) == [INTERNAL_ROW_ID_FIELD_NAME]
+    }
+
+    pub(crate) fn rewrite_columns(
+        mut self,
+        field_name_id_map: &HashMap<String, Uuid>,
+    ) -> ILResult<Expr> {
+        let mut replacer = ColumnReplacer::new(field_name_id_map);
+        self.drive_mut(&mut replacer);
+        if let Some(fail_col) = replacer.fail_col {
+            Err(ILError::invalid_input(format!(
+                "Column {fail_col} not found"
+            )))
+        } else {
+            Ok(self)
+        }
     }
 }
 
@@ -336,46 +314,6 @@ impl std::fmt::Display for Expr {
             }
             Expr::Negative(expr) => write!(f, "-{expr}"),
             Expr::Case(case) => write!(f, "{case}"),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ExprPredicate {
-    filter: Option<Expr>,
-    projection: ProjectionMask,
-}
-
-impl ExprPredicate {
-    pub(crate) fn try_new(filters: Vec<Expr>, projection: ProjectionMask) -> ILResult<Self> {
-        let filter = merge_filters(filters);
-        Ok(Self { filter, projection })
-    }
-}
-
-impl ArrowPredicate for ExprPredicate {
-    fn projection(&self) -> &ProjectionMask {
-        &self.projection
-    }
-
-    fn evaluate(&mut self, batch: RecordBatch) -> Result<BooleanArray, ArrowError> {
-        if let Some(filter) = &self.filter {
-            let array = filter
-                .eval(&batch)
-                .map_err(|e| ArrowError::from_external_error(Box::new(e)))?
-                .into_array(batch.num_rows())
-                .map_err(|e| ArrowError::from_external_error(Box::new(e)))?;
-            let bool_array = array.as_boolean_opt().ok_or_else(|| {
-                ArrowError::ComputeError(format!(
-                    "ExprPredicate evaluation expected boolean array, got {}",
-                    array.data_type()
-                ))
-            })?;
-
-            Ok(bool_array.clone())
-        } else {
-            let bool_array = BooleanArray::from(vec![true; batch.num_rows()]);
-            Ok(bool_array)
         }
     }
 }

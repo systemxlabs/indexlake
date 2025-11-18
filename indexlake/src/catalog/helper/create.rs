@@ -1,9 +1,8 @@
-use arrow::datatypes::Fields;
 use uuid::Uuid;
 
 use crate::ILResult;
 use crate::catalog::{
-    CatalogDataType, CatalogDatabase, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
+    CatalogDataType, FieldRecord, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
     inline_row_table_name,
 };
 
@@ -11,24 +10,24 @@ impl TransactionHelper {
     pub(crate) async fn create_inline_row_table(
         &mut self,
         table_id: &Uuid,
-        fields: &Fields,
+        field_records: &[FieldRecord],
     ) -> ILResult<()> {
         let mut columns = Vec::new();
-        match self.database {
-            CatalogDatabase::Postgres => {
-                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} UUID PRIMARY KEY"));
-            }
-            CatalogDatabase::Sqlite => {
-                columns.push(format!("{INTERNAL_ROW_ID_FIELD_NAME} BLOB PRIMARY KEY"));
-            }
-        }
+        let pri_key_col = format!(
+            "{INTERNAL_ROW_ID_FIELD_NAME} {} PRIMARY KEY",
+            self.catalog
+                .unparse_catalog_data_type(CatalogDataType::Uuid)
+        );
+        columns.push(pri_key_col);
 
-        for field in fields {
+        for field_record in field_records {
+            let catalog_data_type = CatalogDataType::from_arrow(&field_record.data_type)?;
             columns.push(format!(
                 "{} {} {}",
-                self.database.sql_identifier(field.name()),
-                CatalogDataType::from_arrow(field.data_type())?.to_sql(self.database),
-                if field.is_nullable() {
+                self.catalog
+                    .sql_identifier(&hex::encode(field_record.field_id)),
+                self.catalog.unparse_catalog_data_type(catalog_data_type),
+                if field_record.nullable {
                     "NULL"
                 } else {
                     "NOT NULL"

@@ -71,7 +71,7 @@ impl IndexBuilder for RStarIndexBuilder {
         Ok(())
     }
 
-    async fn read_file(&mut self, input_file: InputFile) -> ILResult<()> {
+    async fn read_file(&mut self, input_file: Box<dyn InputFile>) -> ILResult<()> {
         let arrow_reader_builder = ParquetRecordBatchStreamBuilder::new(input_file).await?;
         let mut batch_stream = arrow_reader_builder.build()?;
 
@@ -84,7 +84,7 @@ impl IndexBuilder for RStarIndexBuilder {
         Ok(())
     }
 
-    async fn write_file(&mut self, output_file: OutputFile) -> ILResult<()> {
+    async fn write_file(&mut self, output_file: Box<dyn OutputFile>) -> ILResult<()> {
         let writer_properties = WriterProperties::builder()
             .set_max_row_group_size(4096)
             .build();

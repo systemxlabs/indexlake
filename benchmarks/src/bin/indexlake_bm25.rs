@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let table_config = TableConfig {
         inline_row_count_limit: insert_batch_size,
         parquet_row_group_size: 100,
-        preferred_data_file_format: DataFileFormat::ParquetV1,
+        preferred_data_file_format: DataFileFormat::ParquetV2,
     };
     let table_creation = TableCreation {
         namespace_name: namespace_name.to_string(),

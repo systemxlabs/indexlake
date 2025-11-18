@@ -25,7 +25,7 @@ async fn create_table(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -60,7 +60,7 @@ async fn create_table(
     fields.extend(expected_schema.fields.iter().cloned());
     let expected_schema = Schema::new(fields);
 
-    assert_eq!(table.schema.as_ref(), &expected_schema);
+    assert_eq!(table.output_schema.as_ref(), &expected_schema);
 
     Ok(())
 }
@@ -75,7 +75,7 @@ async fn create_table_with_invalid_schema(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -121,7 +121,7 @@ async fn table_data_types(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
     #[case] format: DataFileFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -412,7 +412,7 @@ async fn duplicated_table_name(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -455,7 +455,7 @@ async fn create_table_with_invalid_column_default_value(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -498,14 +498,15 @@ async fn truncate_table(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, DataFileFormat::ParquetV2).await?;
 
-    table.truncate().await?;
+    let truncate_count = table.truncate().await?;
+    assert_eq!(truncate_count, 4);
 
     let scan = TableScan::default();
     let stream = table.scan(scan).await?;
@@ -525,7 +526,7 @@ async fn drop_table(
     catalog: Arc<dyn Catalog>,
     #[future(awt)]
     #[case]
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
@@ -583,5 +584,26 @@ async fn drop_table(
 +----+-------+"#,
     );
 
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() })]
+#[case(async { catalog_postgres().await }, async { storage_s3().await })]
+#[tokio::test(flavor = "multi_thread")]
+async fn table_size(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, DataFileFormat::ParquetV2).await?;
+    let size = table.size().await?;
+    assert!(size > 0);
     Ok(())
 }

@@ -27,7 +27,7 @@ use arrow::ipc::writer::StreamWriter;
 use arrow::util::display::{ArrayFormatter, FormatOptions};
 use arrow_schema::{Field, Schema, TimeUnit};
 
-use crate::catalog::CatalogDatabase;
+use crate::catalog::Catalog;
 use crate::table::array_to_sql_literals;
 use crate::{ILError, ILResult};
 
@@ -167,9 +167,9 @@ impl Scalar {
         }
     }
 
-    pub fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
+    pub fn to_sql(&self, catalog: &dyn Catalog) -> ILResult<String> {
         let array = self.to_array_of_size(1)?;
-        let mut literals = array_to_sql_literals(&array, database)?;
+        let mut literals = array_to_sql_literals(&array, catalog)?;
         Ok(literals.remove(0))
     }
 

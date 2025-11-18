@@ -15,7 +15,7 @@ impl TransactionHelper {
         self.transaction
             .execute(&format!(
                 "INSERT INTO indexlake_namespace (namespace_id, namespace_name) VALUES ({}, '{namespace_name}')",
-                self.database.sql_uuid_literal(namespace_id)
+                self.catalog.sql_uuid_literal(namespace_id)
             ))
             .await?;
         Ok(())
@@ -26,9 +26,9 @@ impl TransactionHelper {
             .execute(&format!(
                 "INSERT INTO indexlake_table ({}) VALUES {}",
                 TableRecord::catalog_schema()
-                    .select_items(self.database)
+                    .select_items(self.catalog.as_ref())
                     .join(", "),
-                table_record.to_sql(self.database)?
+                table_record.to_sql(self.catalog.as_ref())?
             ))
             .await?;
         Ok(())
@@ -40,13 +40,13 @@ impl TransactionHelper {
         }
         let mut values = Vec::new();
         for record in fields {
-            values.push(record.to_sql(self.database)?);
+            values.push(record.to_sql(self.catalog.as_ref())?);
         }
         self.transaction
             .execute(&format!(
                 "INSERT INTO indexlake_field ({}) VALUES {}",
                 FieldRecord::catalog_schema()
-                    .select_items(self.database)
+                    .select_items(self.catalog.as_ref())
                     .join(", "),
                 values.join(", ")
             ))
@@ -93,7 +93,7 @@ impl TransactionHelper {
                 inline_row_table_name(table_id),
                 field_names
                     .iter()
-                    .map(|name| self.database.sql_identifier(name))
+                    .map(|name| self.catalog.sql_identifier(name))
                     .collect::<Vec<_>>()
                     .join(", "),
                 values_strs.join(", ")
@@ -102,11 +102,11 @@ impl TransactionHelper {
         Ok(())
     }
 
-    pub(crate) async fn insert_dump_task(&mut self, table_id: &Uuid) -> ILResult<usize> {
+    pub(crate) async fn insert_task(&mut self, task_id: &str) -> ILResult<usize> {
         self.transaction
             .execute(&format!(
-                "INSERT INTO indexlake_dump_task (table_id) VALUES ({})",
-                self.database.sql_uuid_literal(table_id)
+                "INSERT INTO indexlake_task VALUES ({})",
+                self.catalog.sql_string_literal(task_id)
             ))
             .await
     }
@@ -120,13 +120,13 @@ impl TransactionHelper {
         }
         let values = data_files
             .iter()
-            .map(|r| r.to_sql(self.database))
+            .map(|r| r.to_sql(self.catalog.as_ref()))
             .collect::<Vec<_>>();
         self.transaction
             .execute(&format!(
                 "INSERT INTO indexlake_data_file ({}) VALUES {}",
                 DataFileRecord::catalog_schema()
-                    .select_items(self.database)
+                    .select_items(self.catalog.as_ref())
                     .join(", "),
                 values.join(", ")
             ))
@@ -138,9 +138,9 @@ impl TransactionHelper {
             .execute(&format!(
                 "INSERT INTO indexlake_index ({}) VALUES {}",
                 IndexRecord::catalog_schema()
-                    .select_items(self.database)
+                    .select_items(self.catalog.as_ref())
                     .join(", "),
-                index_record.to_sql(self.database)
+                index_record.to_sql(self.catalog.as_ref())
             ))
             .await
     }
@@ -154,13 +154,13 @@ impl TransactionHelper {
         }
         let values = index_files
             .iter()
-            .map(|r| r.to_sql(self.database))
+            .map(|r| r.to_sql(self.catalog.as_ref()))
             .collect::<Vec<_>>();
         self.transaction
             .execute(&format!(
                 "INSERT INTO indexlake_index_file ({}) VALUES {}",
                 IndexFileRecord::catalog_schema()
-                    .select_items(self.database)
+                    .select_items(self.catalog.as_ref())
                     .join(", "),
                 values.join(", ")
             ))
@@ -176,13 +176,13 @@ impl TransactionHelper {
         }
         let values = inline_indexes
             .iter()
-            .map(|r| r.to_sql(self.database))
+            .map(|r| r.to_sql(self.catalog.as_ref()))
             .collect::<Vec<_>>();
         self.transaction
             .execute(&format!(
                 "INSERT INTO indexlake_inline_index ({}) VALUES {}",
                 InlineIndexRecord::catalog_schema()
-                    .select_items(self.database)
+                    .select_items(self.catalog.as_ref())
                     .join(", "),
                 values.join(", ")
             ))

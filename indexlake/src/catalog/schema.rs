@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arrow::datatypes::{DataType, Schema};
 use uuid::Uuid;
 
-use crate::catalog::CatalogDatabase;
+use crate::catalog::Catalog;
 use crate::{ILError, ILResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,53 +25,7 @@ pub enum CatalogDataType {
 }
 
 impl CatalogDataType {
-    pub(crate) fn to_sql(&self, database: CatalogDatabase) -> &str {
-        match self {
-            CatalogDataType::Boolean => "BOOLEAN",
-            CatalogDataType::Int8 => match database {
-                CatalogDatabase::Sqlite => "TINYINT",
-                CatalogDatabase::Postgres => "SMALLINT",
-            },
-            CatalogDataType::Int16 => "SMALLINT",
-            CatalogDataType::Int32 => "INTEGER",
-            CatalogDataType::Int64 => "BIGINT",
-            CatalogDataType::UInt8 => match database {
-                CatalogDatabase::Sqlite => "TINYINT UNSIGNED",
-                CatalogDatabase::Postgres => "SMALLINT",
-            },
-            CatalogDataType::UInt16 => match database {
-                CatalogDatabase::Sqlite => "SMALLINT UNSIGNED",
-                CatalogDatabase::Postgres => "INTEGER",
-            },
-            CatalogDataType::UInt32 => match database {
-                CatalogDatabase::Sqlite => "INTEGER UNSIGNED",
-                CatalogDatabase::Postgres => "BIGINT",
-            },
-            CatalogDataType::UInt64 => match database {
-                CatalogDatabase::Sqlite => "BIGINT UNSIGNED",
-                CatalogDatabase::Postgres => "FLOAT4",
-            },
-            CatalogDataType::Float32 => match database {
-                CatalogDatabase::Sqlite => "FLOAT",
-                CatalogDatabase::Postgres => "FLOAT4",
-            },
-            CatalogDataType::Float64 => match database {
-                CatalogDatabase::Sqlite => "DOUBLE",
-                CatalogDatabase::Postgres => "FLOAT8",
-            },
-            CatalogDataType::Utf8 => "VARCHAR",
-            CatalogDataType::Binary => match database {
-                CatalogDatabase::Sqlite => "BLOB",
-                CatalogDatabase::Postgres => "BYTEA",
-            },
-            CatalogDataType::Uuid => match database {
-                CatalogDatabase::Sqlite => "BLOB",
-                CatalogDatabase::Postgres => "UUID",
-            },
-        }
-    }
-
-    pub(crate) fn from_arrow(datatype: &DataType) -> ILResult<Self> {
+    pub fn from_arrow(datatype: &DataType) -> ILResult<Self> {
         match datatype {
             DataType::Boolean => Ok(CatalogDataType::Boolean),
             DataType::Int8 => Ok(CatalogDataType::Int8),
@@ -187,16 +141,16 @@ impl CatalogSchema {
         self.columns.iter().find(|f| f.name == field_name)
     }
 
-    pub fn select_items(&self, database: CatalogDatabase) -> Vec<String> {
+    pub fn select_items(&self, catalog: &dyn Catalog) -> Vec<String> {
         self.columns
             .iter()
-            .map(|f| database.sql_identifier(&f.name))
+            .map(|f| catalog.sql_identifier(&f.name))
             .collect::<Vec<_>>()
     }
 
     pub fn placeholder_row_sql_values(
         &self,
-        database: CatalogDatabase,
+        catalog: &dyn Catalog,
         num_rows: usize,
     ) -> Vec<Vec<String>> {
         let mut columns = Vec::with_capacity(self.columns.len());
@@ -217,8 +171,8 @@ impl CatalogSchema {
                     CatalogDataType::Float32 => "0.0".to_string(),
                     CatalogDataType::Float64 => "0.0".to_string(),
                     CatalogDataType::Utf8 => "''".to_string(),
-                    CatalogDataType::Binary => database.sql_binary_literal(&[0u8]),
-                    CatalogDataType::Uuid => database.sql_uuid_literal(&Uuid::nil()),
+                    CatalogDataType::Binary => catalog.sql_binary_literal(&[0u8]),
+                    CatalogDataType::Uuid => catalog.sql_uuid_literal(&Uuid::nil()),
                 }
             };
 

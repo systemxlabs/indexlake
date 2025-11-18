@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use uuid::Uuid;
+
 use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexBuilder, IndexDefinitionRef, IndexKind};
 use crate::{ILError, ILResult};
@@ -33,6 +35,13 @@ impl IndexManager {
 
     pub(crate) fn get_index_kind(&self, kind: &str) -> Option<&Arc<dyn IndexKind>> {
         self.kinds.get(kind)
+    }
+
+    pub(crate) fn any_index_contains_field(&self, field_id: &Uuid) -> bool {
+        let field_id_str = hex::encode(field_id);
+        self.indexes
+            .iter()
+            .any(|def| def.key_columns.contains(&field_id_str))
     }
 
     pub(crate) fn supports_filter(&self, filter: &Expr) -> ILResult<FilterSupport> {

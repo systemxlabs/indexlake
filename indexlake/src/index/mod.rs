@@ -44,9 +44,9 @@ pub trait IndexBuilder: Debug + Send + Sync {
 
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()>;
 
-    async fn read_file(&mut self, input_file: InputFile) -> ILResult<()>;
+    async fn read_file(&mut self, input_file: Box<dyn InputFile>) -> ILResult<()>;
 
-    async fn write_file(&mut self, output_file: OutputFile) -> ILResult<()>;
+    async fn write_file(&mut self, output_file: Box<dyn OutputFile>) -> ILResult<()>;
 
     fn read_bytes(&mut self, buf: &[u8]) -> ILResult<()>;
 

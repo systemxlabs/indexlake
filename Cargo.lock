@@ -1688,9 +1688,9 @@ dependencies = [
 
 [[package]]
 name = "derive-with"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b843bde9187ed083594f7dad609760678601bf0eba95046f6222eb92f4e8d8c8"
+checksum = "c3428de1e57117de0813975a73ed5bfaa85bcae07982db0d7bb782ebdfa18692"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2544,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -2556,9 +2556,9 @@ dependencies = [
  "derive-with",
  "futures",
  "hex",
+ "itertools 0.14.0",
  "log",
  "num_cpus",
- "opendal",
  "parquet",
  "serde",
  "serde_json",
@@ -2568,7 +2568,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-benchmarks"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "futures",
@@ -2584,12 +2584,14 @@ dependencies = [
 
 [[package]]
 name = "indexlake-catalog-postgres"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
+ "arrow",
  "async-trait",
  "bb8",
  "bb8-postgres",
  "futures",
+ "hex",
  "indexlake",
  "log",
  "tokio",
@@ -2598,18 +2600,21 @@ dependencies = [
 
 [[package]]
 name = "indexlake-catalog-sqlite"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
+ "arrow",
  "async-trait",
  "futures",
+ "hex",
  "indexlake",
  "log",
  "rusqlite",
+ "uuid",
 ]
 
 [[package]]
 name = "indexlake-datafusion"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "datafusion",
@@ -2625,14 +2630,14 @@ dependencies = [
 
 [[package]]
 name = "indexlake-datafusion-gen"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "prost-build",
 ]
 
 [[package]]
 name = "indexlake-index-bm25"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2648,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-index-btree"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2662,11 +2667,12 @@ dependencies = [
 
 [[package]]
 name = "indexlake-index-hnsw"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "async-trait",
  "bincode",
+ "bytes",
  "hnsw",
  "indexlake",
  "rand_pcg",
@@ -2678,7 +2684,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-index-rstar"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "async-trait",
@@ -2695,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "indexlake-integration-tests"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "bytes",
@@ -2714,11 +2720,36 @@ dependencies = [
  "indexlake-index-btree",
  "indexlake-index-hnsw",
  "indexlake-index-rstar",
+ "indexlake-storage-fs",
+ "indexlake-storage-s3",
  "opendal",
  "rstest",
  "rusqlite",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "indexlake-storage-fs"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "indexlake",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "indexlake-storage-s3"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "indexlake",
+ "opendal",
 ]
 
 [[package]]
@@ -4624,6 +4655,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
 dependencies = [
  "rustls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
  "tokio",
 ]
 

@@ -19,7 +19,7 @@ use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use datafusion_proto::physical_plan::from_proto::parse_physical_sort_exprs;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_sort_exprs;
 use indexlake::Client;
-use indexlake::catalog::DataFileRecord;
+use indexlake::catalog::{DataFileRecord, RowValidity};
 use indexlake::storage::DataFileFormat;
 use indexlake::table::Table;
 use prost::Message;
@@ -99,7 +99,6 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     insert_op,
                 )?))
             }
-            // TODO upstream this to datafusion
             IndexLakePhysicalPlanType::MemoryDatasource(node) => {
                 let partitions = parse_partitions(&node.partitions)?;
                 let schema = Schema::try_from(&node.schema.unwrap())?;
@@ -335,13 +334,9 @@ fn serialize_data_files(
                     table_id: record.table_id.as_bytes().to_vec(),
                     format: serialize_data_file_format(record.format),
                     relative_path: record.relative_path.clone(),
+                    size: record.size,
                     record_count: record.record_count,
-                    row_ids: record
-                        .row_ids
-                        .iter()
-                        .map(|id| id.as_bytes().to_vec())
-                        .collect(),
-                    validity: record.validity.clone(),
+                    validity: record.validity.bytes().to_vec(),
                 });
             }
             Ok(Some(DataFiles {
@@ -368,17 +363,12 @@ fn parse_data_files(
                     })?,
                     format: parse_data_file_format(proto_data_file.format)?,
                     relative_path: proto_data_file.relative_path,
+                    size: proto_data_file.size,
                     record_count: proto_data_file.record_count,
-                    row_ids: proto_data_file
-                        .row_ids
-                        .into_iter()
-                        .map(|id| {
-                            Uuid::from_slice(id.as_slice()).map_err(|e| {
-                                DataFusionError::Internal(format!("Failed to parse row id: {e:?}"))
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                    validity: proto_data_file.validity,
+                    validity: RowValidity::from(
+                        proto_data_file.validity,
+                        proto_data_file.record_count as usize,
+                    ),
                 });
             }
             Ok(Some(Arc::new(records)))

@@ -1,13 +1,15 @@
+use arrow::datatypes::Schema;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use bb8_postgres::tokio_postgres::NoTls;
 use futures::StreamExt;
 use indexlake::catalog::{
-    Catalog, CatalogDataType, CatalogDatabase, CatalogSchemaRef, Row, RowStream, Scalar,
-    Transaction,
+    Catalog, CatalogDataType, CatalogSchemaRef, Row, RowStream, Scalar, Transaction,
 };
+use indexlake::expr::{BinaryExpr, Expr};
 use indexlake::{ILError, ILResult};
 use log::{error, trace};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct PostgresCatalog {
@@ -22,10 +24,6 @@ impl PostgresCatalog {
 
 #[async_trait::async_trait]
 impl Catalog for PostgresCatalog {
-    fn database(&self) -> CatalogDatabase {
-        CatalogDatabase::Postgres
-    }
-
     async fn query(&self, sql: &str, schema: CatalogSchemaRef) -> ILResult<RowStream<'static>> {
         trace!("postgres query: {sql}");
         let conn = self
@@ -56,6 +54,176 @@ impl Catalog for PostgresCatalog {
             .await
             .map_err(|e| ILError::catalog(format!("failed to start postgres txn: {e}")))?;
         Ok(Box::new(PostgresTransaction { conn, done: false }))
+    }
+
+    async fn truncate(&self, table_name: &str) -> ILResult<()> {
+        let conn = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| ILError::catalog(format!("failed to get postgres connection: {e}")))?;
+        conn.execute(
+            &format!("TRUNCATE TABLE {}", self.sql_identifier(table_name)),
+            &[],
+        )
+        .await
+        .map(|r| r as usize)
+        .map_err(|e| {
+            ILError::catalog(format!(
+                "failed to truncate table {table_name} on postgres: {e}"
+            ))
+        })?;
+        Ok(())
+    }
+
+    async fn size(&self, table_name: &str) -> ILResult<usize> {
+        let conn = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| ILError::catalog(format!("failed to get postgres connection: {e}")))?;
+        let row = conn
+            .query_one(
+                &format!("SELECT pg_total_relation_size('{table_name}')"),
+                &[],
+            )
+            .await
+            .map_err(|e| {
+                ILError::catalog(format!(
+                    "failed to get size of table {table_name} on postgres: {e}"
+                ))
+            })?;
+        let size = row
+            .try_get::<_, Option<i64>>(0)
+            .map_err(|e| ILError::storage(format!("Failed to get size from row: {e}")))?;
+        Ok(size.unwrap_or(0) as usize)
+    }
+
+    fn sql_identifier(&self, ident: &str) -> String {
+        format!("\"{ident}\"")
+    }
+
+    fn sql_binary_literal(&self, value: &[u8]) -> String {
+        format!("E'\\\\x{}'", hex::encode(value))
+    }
+
+    fn sql_uuid_literal(&self, value: &Uuid) -> String {
+        format!("'{value}'")
+    }
+
+    fn sql_string_literal(&self, value: &str) -> String {
+        let value = value.replace("'", "''");
+        format!("'{value}'")
+    }
+
+    // TODO impl this
+    fn supports_filter(&self, filter: &Expr, _schema: &Schema) -> ILResult<bool> {
+        match filter {
+            Expr::Function(_) => Ok(false),
+            Expr::BinaryExpr(BinaryExpr { left, right, .. }) => {
+                if let Expr::Column(_) = left.as_ref()
+                    && let Expr::Literal(lit) = right.as_ref()
+                    && matches!(lit.value, Scalar::List(_))
+                {
+                    Ok(false)
+                } else if let Expr::Literal(lit) = left.as_ref()
+                    && let Expr::Column(_) = right.as_ref()
+                    && matches!(lit.value, Scalar::List(_))
+                {
+                    Ok(false)
+                } else {
+                    Ok(true)
+                }
+            }
+            _ => Ok(true),
+        }
+    }
+
+    fn unparse_expr(&self, expr: &Expr) -> ILResult<String> {
+        match expr {
+            Expr::Column(name) => Ok(self.sql_identifier(name)),
+            Expr::Literal(literal) => literal.value.to_sql(self),
+            Expr::BinaryExpr(binary_expr) => {
+                let left = self.unparse_expr(&binary_expr.left)?;
+                let right = self.unparse_expr(&binary_expr.right)?;
+                Ok(format!("({} {} {})", left, binary_expr.op, right))
+            }
+            Expr::Not(expr) => Ok(format!("NOT {}", self.unparse_expr(expr)?)),
+            Expr::IsNull(expr) => Ok(format!("{} IS NULL", self.unparse_expr(expr)?)),
+            Expr::IsNotNull(expr) => Ok(format!("{} IS NOT NULL", self.unparse_expr(expr)?)),
+            Expr::InList(in_list) => {
+                let list = in_list
+                    .list
+                    .iter()
+                    .map(|expr| self.unparse_expr(expr))
+                    .collect::<ILResult<Vec<_>>>()?
+                    .join(", ");
+                Ok(format!(
+                    "{} IN ({})",
+                    self.unparse_expr(&in_list.expr)?,
+                    list
+                ))
+            }
+            Expr::Function(_) => Err(ILError::invalid_input(
+                "Function can only be used for index",
+            )),
+            Expr::Like(like) => {
+                let expr = self.unparse_expr(&like.expr)?;
+                let pattern = self.unparse_expr(&like.pattern)?;
+                match (like.negated, like.case_insensitive) {
+                    (true, true) => Ok(format!("{expr} NOT ILIKE {pattern}")),
+                    (true, false) => Ok(format!("{expr} NOT LIKE {pattern}")),
+                    (false, true) => Ok(format!("{expr} ILIKE {pattern}")),
+                    (false, false) => Ok(format!("{expr} LIKE {pattern}")),
+                }
+            }
+            Expr::Cast(cast) => {
+                let catalog_datatype = CatalogDataType::from_arrow(&cast.cast_type)?;
+                let expr_sql = self.unparse_expr(&cast.expr)?;
+                Ok(format!(
+                    "CAST({} AS {})",
+                    expr_sql,
+                    self.unparse_catalog_data_type(catalog_datatype),
+                ))
+            }
+            Expr::TryCast(_) => Err(ILError::invalid_input("TRY_CAST is not supported in SQL")),
+            Expr::Negative(expr) => Ok(format!("-{}", self.unparse_expr(expr)?)),
+            Expr::Case(case) => {
+                let mut sql = String::new();
+                sql.push_str("CASE");
+                for (when, then) in &case.when_then {
+                    sql.push_str(&format!(
+                        " WHEN {} THEN {}",
+                        self.unparse_expr(when)?,
+                        self.unparse_expr(then)?,
+                    ));
+                }
+                if let Some(else_expr) = &case.else_expr {
+                    sql.push_str(&format!(" ELSE {}", self.unparse_expr(else_expr)?));
+                }
+                sql.push_str(" END");
+                Ok(sql)
+            }
+        }
+    }
+
+    fn unparse_catalog_data_type(&self, data_type: CatalogDataType) -> String {
+        match data_type {
+            CatalogDataType::Boolean => "BOOLEAN".to_string(),
+            CatalogDataType::Int8 => "SMALLINT".to_string(),
+            CatalogDataType::Int16 => "SMALLINT".to_string(),
+            CatalogDataType::Int32 => "INTEGER".to_string(),
+            CatalogDataType::Int64 => "BIGINT".to_string(),
+            CatalogDataType::UInt8 => "SMALLINT".to_string(),
+            CatalogDataType::UInt16 => "INTEGER".to_string(),
+            CatalogDataType::UInt32 => "BIGINT".to_string(),
+            CatalogDataType::UInt64 => "FLOAT4".to_string(),
+            CatalogDataType::Float32 => "FLOAT4".to_string(),
+            CatalogDataType::Float64 => "FLOAT8".to_string(),
+            CatalogDataType::Utf8 => "VARCHAR".to_string(),
+            CatalogDataType::Binary => "BYTEA".to_string(),
+            CatalogDataType::Uuid => "UUID".to_string(),
+        }
     }
 }
 

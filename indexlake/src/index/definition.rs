@@ -1,7 +1,8 @@
-use crate::catalog::{FieldRecord, IndexRecord};
+use crate::catalog::IndexRecord;
 use crate::index::{IndexKind, IndexParams};
+use crate::table::TableSchemaRef;
 use crate::{ILError, ILResult};
-use arrow::datatypes::{FieldRef, SchemaRef};
+use arrow::datatypes::FieldRef;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -15,7 +16,7 @@ pub struct IndexDefinition {
     pub kind: String,
     pub table_id: Uuid,
     pub table_name: String,
-    pub table_schema: SchemaRef,
+    pub table_schema: TableSchemaRef,
     pub key_columns: Vec<String>,
     pub params: Arc<dyn IndexParams>,
 }
@@ -24,16 +25,17 @@ impl IndexDefinition {
     pub fn key_fields(&self) -> ILResult<Vec<FieldRef>> {
         let mut key_fields = Vec::new();
         for name in self.key_columns.iter() {
-            let index = self.table_schema.index_of(name)?;
+            let index = self.table_schema.arrow_schema.index_of(name)?;
             let field = self
                 .table_schema
+                .arrow_schema
                 .fields
                 .get(index)
                 .cloned()
                 .ok_or_else(|| {
                     ILError::internal(format!(
                         "Key field {} not found in table schema {}",
-                        name, self.table_schema
+                        name, self.table_schema.arrow_schema
                     ))
                 })?;
             key_fields.push(field);
@@ -52,22 +54,13 @@ impl IndexDefinition {
 
     pub(crate) fn from_index_record(
         index_record: &IndexRecord,
-        field_records: &[FieldRecord],
         table_name: &str,
-        table_schema: &SchemaRef,
+        table_schema: &TableSchemaRef,
         index_kinds: &HashMap<String, Arc<dyn IndexKind>>,
     ) -> ILResult<Self> {
         let mut key_columns = Vec::new();
         for key_field_id in index_record.key_field_ids.iter() {
-            let field_record = field_records
-                .iter()
-                .find(|f| f.field_id == *key_field_id)
-                .ok_or_else(|| {
-                    ILError::internal(format!(
-                        "Key field id {key_field_id} not found in field records"
-                    ))
-                })?;
-            key_columns.push(field_record.field_name.clone());
+            key_columns.push(hex::encode(key_field_id));
         }
 
         let index_kind = index_kinds.get(&index_record.index_kind).ok_or_else(|| {

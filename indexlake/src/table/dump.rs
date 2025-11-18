@@ -1,24 +1,25 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::datatypes::SchemaRef;
 use futures::StreamExt;
 use log::{debug, error};
 use uuid::Uuid;
 
 use crate::catalog::{
-    Catalog, CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-    RowStream, TransactionHelper, rows_to_record_batch,
+    Catalog, CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME,
+    IndexFileRecord, InlineIndexRecord, RowStream, RowValidity, TransactionHelper,
+    rows_to_record_batch,
 };
+use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
-use crate::table::{Table, TableConfig};
+use crate::table::{Table, TableConfig, TableSchemaRef};
 use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
     let namespace_id = table.namespace_id;
     let table_id = table.table_id;
-    let table_schema = table.schema.clone();
+    let table_schema = table.table_schema.clone();
     let index_manager = table.index_manager.clone();
     let table_config = table.config.clone();
     let catalog = table.catalog.clone();
@@ -30,11 +31,13 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
             if inline_row_count < table_config.inline_row_count_limit as i64 {
                 return Ok(false);
             }
-            if catalog_helper.dump_task_exists(&table_id).await? {
+            let task_id = format!("dump-table-{}", table_id);
+            if catalog_helper.task_exists(&task_id).await? {
                 return Ok(false);
             }
 
             let dump_task = DumpTask {
+                task_id,
                 namespace_id,
                 table_id,
                 table_schema: table_schema.clone(),
@@ -67,13 +70,14 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
 }
 
 pub(crate) struct DumpTask {
+    task_id: String,
     namespace_id: Uuid,
     table_id: Uuid,
-    table_schema: SchemaRef,
+    table_schema: TableSchemaRef,
     index_manager: Arc<IndexManager>,
     table_config: Arc<TableConfig>,
     catalog: Arc<dyn Catalog>,
-    storage: Arc<Storage>,
+    storage: Arc<dyn Storage>,
 }
 
 impl DumpTask {
@@ -81,7 +85,7 @@ impl DumpTask {
         let now = Instant::now();
 
         let mut tx_helper = TransactionHelper::new(&self.catalog).await?;
-        if tx_helper.insert_dump_task(&self.table_id).await.is_err() {
+        if tx_helper.insert_task(&self.task_id).await.is_err() {
             debug!(
                 "[indexlake] Table {} already has a dump task",
                 self.table_id
@@ -94,13 +98,14 @@ impl DumpTask {
             return Ok(false);
         }
 
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&self.table_schema)?);
+        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&self.table_schema.arrow_schema)?);
         let row_stream = tx_helper
             .scan_inline_rows(
                 &self.table_id,
                 &catalog_schema,
                 &[],
                 Some(self.table_config.inline_row_count_limit),
+                Some(col(INTERNAL_ROW_ID_FIELD_NAME)),
             )
             .await?;
 
@@ -120,6 +125,13 @@ impl DumpTask {
                     .await?
             }
         };
+        let size = self
+            .storage
+            .open(&relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
 
         if row_ids.len() != self.table_config.inline_row_count_limit {
             self.storage.delete(&relative_path).await?;
@@ -138,14 +150,22 @@ impl DumpTask {
                 &self.table_id,
                 &index_file_id,
             );
-            let output_file = self.storage.create_file(&relative_path).await?;
+            let output_file = self.storage.create(&relative_path).await?;
             index_builder.write_file(output_file).await?;
+            let size = self
+                .storage
+                .open(&relative_path)
+                .await?
+                .metadata()
+                .await?
+                .size;
             index_file_records.push(IndexFileRecord {
                 index_file_id,
                 table_id: self.table_id,
                 index_id: index_builder.index_def().index_id,
                 data_file_id,
                 relative_path,
+                size: size as i64,
             });
         }
 
@@ -155,9 +175,9 @@ impl DumpTask {
                 table_id: self.table_id,
                 format: self.table_config.preferred_data_file_format,
                 relative_path: relative_path.clone(),
+                size: size as i64,
                 record_count: row_ids.len() as i64,
-                row_ids: row_ids.clone(),
-                validity: vec![true; row_ids.len()],
+                validity: RowValidity::new(row_ids.len()),
             }])
             .await?;
 
@@ -182,12 +202,12 @@ impl DumpTask {
         )
         .await?;
 
-        tx_helper.delete_dump_task(&self.table_id).await?;
+        tx_helper.delete_task(&self.task_id).await?;
 
         tx_helper.commit().await?;
 
         debug!(
-            "[indexlake] dump table {} {} inline rows in {} ms",
+            "[indexlake] dumped table {} {} inline rows in {} ms",
             self.table_id,
             self.table_config.inline_row_count_limit,
             now.elapsed().as_millis()
@@ -204,10 +224,10 @@ impl DumpTask {
     ) -> ILResult<Vec<Uuid>> {
         let mut row_ids = Vec::new();
 
-        let output_file = self.storage.create_file(relative_path).await?;
+        let output_file = self.storage.create(relative_path).await?;
         let mut arrow_writer = build_parquet_writer(
             output_file,
-            self.table_schema.clone(),
+            self.table_schema.arrow_schema.clone(),
             self.table_config.parquet_row_group_size,
             self.table_config.preferred_data_file_format,
         )?;
@@ -222,7 +242,7 @@ impl DumpTask {
                 row_ids.push(row_id);
                 rows.push(row);
             }
-            let record_batch = rows_to_record_batch(&self.table_schema, &rows)?;
+            let record_batch = rows_to_record_batch(&self.table_schema.arrow_schema, &rows)?;
 
             for index_builder in index_builders.iter_mut() {
                 index_builder.append(&record_batch)?;
@@ -240,21 +260,21 @@ impl DumpTask {
 pub(crate) async fn rebuild_inline_indexes(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
-    table_schema: &SchemaRef,
+    table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
 ) -> ILResult<()> {
     // index builders
     let mut index_builders = index_manager.new_index_builders()?;
 
     // append index builders
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
-        .scan_inline_rows(table_id, &catalog_schema, &[], None)
+        .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
         .await?;
     let mut chunk_stream = row_stream.chunks(100);
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let record_batch = rows_to_record_batch(table_schema, &rows)?;
+        let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         for index_builder in index_builders.iter_mut() {
             index_builder.append(&record_batch)?;
         }

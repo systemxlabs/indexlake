@@ -14,7 +14,7 @@ use crate::catalog::{
 use crate::expr::{Expr, merge_filters, split_conjunction_filters};
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::read_data_file_by_record;
-use crate::table::Table;
+use crate::table::{Table, TableSchemaRef};
 use crate::utils::{
     append_new_fields_to_schema, project_schema, record_batch_with_location,
     record_batch_with_location_kind,
@@ -32,6 +32,26 @@ pub struct TableScan {
 }
 
 impl TableScan {
+    pub fn validate(&self) -> ILResult<()> {
+        if self.projection == Some(vec![]) {
+            return Err(ILError::invalid_input(
+                "projection must not be empty".to_string(),
+            ));
+        }
+        if self.batch_size == 0 {
+            return Err(ILError::invalid_input(
+                "batch_size must be greater than 0".to_string(),
+            ));
+        }
+        if self.concurrency == 0 {
+            return Err(ILError::invalid_input(
+                "concurrency must be greater than 0".to_string(),
+            ));
+        }
+        self.partition.validate()?;
+        Ok(())
+    }
+
     pub fn output_schema(&self, table_schema: &Schema) -> ILResult<SchemaRef> {
         let projected_schema = if let Some(projection) = &self.projection {
             table_schema.project(projection)?
@@ -47,6 +67,16 @@ impl TableScan {
                 .collect::<Vec<_>>(),
         );
         Ok(Arc::new(schema))
+    }
+
+    pub fn rewrite_columns(mut self, field_name_id_map: &HashMap<String, Uuid>) -> ILResult<Self> {
+        let rewritten_filters = self
+            .filters
+            .into_iter()
+            .map(|f| f.rewrite_columns(field_name_id_map))
+            .collect::<ILResult<Vec<_>>>()?;
+        self.filters = rewritten_filters;
+        Ok(self)
     }
 }
 
@@ -168,7 +198,7 @@ async fn process_table_scan(
     let mut streams: Vec<RecordBatchStream> = if scan.partition.contains_inline_rows() {
         // Scan inline rows
         let inline_stream = Box::pin(
-            scan_inline_rows(catalog_helper, &table.table_id, &table.schema, &scan).await?,
+            scan_inline_rows(catalog_helper, &table.table_id, &table.table_schema, &scan).await?,
         );
         vec![inline_stream]
     } else {
@@ -182,7 +212,7 @@ async fn process_table_scan(
     let mut futs = Vec::with_capacity(data_file_records.len());
     for data_file_record in data_file_records {
         let storage = table.storage.clone();
-        let table_schema = table.schema.clone();
+        let table_schema = table.table_schema.clone();
         let projection = scan.projection.clone();
         let filters = scan.filters.clone();
         let batch_size = scan.batch_size;
@@ -190,7 +220,7 @@ async fn process_table_scan(
         let location = format!("data_file_{}", data_file_record.data_file_id);
         let fut = async move {
             let stream = read_data_file_by_record(
-                &storage,
+                storage.as_ref(),
                 &table_schema,
                 &data_file_record,
                 projection,
@@ -261,17 +291,22 @@ pub(crate) async fn get_partitioned_data_file_records(
 async fn scan_inline_rows(
     catalog_helper: &CatalogHelper,
     table_id: &Uuid,
-    table_schema: &SchemaRef,
+    table_schema: &TableSchemaRef,
     scan: &TableScan,
 ) -> ILResult<RecordBatchStream> {
-    let projected_schema = Arc::new(project_schema(table_schema, scan.projection.as_ref())?);
+    let projected_schema = Arc::new(project_schema(
+        &table_schema.arrow_schema,
+        scan.projection.as_ref(),
+    )?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
-    let database = catalog_helper.catalog.database();
     let mut db_filters = Vec::new();
     let mut arrow_filters = Vec::new();
     for filter in scan.filters.iter() {
-        if database.supports_filter(filter, table_schema)? {
+        if catalog_helper
+            .catalog
+            .supports_filter(filter, &table_schema.arrow_schema)?
+        {
             db_filters.push(filter.clone());
         } else {
             arrow_filters.push(filter.clone());
@@ -454,7 +489,10 @@ async fn index_scan_inline_rows(
         intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
     }
 
-    let projected_schema = Arc::new(project_schema(&table.schema, scan.projection.as_ref())?);
+    let projected_schema = Arc::new(project_schema(
+        &table.table_schema.arrow_schema,
+        scan.projection.as_ref(),
+    )?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
     let row_stream = catalog_helper
         .scan_inline_rows(
@@ -515,12 +553,12 @@ async fn index_scan_data_file(
         .collect::<Vec<_>>();
 
     read_data_file_by_record(
-        &table.storage,
-        &table.schema,
+        table.storage.as_ref(),
+        &table.table_schema,
         data_file_record,
         scan_projection,
         left_filters,
-        Some(&row_ids),
+        Some(row_ids.into_iter().collect()),
         scan_batch_size,
     )
     .await
@@ -555,10 +593,7 @@ async fn filter_index_files_row_ids(
             .map(|idx| filters[*idx].clone())
             .collect::<Vec<_>>();
 
-        let input_file = table
-            .storage
-            .open_file(&index_file_record.relative_path)
-            .await?;
+        let input_file = table.storage.open(&index_file_record.relative_path).await?;
 
         let mut index_builder = index_kind.builder(index_def)?;
         index_builder.read_file(input_file).await?;

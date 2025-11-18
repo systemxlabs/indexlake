@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
-use arrow_schema::Schema;
+use arrow_schema::{Field, Schema};
 use futures::StreamExt;
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ use crate::catalog::{
 use crate::index::{IndexDefinition, IndexParams};
 use crate::storage::read_data_file_by_record;
 use crate::table::{Table, TableConfig};
-use crate::{ILError, ILResult};
+use crate::{ILError, ILResult, check_schema_contains_system_column};
 
 #[derive(Debug, Clone)]
 pub struct TableCreation {
@@ -23,6 +23,38 @@ pub struct TableCreation {
     pub default_values: HashMap<String, Scalar>,
     pub config: TableConfig,
     pub if_not_exists: bool,
+}
+
+impl TableCreation {
+    pub fn validate(&self) -> ILResult<()> {
+        if self.table_name.is_empty() {
+            return Err(ILError::invalid_input(
+                "Table name cannot be empty".to_string(),
+            ));
+        }
+
+        if self.schema.fields().is_empty() {
+            return Err(ILError::invalid_input(
+                "Table schema cannot be empty".to_string(),
+            ));
+        }
+
+        let field_names = self
+            .schema
+            .fields()
+            .iter()
+            .map(|f| f.name())
+            .collect::<HashSet<_>>();
+        if field_names.len() < self.schema.fields.len() {
+            return Err(ILError::invalid_input(
+                "Table schema contains duplicate field names".to_string(),
+            ));
+        }
+
+        check_schema_contains_system_column(&self.schema)?;
+
+        Ok(())
+    }
 }
 
 impl Default for TableCreation {
@@ -63,21 +95,13 @@ pub(crate) async fn process_create_table(
         };
     }
 
+    // check default values
     for (field_name, default_value) in &creation.default_values {
-        let default_value_type = default_value.data_type();
         let field = creation.schema.field_with_name(field_name)?;
-        if &default_value_type != field.data_type() {
-            return Err(ILError::invalid_input(format!(
-                "Default value data type {default_value_type} does not match field {field}",
-            )));
-        }
-        if default_value.is_null() && !field.is_nullable() {
-            return Err(ILError::invalid_input(format!(
-                "Default value is null for non-nullable field {field}",
-            )));
-        }
+        check_default_value(field, default_value)?;
     }
 
+    // insert table record
     let table_id = Uuid::now_v7();
     tx_helper
         .insert_table(&TableRecord {
@@ -89,18 +113,10 @@ pub(crate) async fn process_create_table(
         })
         .await?;
 
+    // insert field records
     let mut field_records = Vec::new();
     for field in creation.schema.fields() {
         let default_value = creation.default_values.get(field.name()).cloned();
-        if let Some(v) = &default_value
-            && &v.data_type() != field.data_type()
-        {
-            return Err(ILError::invalid_input(format!(
-                "Default value type {} does not match field type {}",
-                v.data_type(),
-                field.data_type()
-            )));
-        }
         field_records.push(FieldRecord::new(
             Uuid::now_v7(),
             table_id,
@@ -111,7 +127,7 @@ pub(crate) async fn process_create_table(
     tx_helper.insert_fields(&field_records).await?;
 
     tx_helper
-        .create_inline_row_table(&table_id, creation.schema.fields())
+        .create_inline_row_table(&table_id, &field_records)
         .await?;
 
     Ok(table_id)
@@ -126,6 +142,26 @@ pub struct IndexCreation {
     pub if_not_exists: bool,
 }
 
+impl IndexCreation {
+    pub(crate) fn rewrite_columns(
+        mut self,
+        field_name_id_map: &HashMap<String, Uuid>,
+    ) -> ILResult<Self> {
+        let mut rewritten_columns = Vec::with_capacity(self.key_columns.len());
+        for key_col in self.key_columns {
+            if let Some(field_id) = field_name_id_map.get(&key_col) {
+                rewritten_columns.push(hex::encode(field_id));
+            } else {
+                return Err(ILError::invalid_input(format!(
+                    "key column {key_col} not found"
+                )));
+            }
+        }
+        self.key_columns = rewritten_columns;
+        Ok(self)
+    }
+}
+
 pub(crate) async fn process_create_index(
     tx_helper: &mut TransactionHelper,
     table: Table,
@@ -138,7 +174,7 @@ pub(crate) async fn process_create_index(
         kind: creation.kind.clone(),
         table_id: table.table_id,
         table_name: table.table_name.clone(),
-        table_schema: table.schema.clone(),
+        table_schema: table.table_schema.clone(),
         key_columns: creation.key_columns.clone(),
         params: creation.params.clone(),
     });
@@ -166,14 +202,14 @@ pub(crate) async fn process_create_index(
     }
 
     // create inline index
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.schema)?);
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.table_schema.arrow_schema)?);
     let row_stream = tx_helper
-        .scan_inline_rows(&table.table_id, &catalog_schema, &[], None)
+        .scan_inline_rows(&table.table_id, &catalog_schema, &[], None, None)
         .await?;
-    let table_schema = table.schema.clone();
+    let table_schema = table.table_schema.clone();
     let mut inline_stream = row_stream.chunks(100).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(&table_schema, &rows)?;
+        let batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         Ok::<_, ILError>(batch)
     });
     let mut index_builder = index_kind.builder(&index_def)?;
@@ -194,7 +230,7 @@ pub(crate) async fn process_create_index(
     // create index file
     let mut projection = vec![0];
     for col in creation.key_columns.iter() {
-        let idx = table.schema.index_of(col)?;
+        let idx = table.table_schema.arrow_schema.index_of(col)?;
         projection.push(idx);
     }
     projection.sort();
@@ -205,8 +241,8 @@ pub(crate) async fn process_create_index(
     for data_file_record in data_file_records {
         let mut index_builder = index_kind.builder(&index_def)?;
         let mut stream = read_data_file_by_record(
-            &table.storage,
-            &table.schema,
+            table.storage.as_ref(),
+            &table.table_schema,
             &data_file_record,
             Some(projection.clone()),
             vec![],
@@ -225,20 +261,32 @@ pub(crate) async fn process_create_index(
             &table.table_id,
             &index_file_id,
         );
-        let output_file = table.storage.create_file(&relative_path).await?;
+        let output_file = table.storage.create(&relative_path).await?;
         index_builder.write_file(output_file).await?;
+        let size = table
+            .storage
+            .open(&relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
         index_file_records.push(IndexFileRecord {
             index_file_id,
             table_id: table.table_id,
             index_id,
             data_file_id: data_file_record.data_file_id,
             relative_path,
+            size: size as i64,
         });
     }
 
     tx_helper.insert_index_files(&index_file_records).await?;
 
-    let key_field_ids = field_names_to_ids(&table.field_records, &creation.key_columns)?;
+    let key_field_ids = creation
+        .key_columns
+        .iter()
+        .map(|c| Uuid::parse_str(c))
+        .collect::<Result<Vec<Uuid>, _>>()?;
 
     tx_helper
         .insert_index(&IndexRecord {
@@ -254,20 +302,17 @@ pub(crate) async fn process_create_index(
     Ok(index_id)
 }
 
-fn field_names_to_ids(field_records: &[FieldRecord], names: &[String]) -> ILResult<Vec<Uuid>> {
-    let mut field_ids = Vec::new();
-    for name in names.iter() {
-        let field_id_opt = field_records
-            .iter()
-            .find(|record| &record.field_name == name)
-            .map(|record| record.field_id);
-        if let Some(field_id) = field_id_opt {
-            field_ids.push(field_id);
-        } else {
-            return Err(ILError::invalid_input(format!(
-                "Field name {name} not found in table schema"
-            )));
-        }
+pub(crate) fn check_default_value(field: &Field, default_value: &Scalar) -> ILResult<()> {
+    let default_value_type = default_value.data_type();
+    if &default_value_type != field.data_type() {
+        return Err(ILError::invalid_input(format!(
+            "Default value data type {default_value_type} does not match field {field}",
+        )));
     }
-    Ok(field_ids)
+    if default_value.is_null() && !field.is_nullable() {
+        return Err(ILError::invalid_input(format!(
+            "Default value is null for non-nullable field {field}",
+        )));
+    }
+    Ok(())
 }

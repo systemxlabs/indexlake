@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use arrow::array::{ArrayRef, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions};
 use arrow::util::pretty::pretty_format_batches_with_schema;
@@ -46,7 +47,7 @@ pub async fn full_table_scan_with_location_kind(table: &Table) -> ILResult<Strin
 }
 
 pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
-    let batch_schema = scan.output_schema(&table.schema)?;
+    let batch_schema = scan.output_schema(&table.output_schema)?;
     let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
 
     let stream = table.scan(scan).await?;
@@ -69,7 +70,10 @@ pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
 }
 
 pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String> {
-    let batch_schema = Arc::new(project_schema(&table.schema, search.projection.as_ref())?);
+    let batch_schema = Arc::new(project_schema(
+        &table.output_schema,
+        search.projection.as_ref(),
+    )?);
     let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
 
     let stream = table.search(search).await?;
@@ -165,4 +169,11 @@ pub async fn assert_data_file_count(table: &Table, check: impl Fn(usize) -> bool
         return Err(ILError::internal("table data file count check failed"));
     }
     Ok(())
+}
+
+pub fn timestamp_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis() as i64
 }

@@ -1,189 +1,84 @@
-mod fs;
 mod parquet;
-mod s3;
 
-pub use opendal::services::S3Config;
+use arrow::array::FixedSizeBinaryArray;
+use bytes::Bytes;
+use futures::Stream;
 pub(crate) use parquet::*;
 use uuid::Uuid;
 
 use crate::catalog::DataFileRecord;
-use crate::expr::Expr;
-use crate::storage::fs::FsStorage;
-use crate::storage::s3::S3Storage;
+use crate::expr::{Expr, row_ids_in_list_expr};
+use crate::table::TableSchemaRef;
 use crate::{ILError, ILResult, RecordBatchStream};
-use arrow_schema::Schema;
-use opendal::Operator;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::fmt::Debug;
+use std::ops::Range;
+use std::pin::Pin;
 
-#[derive(Debug, Clone)]
-pub enum Storage {
-    Fs(FsStorage),
-    S3(Box<S3Storage>),
+#[async_trait::async_trait]
+pub trait Storage: Debug + Send + Sync + 'static {
+    async fn create(&self, relative_path: &str) -> ILResult<Box<dyn OutputFile>>;
+    async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>>;
+    async fn delete(&self, relative_path: &str) -> ILResult<()>;
+    async fn exists(&self, relative_path: &str) -> ILResult<bool>;
+    async fn list(&self, relative_path: &str) -> ILResult<DirEntryStream>;
+    async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()>;
 }
 
-impl Storage {
-    pub fn new_fs(root: impl Into<PathBuf>) -> Self {
-        Storage::Fs(FsStorage::new(root.into()))
-    }
+#[async_trait::async_trait]
+pub trait InputFile: Debug + Send + Sync + 'static {
+    async fn metadata(&self) -> ILResult<FileMetadata>;
+    async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes>;
+}
 
-    pub fn new_s3(config: S3Config, bucket: impl Into<String>) -> Self {
-        Storage::S3(Box::new(S3Storage::new(config, bucket.into())))
+#[async_trait::async_trait]
+impl InputFile for Box<dyn InputFile> {
+    async fn metadata(&self) -> ILResult<FileMetadata> {
+        self.as_ref().metadata().await
     }
-
-    pub async fn delete(&self, relative_path: &str) -> ILResult<()> {
-        let op = self.new_operator()?;
-        Ok(op.delete(relative_path).await?)
-    }
-
-    pub async fn remove_dir_all(&self, relative_path: &str) -> ILResult<()> {
-        let op = self.new_operator()?;
-        let relative_path = if relative_path.ends_with('/') {
-            relative_path.to_string()
-        } else {
-            format!("{relative_path}/")
-        };
-        Ok(op.remove_all(&relative_path).await?)
-    }
-
-    pub async fn exists(&self, relative_path: &str) -> ILResult<bool> {
-        let op = self.new_operator()?;
-        Ok(op.exists(relative_path).await?)
-    }
-
-    pub(crate) fn new_operator(&self) -> ILResult<Operator> {
-        match self {
-            Storage::Fs(fs) => fs.new_operator(),
-            Storage::S3(s3) => s3.new_operator(),
-        }
-    }
-
-    pub fn root_path(&self) -> ILResult<String> {
-        match self {
-            Storage::Fs(fs) => Ok(fs.root.to_string_lossy().to_string()),
-            Storage::S3(s3) => Ok(format!("s3://{}/", s3.bucket)),
-        }
-    }
-
-    pub fn storage_options(&self) -> ILResult<HashMap<String, String>> {
-        match self {
-            Storage::Fs(_fs) => Ok(HashMap::new()),
-            Storage::S3(s3) => {
-                let mut options = HashMap::new();
-                options.insert(
-                    "aws_access_key_id".to_string(),
-                    s3.config
-                        .access_key_id
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Access key id is not set"))?,
-                );
-                options.insert(
-                    "aws_secret_access_key".to_string(),
-                    s3.config
-                        .secret_access_key
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Secret access key is not set"))?,
-                );
-                options.insert(
-                    "aws_endpoint".to_string(),
-                    s3.config
-                        .endpoint
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Endpoint is not set"))?,
-                );
-                options.insert("aws_allow_http".to_string(), "true".to_string());
-                options.insert(
-                    "aws_region".to_string(),
-                    s3.config
-                        .region
-                        .clone()
-                        .ok_or_else(|| ILError::internal("Region is not set"))?,
-                );
-                options.insert("AWS_EC2_METADATA_DISABLED".to_string(), "true".to_string());
-                options.insert("AWS_S3_ALLOW_UNSAFE_RENAME".to_string(), "true".to_string());
-                Ok(options)
-            }
-        }
-    }
-
-    pub async fn create_file(&self, relative_path: &str) -> ILResult<OutputFile> {
-        let op = self.new_operator()?;
-        let writer = op.writer(relative_path).await?;
-        Ok(OutputFile {
-            op,
-            relative_path: relative_path.to_string(),
-            writer,
-        })
-    }
-
-    pub async fn open_file(&self, relative_path: &str) -> ILResult<InputFile> {
-        let op = self.new_operator()?;
-        let reader = op.reader(relative_path).await?;
-        Ok(InputFile {
-            op,
-            relative_path: relative_path.to_string(),
-            reader,
-        })
-    }
-
-    pub async fn connectivity_check(&self) -> ILResult<()> {
-        let op = self.new_operator()?;
-        op.list("").await?;
-        Ok(())
+    async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes> {
+        self.as_mut().read(range).await
     }
 }
 
-/// Output file is used for writing to files.
-pub struct OutputFile {
-    op: Operator,
-    relative_path: String,
-    writer: opendal::Writer,
+#[async_trait::async_trait]
+pub trait OutputFile: Debug + Send + Sync + 'static {
+    async fn write(&mut self, bs: Bytes) -> ILResult<()>;
+    async fn close(&mut self) -> ILResult<()>;
 }
 
-impl OutputFile {
-    pub async fn file_size_bytes(&self) -> ILResult<u64> {
-        let meta = self.op.stat(&self.relative_path).await?;
-        Ok(meta.content_length())
+#[async_trait::async_trait]
+impl OutputFile for Box<dyn OutputFile> {
+    async fn write(&mut self, bs: Bytes) -> ILResult<()> {
+        self.as_mut().write(bs).await
     }
-
-    pub async fn delete(&self) -> ILResult<()> {
-        Ok(self.op.delete(&self.relative_path).await?)
-    }
-
-    pub fn writer(&mut self) -> &mut opendal::Writer {
-        &mut self.writer
-    }
-
-    pub async fn close(&mut self) -> ILResult<()> {
-        self.writer.close().await?;
-        Ok(())
+    async fn close(&mut self) -> ILResult<()> {
+        self.as_mut().close().await
     }
 }
 
-pub struct InputFile {
-    op: Operator,
-    relative_path: String,
-    reader: opendal::Reader,
+#[derive(Debug)]
+pub struct FileMetadata {
+    pub size: u64,
+    pub mode: EntryMode,
+    // Timestamp in milliseconds
+    pub last_modified: Option<i64>,
 }
 
-impl InputFile {
-    pub async fn file_size_bytes(&self) -> ILResult<u64> {
-        let meta = self.op.stat(&self.relative_path).await?;
-        Ok(meta.content_length())
-    }
+pub type DirEntryStream = Pin<Box<dyn Stream<Item = ILResult<DirEntry>> + Send>>;
 
-    pub async fn delete(&self) -> ILResult<()> {
-        Ok(self.op.delete(&self.relative_path).await?)
-    }
+#[derive(Debug)]
+pub struct DirEntry {
+    pub name: String,
+    pub metadata: FileMetadata,
+}
 
-    pub async fn read(&self) -> ILResult<bytes::Bytes> {
-        Ok(self.op.read(&self.relative_path).await?.to_bytes())
-    }
-
-    pub fn reader(&self) -> &opendal::Reader {
-        &self.reader
-    }
+#[derive(Debug)]
+pub enum EntryMode {
+    File,
+    Directory,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -216,14 +111,18 @@ impl std::str::FromStr for DataFileFormat {
 }
 
 pub(crate) async fn read_data_file_by_record(
-    storage: &Storage,
-    table_schema: &Schema,
+    storage: &dyn Storage,
+    table_schema: &TableSchemaRef,
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
-    filters: Vec<Expr>,
-    row_ids: Option<&HashSet<Uuid>>,
+    mut filters: Vec<Expr>,
+    row_ids: Option<Vec<Uuid>>,
     batch_size: usize,
 ) -> ILResult<RecordBatchStream> {
+    if let Some(row_ids) = row_ids {
+        let row_id_filter = row_ids_in_list_expr(row_ids);
+        filters.push(row_id_filter);
+    }
     match data_file_record.format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
             read_parquet_file_by_record(
@@ -232,7 +131,6 @@ pub(crate) async fn read_data_file_by_record(
                 data_file_record,
                 projection,
                 filters,
-                row_ids,
                 batch_size,
             )
             .await
@@ -240,30 +138,9 @@ pub(crate) async fn read_data_file_by_record(
     }
 }
 
-pub(crate) async fn read_data_file_by_record_and_row_id_condition(
-    storage: &Storage,
-    table_schema: &Schema,
-    data_file_record: &DataFileRecord,
-    projection: Option<Vec<usize>>,
-    row_id_condition: &Expr,
-) -> ILResult<RecordBatchStream> {
-    match data_file_record.format {
-        DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
-            read_parquet_file_by_record_and_row_id_condition(
-                storage,
-                table_schema,
-                data_file_record,
-                projection,
-                row_id_condition,
-            )
-            .await
-        }
-    }
-}
-
 pub(crate) async fn find_matched_row_ids_from_data_file(
-    storage: &Storage,
-    table_schema: &Schema,
+    storage: &dyn Storage,
+    table_schema: &TableSchemaRef,
     condition: &Expr,
     data_file_record: &DataFileRecord,
 ) -> ILResult<HashSet<Uuid>> {
@@ -276,6 +153,18 @@ pub(crate) async fn find_matched_row_ids_from_data_file(
                 data_file_record,
             )
             .await
+        }
+    }
+}
+
+pub(crate) async fn read_row_id_array_from_data_file(
+    storage: &dyn Storage,
+    relative_path: &str,
+    format: DataFileFormat,
+) -> ILResult<FixedSizeBinaryArray> {
+    match format {
+        DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
+            read_row_id_array_from_parquet(storage, relative_path).await
         }
     }
 }

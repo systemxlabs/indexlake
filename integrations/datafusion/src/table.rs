@@ -7,9 +7,13 @@ use datafusion::common::stats::Precision;
 use datafusion::common::{DFSchema, Statistics};
 use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
+use datafusion::functions_aggregate::sum::sum_udaf;
 use datafusion::logical_expr::TableProviderFilterPushDown;
 use datafusion::logical_expr::dml::InsertOp;
+use datafusion::physical_expr::aggregate::AggregateExprBuilder;
 use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
+use datafusion::physical_plan::expressions::col;
 use datafusion::prelude::Expr;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
@@ -18,7 +22,7 @@ use log::warn;
 
 use crate::{
     IndexLakeInsertExec, IndexLakeScanExec, datafusion_expr_to_indexlake_expr,
-    indexlake_scalar_to_datafusion_scalar,
+    indexlake_scalar_to_datafusion_scalar, make_count_schema,
 };
 
 #[derive(Debug)]
@@ -75,9 +79,9 @@ impl TableProvider for IndexLakeTable {
 
     fn schema(&self) -> SchemaRef {
         if self.hide_row_id {
-            Arc::new(schema_without_row_id(&self.table.schema))
+            Arc::new(schema_without_row_id(&self.table.output_schema))
         } else {
-            self.table.schema.clone()
+            self.table.output_schema.clone()
         }
     }
 
@@ -136,7 +140,7 @@ impl TableProvider for IndexLakeTable {
         &self,
         filters: &[&Expr],
     ) -> Result<Vec<TableProviderFilterPushDown>, DataFusionError> {
-        let df_schema = DFSchema::try_from(self.table.schema.clone())?;
+        let df_schema = DFSchema::try_from(self.table.output_schema.clone())?;
         let mut supports = Vec::with_capacity(filters.len());
         for filter in filters {
             let Ok(il_expr) = datafusion_expr_to_indexlake_expr(filter, &df_schema) else {
@@ -145,7 +149,7 @@ impl TableProvider for IndexLakeTable {
             };
             let support = self
                 .table
-                .supports_filter(&il_expr)
+                .supports_filter(il_expr.clone())
                 .map_err(|e| DataFusionError::Internal(e.to_string()))?;
             match support {
                 FilterSupport::Exact => supports.push(TableProviderFilterPushDown::Exact),
@@ -170,7 +174,7 @@ impl TableProvider for IndexLakeTable {
             Ok(row_count) => Some(Statistics {
                 num_rows: Precision::Exact(row_count),
                 total_byte_size: Precision::Absent,
-                column_statistics: Statistics::unknown_column(&self.table.schema),
+                column_statistics: Statistics::unknown_column(&self.table.output_schema),
             }),
             Err(e) => {
                 warn!(
@@ -188,7 +192,23 @@ impl TableProvider for IndexLakeTable {
         input: Arc<dyn ExecutionPlan>,
         insert_op: InsertOp,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let exec = IndexLakeInsertExec::try_new(self.table.clone(), input, insert_op)?;
-        Ok(Arc::new(exec))
+        let insert_exec = IndexLakeInsertExec::try_new(self.table.clone(), input, insert_op)?;
+
+        let count_schema = make_count_schema();
+        let agg_expr =
+            AggregateExprBuilder::new(sum_udaf(), vec![col("count", count_schema.as_ref())?])
+                .schema(count_schema.clone())
+                .alias("count")
+                .build()?;
+        let group_by = PhysicalGroupBy::new_single(vec![]);
+        let agg_exec = AggregateExec::try_new(
+            AggregateMode::Single,
+            group_by,
+            vec![Arc::new(agg_expr)],
+            vec![None],
+            Arc::new(insert_exec),
+            count_schema,
+        )?;
+        Ok(Arc::new(agg_exec))
     }
 }

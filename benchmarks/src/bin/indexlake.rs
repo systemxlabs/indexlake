@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use futures::StreamExt;
-use indexlake::storage::DataFileFormat;
-use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};
+use indexlake::expr::{col, lit};
+use indexlake::table::{TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate};
 use indexlake::{Client, ILError};
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
@@ -20,18 +20,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.create_namespace(&namespace_name, true).await?;
 
     let table_name = uuid::Uuid::new_v4().to_string();
-    let table_config = TableConfig {
-        inline_row_count_limit: 10000,
-        parquet_row_group_size: 1000,
-        preferred_data_file_format: DataFileFormat::ParquetV2,
-    };
     let table_creation = TableCreation {
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: arrow_table_schema(),
-        default_values: HashMap::new(),
-        config: table_config.clone(),
-        if_not_exists: false,
+        ..Default::default()
     };
     client.create_table(table_creation).await?;
 
@@ -40,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_rows = 1000000;
     let num_tasks = 10;
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 10000;
+    let insert_batch_size = 100000;
 
     let start_time = Instant::now();
     let mut handles = Vec::new();
@@ -64,13 +57,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let insert_cost_time = start_time.elapsed();
     println!(
-        "IndexLake: inserted {} rows, {} tasks, batch size: {}, format: {}, in {}ms",
+        "IndexLake: inserted {} rows, {} tasks, batch size: {}, in {}ms",
         total_rows,
         num_tasks,
         insert_batch_size,
-        table_config.preferred_data_file_format,
         insert_cost_time.as_millis()
     );
+
+    let table_count = table.count(TableScanPartition::single_partition()).await?;
+    assert_eq!(table_count, total_rows);
 
     let start_time = Instant::now();
     let mut handles = Vec::new();
@@ -96,6 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         count += handle.await??;
     }
 
+    assert_eq!(count, total_rows);
+
     let scan_cost_time = start_time.elapsed();
     println!(
         "IndexLake: scanned {} rows by {} tasks in {}ms",
@@ -103,6 +100,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         num_tasks,
         scan_cost_time.as_millis()
     );
+
+    let start_time = Instant::now();
+    let update = TableUpdate {
+        set_map: HashMap::from([("content".to_string(), lit("new content"))]),
+        condition: col("id").eq(lit(100i32)),
+    };
+    let update_count = table.update(update).await?;
+    let update_cost_time = start_time.elapsed().as_millis();
+    println!("IndexLake: updated {update_count} rows in {update_cost_time}ms",);
+
+    let start_time = Instant::now();
+    let condition = col("id").eq(lit(100i32));
+    let delete_count = table.delete(condition).await?;
+    let delete_cost_time = start_time.elapsed().as_millis();
+    println!("IndexLake: deleted {delete_count} rows in {delete_cost_time}ms",);
 
     Ok(())
 }

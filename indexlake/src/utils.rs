@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::iter::repeat_n;
 use std::sync::Arc;
 
@@ -7,9 +8,10 @@ use arrow::array::{
 use arrow::datatypes::{FieldRef, Schema};
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
+use arrow_schema::SchemaRef;
 use uuid::Uuid;
 
-use crate::catalog::INTERNAL_ROW_ID_FIELD_NAME;
+use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use crate::expr::{Expr, visited_columns};
 use crate::table::MetadataColumn;
 use crate::{ILError, ILResult};
@@ -102,6 +104,31 @@ pub fn extract_row_ids_from_record_batch(record_batch: &RecordBatch) -> ILResult
     fixed_size_binary_array_to_uuids(&row_id_array)
 }
 
+pub fn sort_record_batches(batches: &[RecordBatch], sort_col: &str) -> ILResult<Vec<RecordBatch>> {
+    if batches.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // TODO not concat batches, this might lead arrow array overflow
+    let record = arrow::compute::concat_batches(&batches[0].schema(), batches)?;
+
+    let sort_col_idx = record.schema().index_of(sort_col)?;
+    let sort_array = record.column(sort_col_idx);
+
+    let indices = arrow::compute::sort_to_indices(sort_array, None, None)?;
+
+    let sorted_arrays: Vec<ArrayRef> = record
+        .columns()
+        .iter()
+        .map(|col| arrow::compute::take(col, &indices, None))
+        .collect::<arrow::error::Result<_>>()?;
+
+    let options = RecordBatchOptions::new().with_row_count(Some(record.num_rows()));
+    let batch = RecordBatch::try_new_with_options(record.schema(), sorted_arrays, &options)?;
+
+    Ok(vec![batch])
+}
+
 pub fn array_to_uuids(array: &dyn Array) -> ILResult<Vec<Uuid>> {
     let data_type = array.data_type();
     let fixed_size_binary_array = array.as_fixed_size_binary_opt().ok_or_else(|| {
@@ -191,4 +218,88 @@ pub fn deserialize_array(buf: &[u8], field: FieldRef) -> ILResult<ArrayRef> {
             .as_slice(),
     )?;
     Ok(array)
+}
+
+pub fn rewrite_batch_schema(
+    batch: &RecordBatch,
+    field_name_id_map: &HashMap<String, Uuid>,
+) -> ILResult<RecordBatch> {
+    let mut new_fields = Vec::new();
+    let batch_schema = batch.schema_ref();
+    for field in batch_schema.fields() {
+        if let Some(field_id) = field_name_id_map.get(field.name()) {
+            let new_field_name = hex::encode(field_id);
+            let new_field = field.as_ref().clone().with_name(new_field_name);
+            new_fields.push(Arc::new(new_field));
+        } else if field.name() == INTERNAL_ROW_ID_FIELD_NAME {
+            new_fields.push(field.clone());
+        } else {
+            return Err(ILError::invalid_input(format!("Invalid field {field}")));
+        }
+    }
+    let new_schema =
+        Arc::new(Schema::new(new_fields).with_metadata(batch_schema.metadata().clone()));
+    let new_batch = RecordBatch::try_new(new_schema, batch.columns().to_vec())?;
+    Ok(new_batch)
+}
+
+pub fn correct_batch_schema(
+    batch: &RecordBatch,
+    field_id_name_map: &HashMap<Uuid, String>,
+) -> ILResult<RecordBatch> {
+    let mut new_fields = Vec::new();
+    let batch_schema = batch.schema_ref();
+    for field in batch_schema.fields() {
+        if field.name() == INTERNAL_ROW_ID_FIELD_NAME {
+            new_fields.push(field.clone());
+        } else if let Ok(field_id) = Uuid::parse_str(field.name()) {
+            let Some(correct_field_name) = field_id_name_map.get(&field_id) else {
+                return Err(ILError::internal(format!(
+                    "Not found field name for field id {field_id}"
+                )));
+            };
+            let new_field = field.as_ref().clone().with_name(correct_field_name);
+            new_fields.push(Arc::new(new_field));
+        } else {
+            new_fields.push(field.clone());
+        }
+    }
+    let new_schema =
+        Arc::new(Schema::new(new_fields).with_metadata(batch_schema.metadata().clone()));
+    let new_batch = RecordBatch::try_new(new_schema, batch.columns().to_vec())?;
+    Ok(new_batch)
+}
+
+pub(crate) fn complete_batch_missing_fields(
+    batch: RecordBatch,
+    target_schema: SchemaRef,
+    field_id_default_value_map: &HashMap<Uuid, Scalar>,
+) -> ILResult<RecordBatch> {
+    let mut new_columns = Vec::with_capacity(target_schema.fields().len());
+
+    let batch_schema = batch.schema_ref();
+
+    for field in target_schema.fields() {
+        let field_name = field.name();
+
+        if let Ok(index) = batch_schema.index_of(field_name) {
+            new_columns.push(batch.column(index).clone());
+        } else {
+            let Ok(field_id) = Uuid::parse_str(field.name()) else {
+                return Err(ILError::internal(format!(
+                    "Failed to parse field name {field_name} as uuid",
+                )));
+            };
+            if let Some(default_value) = field_id_default_value_map.get(&field_id) {
+                let array = default_value.to_array_of_size(batch.num_rows())?;
+                new_columns.push(array);
+            } else {
+                return Err(ILError::internal(
+                    "No default value for field {field_name} to complete record batch",
+                ));
+            }
+        }
+    }
+    let new_batch = RecordBatch::try_new(target_schema, new_columns)?;
+    Ok(new_batch)
 }

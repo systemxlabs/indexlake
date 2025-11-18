@@ -1,4 +1,5 @@
 use arrow::datatypes::Schema;
+use arrow_schema::Field;
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -7,7 +8,7 @@ use crate::catalog::{
 };
 use crate::index::{IndexDefinition, IndexKind, IndexManager};
 use crate::storage::Storage;
-use crate::table::{MetadataColumn, Table, TableCreation, process_create_table};
+use crate::table::{MetadataColumn, Table, TableCreation, TableSchema, process_create_table};
 use crate::{ILError, ILResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,12 +16,12 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct Client {
     pub catalog: Arc<dyn Catalog>,
-    pub storage: Arc<Storage>,
+    pub storage: Arc<dyn Storage>,
     pub index_kinds: HashMap<String, Arc<dyn IndexKind>>,
 }
 
 impl Client {
-    pub fn new(catalog: Arc<dyn Catalog>, storage: Arc<Storage>) -> Self {
+    pub fn new(catalog: Arc<dyn Catalog>, storage: Arc<dyn Storage>) -> Self {
         Self {
             catalog,
             storage,
@@ -63,6 +64,21 @@ impl Client {
         Ok(namespace_id)
     }
 
+    pub async fn rename_namespace(&self, old_name: &str, new_name: &str) -> ILResult<()> {
+        let mut tx_helper = self.transaction_helper().await?;
+
+        let Some(namespace_id) = tx_helper.get_namespace_id(old_name).await? else {
+            return Err(ILError::invalid_input(format!(
+                "Namespace {old_name} does not exist"
+            )));
+        };
+        tx_helper
+            .update_namespace_name(&namespace_id, new_name)
+            .await?;
+        tx_helper.commit().await?;
+        Ok(())
+    }
+
     pub async fn get_namespace_id(&self, namespace_name: &str) -> ILResult<Option<Uuid>> {
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
         let namespace_id = catalog_helper.get_namespace_id(namespace_name).await?;
@@ -70,10 +86,7 @@ impl Client {
     }
 
     pub async fn create_table(&self, table_creation: TableCreation) -> ILResult<Uuid> {
-        if table_creation.schema.fields().is_empty() {
-            return Err(ILError::invalid_input("Schema is empty"));
-        }
-        check_schema_contains_system_column(&table_creation.schema)?;
+        table_creation.validate()?;
 
         let mut tx_helper = self.transaction_helper().await?;
         let table_id = process_create_table(&mut tx_helper, table_creation.clone()).await?;
@@ -107,13 +120,23 @@ impl Client {
                 .await?,
         );
 
-        let mut fields = field_records
+        let schema = Arc::new(TableSchema::new(
+            &field_records,
+            table_record.schema_metadata.clone(),
+        ));
+
+        let mut output_fields = field_records
             .iter()
-            .map(|f| Arc::new(f.clone().into_field()))
+            .map(|f| {
+                Arc::new(
+                    Field::new(&f.field_name, f.data_type.clone(), f.nullable)
+                        .with_metadata(f.metadata.clone()),
+                )
+            })
             .collect::<Vec<_>>();
-        fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
-        let schema = Arc::new(Schema::new_with_metadata(
-            fields,
+        output_fields.insert(0, INTERNAL_ROW_ID_FIELD_REF.clone());
+        let output_schema = Arc::new(Schema::new_with_metadata(
+            output_fields,
             table_record.schema_metadata,
         ));
 
@@ -124,7 +147,6 @@ impl Client {
         for index_record in index_records {
             let index = IndexDefinition::from_index_record(
                 &index_record,
-                &field_records,
                 table_name,
                 &schema,
                 &self.index_kinds,
@@ -140,7 +162,8 @@ impl Client {
             table_id: table_record.table_id,
             table_name: table_name.to_string(),
             field_records,
-            schema,
+            table_schema: schema,
+            output_schema,
             config: Arc::new(table_record.config),
             catalog: self.catalog.clone(),
             storage: self.storage.clone(),
@@ -149,7 +172,7 @@ impl Client {
     }
 }
 
-fn check_schema_contains_system_column(schema: &Schema) -> ILResult<()> {
+pub(crate) fn check_schema_contains_system_column(schema: &Schema) -> ILResult<()> {
     if schema.field_with_name(INTERNAL_ROW_ID_FIELD_NAME).is_ok() {
         return Err(ILError::invalid_input(format!(
             "Schema contains system column: {INTERNAL_ROW_ID_FIELD_NAME}"

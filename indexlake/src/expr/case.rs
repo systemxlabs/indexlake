@@ -6,7 +6,6 @@ use arrow::compute::{and, and_not, prep_null_mask_filter};
 use arrow_schema::{DataType, Schema};
 use derive_visitor::{Drive, DriveMut};
 
-use crate::catalog::CatalogDatabase;
 use crate::expr::{ColumnarValue, Expr, try_cast};
 use crate::{ILError, ILResult};
 
@@ -90,23 +89,6 @@ impl Case {
         }
 
         Ok(ColumnarValue::Array(current_value))
-    }
-
-    pub fn to_sql(&self, database: CatalogDatabase) -> ILResult<String> {
-        let mut sql = String::new();
-        sql.push_str("CASE");
-        for (when, then) in &self.when_then {
-            sql.push_str(&format!(
-                " WHEN {} THEN {}",
-                when.to_sql(database)?,
-                then.to_sql(database)?
-            ));
-        }
-        if let Some(else_expr) = &self.else_expr {
-            sql.push_str(&format!(" ELSE {}", else_expr.to_sql(database)?));
-        }
-        sql.push_str(" END");
-        Ok(sql)
     }
 }
 

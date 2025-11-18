@@ -33,7 +33,10 @@ impl IndexKind for BTreeIndexKind {
             ));
         }
         let key_column_name = &index_def.key_columns[0];
-        let key_field = index_def.table_schema.field_with_name(key_column_name)?;
+        let key_field = index_def
+            .table_schema
+            .arrow_schema
+            .field_with_name(key_column_name)?;
 
         match key_field.data_type() {
             DataType::Int8

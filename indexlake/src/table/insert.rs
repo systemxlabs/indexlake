@@ -1,27 +1,29 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
-use arrow_schema::SchemaRef;
+use derive_with::With;
 use futures::StreamExt;
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogDatabase, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
+    Catalog, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity,
     TransactionHelper, rows_to_record_batch,
 };
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, build_parquet_writer};
-use crate::table::Table;
+use crate::table::{Table, TableSchemaRef};
 use crate::utils::{
-    extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, serialize_array,
+    extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, rewrite_batch_schema,
+    serialize_array,
 };
 use crate::{ILError, ILResult};
 
+#[derive(Debug, With)]
 pub struct TableInsertion {
     pub data: Vec<RecordBatch>,
     pub force_inline: bool,
-    pub try_dump: bool,
     pub ignore_row_id: bool,
 }
 
@@ -30,19 +32,18 @@ impl TableInsertion {
         Self {
             data,
             force_inline: false,
-            try_dump: true,
             ignore_row_id: true,
         }
     }
 
-    pub fn with_force_inline(mut self, force_inline: bool) -> Self {
-        self.force_inline = force_inline;
-        self
-    }
-
-    pub fn with_try_dump(mut self, try_dump: bool) -> Self {
-        self.try_dump = try_dump;
-        self
+    pub fn rewrite_columns(mut self, field_name_id_map: &HashMap<String, Uuid>) -> ILResult<Self> {
+        let mut new_data = Vec::with_capacity(self.data.len());
+        for batch in self.data {
+            let new_batch = rewrite_batch_schema(&batch, field_name_id_map)?;
+            new_data.push(new_batch);
+        }
+        self.data = new_data;
+        Ok(self)
     }
 }
 
@@ -61,7 +62,7 @@ pub(crate) async fn process_insert_into_inline_rows(
 
     // insert inline rows
     for batch in batches {
-        let sql_values = record_batch_to_sql_values(batch, tx_helper.database)?;
+        let sql_values = record_batch_to_sql_values(batch, tx_helper.catalog.as_ref())?;
 
         let inline_field_names = batch
             .schema()
@@ -85,7 +86,7 @@ pub(crate) async fn process_insert_into_inline_rows(
     append_non_mergeable_index_builders(
         tx_helper,
         &table.table_id,
-        &table.schema,
+        &table.table_schema,
         &mut non_mergeable_index_builders,
     )
     .await?;
@@ -148,6 +149,13 @@ pub(crate) async fn process_bypass_insert(
         }
     };
     let record_count = row_ids.len();
+    let size = table
+        .storage
+        .open(&relative_path)
+        .await?
+        .metadata()
+        .await?
+        .size;
 
     tx_helper
         .insert_data_files(&[DataFileRecord {
@@ -155,9 +163,9 @@ pub(crate) async fn process_bypass_insert(
             table_id: table.table_id,
             format: table.config.preferred_data_file_format,
             relative_path: relative_path.clone(),
+            size: size as i64,
             record_count: record_count as i64,
-            row_ids,
-            validity: vec![true; record_count],
+            validity: RowValidity::new(record_count),
         }])
         .await?;
 
@@ -170,14 +178,22 @@ pub(crate) async fn process_bypass_insert(
             &table.table_id,
             &index_file_id,
         );
-        let output_file = table.storage.create_file(&relative_path).await?;
+        let output_file = table.storage.create(&relative_path).await?;
         index_builder.write_file(output_file).await?;
+        let size = table
+            .storage
+            .open(&relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
         index_file_records.push(IndexFileRecord {
             index_file_id,
             table_id: table.table_id,
             index_id: index_builder.index_def().index_id,
             data_file_id,
             relative_path,
+            size: size as i64,
         });
     }
 
@@ -192,11 +208,11 @@ async fn write_parquet_file(
     batches: &[RecordBatch],
     index_builders: &mut Vec<Box<dyn IndexBuilder>>,
 ) -> ILResult<Vec<Uuid>> {
-    let output_file = table.storage.create_file(relative_path).await?;
+    let output_file = table.storage.create(relative_path).await?;
 
     let mut arrow_writer = build_parquet_writer(
         output_file,
-        table.schema.clone(),
+        table.table_schema.arrow_schema.clone(),
         table.config.parquet_row_group_size,
         table.config.preferred_data_file_format,
     )?;
@@ -238,7 +254,7 @@ macro_rules! extract_sql_values {
 
 pub(crate) fn array_to_sql_literals(
     array: &dyn Array,
-    database: CatalogDatabase,
+    catalog: &dyn Catalog,
 ) -> ILResult<Vec<String>> {
     let data_type = array.data_type();
     let literals = match data_type {
@@ -329,43 +345,43 @@ pub(crate) fn array_to_sql_literals(
         }
         DataType::Binary => {
             extract_sql_values!(array, BinaryArray, |v: &[u8]| {
-                Ok::<_, ILError>(database.sql_binary_literal(v))
+                Ok::<_, ILError>(catalog.sql_binary_literal(v))
             })
         }
         DataType::FixedSizeBinary(size) => {
             if *size == 16 {
                 extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| {
-                    Ok::<_, ILError>(database.sql_uuid_literal(&Uuid::from_slice(v)?))
+                    Ok::<_, ILError>(catalog.sql_uuid_literal(&Uuid::from_slice(v)?))
                 })
             } else {
                 extract_sql_values!(array, FixedSizeBinaryArray, |v: &[u8]| {
-                    Ok::<_, ILError>(database.sql_binary_literal(v))
+                    Ok::<_, ILError>(catalog.sql_binary_literal(v))
                 })
             }
         }
         DataType::LargeBinary => {
             extract_sql_values!(array, LargeBinaryArray, |v: &[u8]| {
-                Ok::<_, ILError>(database.sql_binary_literal(v))
+                Ok::<_, ILError>(catalog.sql_binary_literal(v))
             })
         }
         DataType::BinaryView => {
             extract_sql_values!(array, BinaryViewArray, |v: &[u8]| {
-                Ok::<_, ILError>(database.sql_binary_literal(v))
+                Ok::<_, ILError>(catalog.sql_binary_literal(v))
             })
         }
         DataType::Utf8 => {
             extract_sql_values!(array, StringArray, |v: &str| {
-                Ok::<_, ILError>(database.sql_string_literal(v))
+                Ok::<_, ILError>(catalog.sql_string_literal(v))
             })
         }
         DataType::LargeUtf8 => {
             extract_sql_values!(array, LargeStringArray, |v: &str| {
-                Ok::<_, ILError>(database.sql_string_literal(v))
+                Ok::<_, ILError>(catalog.sql_string_literal(v))
             })
         }
         DataType::Utf8View => {
             extract_sql_values!(array, StringViewArray, |v: &str| {
-                Ok::<_, ILError>(database.sql_string_literal(v))
+                Ok::<_, ILError>(catalog.sql_string_literal(v))
             })
         }
         DataType::List(inner_field) => {
@@ -377,7 +393,7 @@ pub(crate) fn array_to_sql_literals(
             for v in array.iter() {
                 sql_values.push(match v {
                     Some(v) => {
-                        database.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
+                        catalog.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
                     }
                     None => "NULL".to_string(),
                 });
@@ -395,7 +411,7 @@ pub(crate) fn array_to_sql_literals(
             for v in array.iter() {
                 sql_values.push(match v {
                     Some(v) => {
-                        database.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
+                        catalog.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
                     }
                     None => "NULL".to_string(),
                 });
@@ -411,7 +427,7 @@ pub(crate) fn array_to_sql_literals(
             for v in array.iter() {
                 sql_values.push(match v {
                     Some(v) => {
-                        database.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
+                        catalog.sql_binary_literal(&serialize_array(v, inner_field.clone())?)
                     }
                     None => "NULL".to_string(),
                 });
@@ -439,11 +455,11 @@ pub(crate) fn array_to_sql_literals(
 
 pub(crate) fn record_batch_to_sql_values(
     record: &RecordBatch,
-    database: CatalogDatabase,
+    catalog: &dyn Catalog,
 ) -> ILResult<Vec<Vec<String>>> {
     let mut column_values_list = Vec::with_capacity(record.num_columns());
     for array in record.columns() {
-        let column_values = array_to_sql_literals(array, database)?;
+        let column_values = array_to_sql_literals(array, catalog)?;
         column_values_list.push(column_values);
     }
     Ok(column_values_list)
@@ -452,17 +468,17 @@ pub(crate) fn record_batch_to_sql_values(
 pub(crate) async fn append_non_mergeable_index_builders(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
-    table_schema: &SchemaRef,
+    table_schema: &TableSchemaRef,
     index_builders: &mut Vec<Box<dyn IndexBuilder>>,
 ) -> ILResult<()> {
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(table_schema)?);
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
 
     let row_stream = tx_helper
-        .scan_inline_rows(table_id, &catalog_schema, &[], None)
+        .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
         .await?;
     let mut inline_stream = row_stream.chunks(100).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(table_schema, &rows)?;
+        let batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         Ok::<_, ILError>(batch)
     });
 

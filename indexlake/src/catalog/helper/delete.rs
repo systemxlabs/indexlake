@@ -5,6 +5,38 @@ use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper, inline_row_t
 use crate::expr::Expr;
 
 impl TransactionHelper {
+    pub(crate) async fn delete_table(&mut self, table_id: &Uuid) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "DELETE FROM indexlake_table WHERE table_id = {}",
+                self.catalog.sql_uuid_literal(table_id)
+            ))
+            .await
+    }
+
+    pub(crate) async fn delete_fields(&mut self, table_id: &Uuid) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "DELETE FROM indexlake_field WHERE table_id = {}",
+                self.catalog.sql_uuid_literal(table_id)
+            ))
+            .await
+    }
+
+    pub(crate) async fn delete_field_by_name(
+        &mut self,
+        table_id: &Uuid,
+        field_name: &str,
+    ) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "DELETE FROM indexlake_field WHERE table_id = {} AND field_name = {}",
+                self.catalog.sql_uuid_literal(table_id),
+                self.catalog.sql_string_literal(field_name)
+            ))
+            .await
+    }
+
     pub(crate) async fn delete_inline_rows(
         &mut self,
         table_id: &Uuid,
@@ -19,14 +51,14 @@ impl TransactionHelper {
 
         let mut filter_strs = filters
             .iter()
-            .map(|f| f.to_sql(self.database))
+            .map(|f| self.catalog.unparse_expr(f))
             .collect::<Result<Vec<_>, _>>()?;
         if let Some(row_ids) = row_ids {
             filter_strs.push(format!(
                 "{INTERNAL_ROW_ID_FIELD_NAME} IN ({})",
                 row_ids
                     .iter()
-                    .map(|id| self.database.sql_uuid_literal(id))
+                    .map(|id| self.catalog.sql_uuid_literal(id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -41,11 +73,11 @@ impl TransactionHelper {
             .await
     }
 
-    pub(crate) async fn delete_dump_task(&mut self, table_id: &Uuid) -> ILResult<usize> {
+    pub(crate) async fn delete_task(&mut self, task_id: &str) -> ILResult<usize> {
         self.transaction
             .execute(&format!(
-                "DELETE FROM indexlake_dump_task WHERE table_id = {}",
-                self.database.sql_uuid_literal(table_id)
+                "DELETE FROM indexlake_task WHERE task_id = {}",
+                self.catalog.sql_string_literal(task_id)
             ))
             .await
     }
@@ -54,7 +86,23 @@ impl TransactionHelper {
         self.transaction
             .execute(&format!(
                 "DELETE FROM indexlake_data_file WHERE table_id = {}",
-                self.database.sql_uuid_literal(table_id)
+                self.catalog.sql_uuid_literal(table_id)
+            ))
+            .await
+    }
+
+    pub(crate) async fn delete_data_files(&mut self, data_file_ids: &[Uuid]) -> ILResult<usize> {
+        if data_file_ids.is_empty() {
+            return Ok(0);
+        }
+        self.transaction
+            .execute(&format!(
+                "DELETE FROM indexlake_data_file WHERE data_file_id IN ({})",
+                data_file_ids
+                    .iter()
+                    .map(|id| self.catalog.sql_uuid_literal(id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))
             .await
     }
@@ -63,34 +111,38 @@ impl TransactionHelper {
         self.transaction
             .execute(&format!(
                 "DELETE FROM indexlake_index_file WHERE table_id = {}",
-                self.database.sql_uuid_literal(table_id)
+                self.catalog.sql_uuid_literal(table_id)
             ))
             .await
     }
 
-    pub(crate) async fn delete_index_files(&mut self, index_id: &Uuid) -> ILResult<usize> {
+    pub(crate) async fn delete_index_files_by_index_id(
+        &mut self,
+        index_id: &Uuid,
+    ) -> ILResult<usize> {
         self.transaction
             .execute(&format!(
                 "DELETE FROM indexlake_index_file WHERE index_id = {}",
-                self.database.sql_uuid_literal(index_id)
+                self.catalog.sql_uuid_literal(index_id)
             ))
             .await
     }
 
-    pub(crate) async fn delete_table(&mut self, table_id: &Uuid) -> ILResult<usize> {
+    pub(crate) async fn delete_index_files_by_data_file_ids(
+        &mut self,
+        data_file_ids: &[Uuid],
+    ) -> ILResult<usize> {
+        if data_file_ids.is_empty() {
+            return Ok(0);
+        }
         self.transaction
             .execute(&format!(
-                "DELETE FROM indexlake_table WHERE table_id = {}",
-                self.database.sql_uuid_literal(table_id)
-            ))
-            .await
-    }
-
-    pub(crate) async fn delete_fields(&mut self, table_id: &Uuid) -> ILResult<usize> {
-        self.transaction
-            .execute(&format!(
-                "DELETE FROM indexlake_field WHERE table_id = {}",
-                self.database.sql_uuid_literal(table_id)
+                "DELETE FROM indexlake_index_file WHERE data_file_id IN ({})",
+                data_file_ids
+                    .iter()
+                    .map(|id| self.catalog.sql_uuid_literal(id))
+                    .collect::<Vec<String>>()
+                    .join(", ")
             ))
             .await
     }
@@ -99,7 +151,7 @@ impl TransactionHelper {
         self.transaction
             .execute(&format!(
                 "DELETE FROM indexlake_index WHERE table_id = {}",
-                self.database.sql_uuid_literal(table_id)
+                self.catalog.sql_uuid_literal(table_id)
             ))
             .await
     }
@@ -108,7 +160,7 @@ impl TransactionHelper {
         self.transaction
             .execute(&format!(
                 "DELETE FROM indexlake_index WHERE index_id = {}",
-                self.database.sql_uuid_literal(index_id)
+                self.catalog.sql_uuid_literal(index_id)
             ))
             .await
     }
@@ -123,7 +175,7 @@ impl TransactionHelper {
                 "DELETE FROM indexlake_inline_index WHERE index_id IN ({})",
                 index_ids
                     .iter()
-                    .map(|id| self.database.sql_uuid_literal(id))
+                    .map(|id| self.catalog.sql_uuid_literal(id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ))
