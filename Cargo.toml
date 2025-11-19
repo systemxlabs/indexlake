@@ -77,3 +77,12 @@ tokio = "1"
 tokio-stream = "0.1"
 url = "2.5"
 uuid = { version = "1.18", features = ["serde"] }
+
+[patch.crates-io]
+arrow = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
+arrow-array = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
+arrow-buffer = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
+arrow-data = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
+arrow-ipc = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
+arrow-schema = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
+parquet = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
