@@ -1,23 +1,13 @@
 use std::sync::Arc;
 
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::Schema;
-use datafusion::arrow::ipc::reader::StreamReader;
-use datafusion::arrow::ipc::writer::StreamWriter;
-use datafusion::catalog::memory::{DataSourceExec, MemorySourceConfig};
-use datafusion::datasource::source::DataSource;
 use datafusion::error::DataFusionError;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::dml::InsertOp;
-use datafusion::physical_expr::LexOrdering;
 use datafusion::physical_plan::ExecutionPlan;
-use datafusion::prelude::SessionContext;
 use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
 use datafusion_proto::logical_plan::from_proto::parse_exprs;
 use datafusion_proto::logical_plan::to_proto::serialize_exprs;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
-use datafusion_proto::physical_plan::from_proto::parse_physical_sort_exprs;
-use datafusion_proto::physical_plan::to_proto::serialize_physical_sort_exprs;
 use indexlake::Client;
 use indexlake::catalog::{DataFileRecord, RowValidity};
 use indexlake::storage::DataFileFormat;
@@ -28,7 +18,7 @@ use uuid::Uuid;
 use crate::index_lake_physical_plan_node::IndexLakePhysicalPlanType;
 use crate::{
     DataFile, DataFiles, IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode,
-    IndexLakeScanExec, IndexLakeScanExecNode, MemoryDatasourceNode,
+    IndexLakeScanExec, IndexLakeScanExecNode,
 };
 
 #[derive(Debug)]
@@ -99,38 +89,6 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     insert_op,
                 )?))
             }
-            IndexLakePhysicalPlanType::MemoryDatasource(node) => {
-                let partitions = parse_partitions(&node.partitions)?;
-                let schema = Schema::try_from(&node.schema.unwrap())?;
-                let projection = parse_projection(node.projection.as_ref());
-
-                let sort_information = node
-                    .sort_information
-                    .iter()
-                    .map(|sort_exprs| {
-                        let sort_exprs = parse_physical_sort_exprs(
-                            sort_exprs.physical_sort_expr_nodes.as_slice(),
-                            &SessionContext::new(),
-                            &schema,
-                            self,
-                        )?;
-                        let lex_ordering =
-                            LexOrdering::new(sort_exprs).expect("lex ordering is not empty");
-                        Ok::<_, DataFusionError>(lex_ordering)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let show_sizes = node.show_sizes;
-                let fetch = node.fetch.map(|f| f as usize);
-                let memory_source =
-                    MemorySourceConfig::try_new(&partitions, Arc::new(schema), projection)?
-                        .with_show_sizes(show_sizes)
-                        .with_limit(fetch);
-
-                let memory_source =
-                    MemorySourceConfig::try_with_sort_information(memory_source, sort_information)?;
-                Ok(DataSourceExec::from_data_source(memory_source))
-            }
         }
     }
 
@@ -188,49 +146,6 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             })?;
 
             Ok(())
-        } else if let Some(exec) = node.as_any().downcast_ref::<DataSourceExec>() {
-            let source = exec.data_source();
-            if let Some(memory_source) = source.as_any().downcast_ref::<MemorySourceConfig>() {
-                let proto_partitions = serialize_partitions(memory_source.partitions())?;
-                let projection = serialize_projection(memory_source.projection().as_ref());
-                let sort_information = memory_source
-                    .sort_information()
-                    .iter()
-                    .map(|ordering| {
-                        let sort_exprs = serialize_physical_sort_exprs(ordering.clone(), self)?;
-                        Ok::<_, DataFusionError>(
-                            datafusion_proto::protobuf::PhysicalSortExprNodeCollection {
-                                physical_sort_expr_nodes: sort_exprs,
-                            },
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let proto = IndexLakePhysicalPlanNode {
-                    index_lake_physical_plan_type: Some(
-                        IndexLakePhysicalPlanType::MemoryDatasource(MemoryDatasourceNode {
-                            partitions: proto_partitions,
-                            schema: Some(memory_source.original_schema().try_into()?),
-                            projection,
-                            sort_information,
-                            show_sizes: memory_source.show_sizes(),
-                            fetch: memory_source.fetch().map(|f| f as u32),
-                        }),
-                    ),
-                };
-
-                proto.encode(buf).map_err(|e| {
-                    DataFusionError::Internal(format!(
-                        "Failed to encode memory datasource node: {e:?}"
-                    ))
-                })?;
-
-                Ok(())
-            } else {
-                Err(DataFusionError::NotImplemented(format!(
-                    "IndexLakePhysicalCodec only support encoding MemorySourceConfig, got {source:?}",
-                )))
-            }
         } else {
             Err(DataFusionError::NotImplemented(format!(
                 "IndexLakePhysicalCodec does not support encoding {}",
@@ -282,44 +197,6 @@ fn parse_insert_op(insert_op: i32) -> Result<InsertOp, DataFusionError> {
         datafusion_proto::protobuf::InsertOp::Overwrite => Ok(InsertOp::Overwrite),
         datafusion_proto::protobuf::InsertOp::Replace => Ok(InsertOp::Replace),
     }
-}
-
-fn serialize_partitions(partitions: &[Vec<RecordBatch>]) -> Result<Vec<Vec<u8>>, DataFusionError> {
-    let mut proto_partitions = vec![];
-    for partition in partitions {
-        if partition.is_empty() {
-            proto_partitions.push(vec![]);
-            continue;
-        }
-        let mut proto_partition = vec![];
-        let mut stream_writer =
-            StreamWriter::try_new(&mut proto_partition, &partition[0].schema())?;
-        for batch in partition {
-            stream_writer.write(batch)?;
-        }
-        stream_writer.finish()?;
-        proto_partitions.push(proto_partition);
-    }
-    Ok(proto_partitions)
-}
-
-fn parse_partitions(
-    proto_partitions: &[Vec<u8>],
-) -> Result<Vec<Vec<RecordBatch>>, DataFusionError> {
-    let mut partitions = vec![];
-    for proto_partition in proto_partitions {
-        if proto_partition.is_empty() {
-            partitions.push(vec![]);
-            continue;
-        }
-        let mut partition = vec![];
-        let stream_reader = StreamReader::try_new(proto_partition.as_slice(), None)?;
-        for batch in stream_reader {
-            partition.push(batch?);
-        }
-        partitions.push(partition);
-    }
-    Ok(partitions)
 }
 
 fn serialize_data_files(

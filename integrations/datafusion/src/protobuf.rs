@@ -3,7 +3,7 @@
 pub struct IndexLakePhysicalPlanNode {
     #[prost(
         oneof = "index_lake_physical_plan_node::IndexLakePhysicalPlanType",
-        tags = "1, 2, 3"
+        tags = "1, 2"
     )]
     pub index_lake_physical_plan_type:
         ::core::option::Option<index_lake_physical_plan_node::IndexLakePhysicalPlanType>,
@@ -16,8 +16,6 @@ pub mod index_lake_physical_plan_node {
         Scan(super::IndexLakeScanExecNode),
         #[prost(message, tag = "2")]
         Insert(super::IndexLakeInsertExecNode),
-        #[prost(message, tag = "3")]
-        MemoryDatasource(super::MemoryDatasourceNode),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -47,22 +45,6 @@ pub struct IndexLakeInsertExecNode {
     pub table_name: ::prost::alloc::string::String,
     #[prost(enumeration = "::datafusion_proto::protobuf::InsertOp", tag = "3")]
     pub insert_op: i32,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct MemoryDatasourceNode {
-    #[prost(bytes = "vec", repeated, tag = "1")]
-    pub partitions: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
-    #[prost(message, optional, tag = "2")]
-    pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
-    #[prost(message, optional, tag = "3")]
-    pub projection: ::core::option::Option<Projection>,
-    #[prost(message, repeated, tag = "4")]
-    pub sort_information:
-        ::prost::alloc::vec::Vec<::datafusion_proto::protobuf::PhysicalSortExprNodeCollection>,
-    #[prost(bool, tag = "5")]
-    pub show_sizes: bool,
-    #[prost(uint32, optional, tag = "6")]
-    pub fetch: ::core::option::Option<u32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Projection {
