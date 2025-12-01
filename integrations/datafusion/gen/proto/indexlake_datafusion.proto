@@ -9,7 +9,6 @@ message IndexLakePhysicalPlanNode {
   oneof IndexLakePhysicalPlanType {
     IndexLakeScanExecNode scan = 1;
     IndexLakeInsertExecNode insert = 2;
-    MemoryDatasourceNode memory_datasource = 3;
   }
 }
 
@@ -28,15 +27,6 @@ message IndexLakeInsertExecNode {
   string namespace_name = 1;
   string table_name = 2;
   datafusion.InsertOp insert_op = 3;
-}
-
-message MemoryDatasourceNode {
-  repeated bytes partitions = 1;
-  datafusion_common.Schema schema = 2;
-  Projection projection = 3;
-  repeated datafusion.PhysicalSortExprNodeCollection sort_information = 4;  
-  bool show_sizes = 5;
-  optional uint32 fetch = 6;
 }
 
 message Projection {
