@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use bb8_postgres::tokio_postgres::NoTls;
@@ -13,6 +15,7 @@ pub struct PostgresCatalogBuilder {
     dbname: Option<String>,
     pool_max_size: u32,
     pool_min_idle: Option<u32>,
+    pool_idle_timeout: Option<Duration>,
 }
 
 impl PostgresCatalogBuilder {
@@ -30,6 +33,7 @@ impl PostgresCatalogBuilder {
             dbname: None,
             pool_max_size: 100,
             pool_min_idle: Some(5),
+            pool_idle_timeout: Some(Duration::from_secs(60)),
         }
     }
 
@@ -48,6 +52,11 @@ impl PostgresCatalogBuilder {
         self
     }
 
+    pub fn pool_idle_timeout(mut self, pool_idle_timeout: Option<Duration>) -> Self {
+        self.pool_idle_timeout = pool_idle_timeout;
+        self
+    }
+
     pub async fn build(self) -> ILResult<PostgresCatalog> {
         let mut config = bb8_postgres::tokio_postgres::config::Config::new();
         config
@@ -62,6 +71,7 @@ impl PostgresCatalogBuilder {
         let pool = Pool::builder()
             .max_size(self.pool_max_size)
             .min_idle(self.pool_min_idle)
+            .idle_timeout(self.pool_idle_timeout)
             .build(manager)
             .await
             .map_err(|e| ILError::catalog(format!("failed to build postgres pool: {e}")))?;
