@@ -45,6 +45,8 @@ pub struct IndexLakeInsertExecNode {
     pub table_name: ::prost::alloc::string::String,
     #[prost(enumeration = "::datafusion_proto::protobuf::InsertOp", tag = "3")]
     pub insert_op: i32,
+    #[prost(uint32, optional, tag = "4")]
+    pub insert_partitions: ::core::option::Option<u32>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Projection {

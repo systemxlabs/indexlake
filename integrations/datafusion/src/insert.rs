@@ -20,6 +20,7 @@ pub struct IndexLakeInsertExec {
     pub table: Arc<Table>,
     pub input: Arc<dyn ExecutionPlan>,
     pub insert_op: InsertOp,
+    pub insert_partitions: Option<usize>,
     cache: PlanProperties,
 }
 
@@ -28,6 +29,7 @@ impl IndexLakeInsertExec {
         table: Arc<Table>,
         input: Arc<dyn ExecutionPlan>,
         insert_op: InsertOp,
+        insert_partitions: Option<usize>,
     ) -> Result<Self, DataFusionError> {
         match insert_op {
             InsertOp::Append | InsertOp::Overwrite => {}
@@ -38,9 +40,16 @@ impl IndexLakeInsertExec {
             }
         }
 
+        let partition_count = match insert_partitions {
+            Some(partitions) => {
+                std::cmp::min(partitions, input.output_partitioning().partition_count())
+            }
+            None => input.output_partitioning().partition_count(),
+        };
+
         let cache = PlanProperties::new(
             EquivalenceProperties::new(make_count_schema()),
-            Partitioning::UnknownPartitioning(input.output_partitioning().partition_count()),
+            Partitioning::UnknownPartitioning(partition_count),
             input.pipeline_behavior(),
             input.boundedness(),
         );
@@ -49,6 +58,7 @@ impl IndexLakeInsertExec {
             table,
             input,
             insert_op,
+            insert_partitions,
             cache,
         })
     }
@@ -75,8 +85,12 @@ impl ExecutionPlan for IndexLakeInsertExec {
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let exec =
-            IndexLakeInsertExec::try_new(self.table.clone(), children[0].clone(), self.insert_op)?;
+        let exec = IndexLakeInsertExec::try_new(
+            self.table.clone(),
+            children[0].clone(),
+            self.insert_op,
+            self.insert_partitions,
+        )?;
         Ok(Arc::new(exec))
     }
 

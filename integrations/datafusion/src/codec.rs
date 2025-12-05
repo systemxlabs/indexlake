@@ -87,6 +87,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     Arc::new(table),
                     input,
                     insert_op,
+                    node.insert_partitions.map(|p| p as usize),
                 )?))
             }
         }
@@ -135,6 +136,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         namespace_name: exec.table.namespace_name.clone(),
                         table_name: exec.table.table_name.clone(),
                         insert_op,
+                        insert_partitions: exec.insert_partitions.map(|p| p as u32),
                     },
                 )),
             };

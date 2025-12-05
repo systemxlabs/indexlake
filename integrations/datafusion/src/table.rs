@@ -28,10 +28,11 @@ use crate::{
 #[derive(Debug)]
 pub struct IndexLakeTable {
     table: Arc<Table>,
-    partition_count: usize,
+    scan_partitions: usize,
     column_defaults: HashMap<String, Expr>,
     hide_row_id: bool,
-    concurrency: Option<usize>,
+    scan_concurrency: Option<usize>,
+    insert_partitions: Option<usize>,
 }
 
 impl IndexLakeTable {
@@ -48,15 +49,16 @@ impl IndexLakeTable {
         }
         Ok(Self {
             table,
-            partition_count: num_cpus::get(),
+            scan_partitions: 16,
             column_defaults,
             hide_row_id: false,
-            concurrency: None,
+            scan_concurrency: None,
+            insert_partitions: None,
         })
     }
 
-    pub fn with_partition_count(mut self, partition_count: usize) -> Self {
-        self.partition_count = partition_count;
+    pub fn with_scan_partitions(mut self, scan_partitions: usize) -> Self {
+        self.scan_partitions = scan_partitions;
         self
     }
 
@@ -65,8 +67,13 @@ impl IndexLakeTable {
         self
     }
 
-    pub fn with_concurrency(mut self, concurrency: usize) -> Self {
-        self.concurrency = Some(concurrency);
+    pub fn with_scan_concurrency(mut self, scan_concurrency: Option<usize>) -> Self {
+        self.scan_concurrency = scan_concurrency;
+        self
+    }
+
+    pub fn with_insert_partitions(mut self, insert_partitions: Option<usize>) -> Self {
+        self.insert_partitions = insert_partitions;
         self
     }
 }
@@ -126,9 +133,9 @@ impl TableProvider for IndexLakeTable {
 
         let exec = IndexLakeScanExec::try_new(
             self.table.clone(),
-            self.partition_count,
+            self.scan_partitions,
             data_files,
-            self.concurrency,
+            self.scan_concurrency,
             il_projection,
             filters.to_vec(),
             limit,
@@ -192,7 +199,12 @@ impl TableProvider for IndexLakeTable {
         input: Arc<dyn ExecutionPlan>,
         insert_op: InsertOp,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let insert_exec = IndexLakeInsertExec::try_new(self.table.clone(), input, insert_op)?;
+        let insert_exec = IndexLakeInsertExec::try_new(
+            self.table.clone(),
+            input,
+            insert_op,
+            self.insert_partitions,
+        )?;
 
         let count_schema = make_count_schema();
         let agg_expr =
