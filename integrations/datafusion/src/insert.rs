@@ -125,10 +125,16 @@ impl ExecutionPlan for IndexLakeInsertExec {
                 count += batch.num_rows() as i64;
 
                 table
-                    .insert(TableInsertion::new(vec![batch]))
+                    .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
                     .await
                     .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             }
+
+            // trigger dump
+            table
+                .insert(TableInsertion::new(vec![]).with_try_dump(true))
+                .await
+                .map_err(|e| DataFusionError::Execution(e.to_string()))?;
 
             make_result_batch(count)
         })

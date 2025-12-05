@@ -138,7 +138,9 @@ impl Table {
             process_insert_into_inline_rows(&mut tx_helper, self, &rewritten_batches).await?;
             tx_helper.commit().await?;
 
-            try_run_dump_task(self).await?;
+            if insert.try_dump {
+                try_run_dump_task(self).await?;
+            }
         }
 
         Ok(())
