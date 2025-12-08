@@ -10,7 +10,7 @@ use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_r
 use crate::expr::Expr;
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{
-    Table, TableSchemaRef, process_insert_into_inline_rows, rebuild_inline_indexes,
+    Table, TableSchemaRef, process_insert_into_inline_rows_with_tx, rebuild_inline_indexes,
 };
 use crate::utils::{extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids};
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -129,7 +129,7 @@ pub(crate) async fn update_inline_rows(
         tx_helper
             .delete_inline_rows(&table.table_id, &[], Some(&updated_row_ids))
             .await?;
-        process_insert_into_inline_rows(tx_helper, table, &updated_batches).await?;
+        process_insert_into_inline_rows_with_tx(tx_helper, table, &updated_batches).await?;
         Ok(updated_row_ids.len())
     }
 }
@@ -150,7 +150,7 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
         let row_ids = extract_row_ids_from_record_batch(&batch)?;
         updated_row_ids.extend(row_ids);
         let updated_batch = update_record_batch(&batch, set_map)?;
-        process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
+        process_insert_into_inline_rows_with_tx(tx_helper, table, &[updated_batch]).await?;
     }
     // TODO we count emit this after parquet reader supports row position
     let row_id_array = read_row_id_array_from_data_file(
@@ -191,7 +191,7 @@ pub(crate) async fn update_data_file_rows_by_condition(
         let row_ids = extract_row_ids_from_record_batch(&batch)?;
         updated_row_ids.extend(row_ids);
         let updated_batch = update_record_batch(&batch, set_map)?;
-        process_insert_into_inline_rows(tx_helper, table, &[updated_batch]).await?;
+        process_insert_into_inline_rows_with_tx(tx_helper, table, &[updated_batch]).await?;
     }
 
     let row_id_array = read_row_id_array_from_data_file(

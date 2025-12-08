@@ -134,9 +134,7 @@ impl Table {
             process_bypass_insert(&mut tx_helper, self, &rewritten_batches).await?;
             tx_helper.commit().await?;
         } else {
-            let mut tx_helper = self.transaction_helper().await?;
-            process_insert_into_inline_rows(&mut tx_helper, self, &rewritten_batches).await?;
-            tx_helper.commit().await?;
+            process_insert_into_inline_rows_without_tx(self, &rewritten_batches).await?;
 
             if insert.try_dump {
                 try_run_dump_task(self).await?;

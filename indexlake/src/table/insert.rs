@@ -46,7 +46,42 @@ impl TableInsertion {
     }
 }
 
-pub(crate) async fn process_insert_into_inline_rows(
+pub(crate) async fn process_insert_into_inline_rows_without_tx(
+    table: &Table,
+    batches: &[RecordBatch],
+) -> ILResult<()> {
+    if batches.is_empty() {
+        return Ok(());
+    }
+
+    let index_builders = table.index_manager.new_index_builders()?;
+    let inline_index_records = build_inline_indexes(batches, index_builders)?;
+
+    // insert inline rows
+    let sql_values = build_sql_values(batches, table.catalog.as_ref())?;
+    let inline_field_names = batches[0]
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| field.name().clone())
+        .collect::<Vec<_>>();
+
+    let mut tx_helper = table.transaction_helper().await?;
+    tx_helper
+        .insert_inline_rows(&table.table_id, &inline_field_names, sql_values)
+        .await?;
+
+    // insert inline index records
+    tx_helper
+        .insert_inline_indexes(&inline_index_records)
+        .await?;
+
+    tx_helper.commit().await?;
+
+    Ok(())
+}
+
+pub(crate) async fn process_insert_into_inline_rows_with_tx(
     tx_helper: &mut TransactionHelper,
     table: &Table,
     batches: &[RecordBatch],
@@ -55,41 +90,20 @@ pub(crate) async fn process_insert_into_inline_rows(
         return Ok(());
     }
 
-    let mut index_builders = table.index_manager.new_index_builders()?;
+    let index_builders = table.index_manager.new_index_builders()?;
+    let inline_index_records = build_inline_indexes(batches, index_builders)?;
 
     // insert inline rows
-    for batch in batches {
-        let sql_values = record_batch_to_sql_values(batch, tx_helper.catalog.as_ref())?;
-
-        let inline_field_names = batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| field.name().clone())
-            .collect::<Vec<_>>();
-
-        tx_helper
-            .insert_inline_rows(&table.table_id, &inline_field_names, sql_values)
-            .await?;
-    }
-
-    // append index builders
-    for batch in batches {
-        for builder in index_builders.iter_mut() {
-            builder.append(batch)?;
-        }
-    }
-
-    // build inline index records
-    let mut inline_index_records = Vec::new();
-    for builder in index_builders.iter_mut() {
-        let mut index_data = Vec::new();
-        builder.write_bytes(&mut index_data)?;
-        inline_index_records.push(InlineIndexRecord {
-            index_id: builder.index_def().index_id,
-            index_data,
-        });
-    }
+    let sql_values = build_sql_values(batches, table.catalog.as_ref())?;
+    let inline_field_names = batches[0]
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| field.name().clone())
+        .collect::<Vec<_>>();
+    tx_helper
+        .insert_inline_rows(&table.table_id, &inline_field_names, sql_values)
+        .await?;
 
     // insert inline index records
     tx_helper
@@ -171,6 +185,41 @@ pub(crate) async fn process_bypass_insert(
     tx_helper.insert_index_files(&index_file_records).await?;
 
     Ok(())
+}
+
+pub(crate) fn build_sql_values(
+    batches: &[RecordBatch],
+    catalog: &dyn Catalog,
+) -> ILResult<Vec<Vec<String>>> {
+    let num_rows = batches.iter().map(|batch| batch.num_rows()).sum();
+    let mut all_sql_values = Vec::with_capacity(num_rows);
+    for batch in batches {
+        let sql_values = record_batch_to_sql_values(batch, catalog)?;
+        all_sql_values.extend(sql_values);
+    }
+    Ok(all_sql_values)
+}
+
+pub(crate) fn build_inline_indexes(
+    batches: &[RecordBatch],
+    mut index_builders: Vec<Box<dyn IndexBuilder>>,
+) -> ILResult<Vec<InlineIndexRecord>> {
+    for batch in batches {
+        for builder in index_builders.iter_mut() {
+            builder.append(batch)?;
+        }
+    }
+
+    let mut inline_index_records = Vec::new();
+    for builder in index_builders.iter_mut() {
+        let mut index_data = Vec::new();
+        builder.write_bytes(&mut index_data)?;
+        inline_index_records.push(InlineIndexRecord {
+            index_id: builder.index_def().index_id,
+            index_data,
+        });
+    }
+    Ok(inline_index_records)
 }
 
 async fn write_parquet_file(
