@@ -46,10 +46,6 @@ impl RStarIndexBuilder {
 
 #[async_trait::async_trait]
 impl IndexBuilder for RStarIndexBuilder {
-    fn mergeable(&self) -> bool {
-        true
-    }
-
     fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }

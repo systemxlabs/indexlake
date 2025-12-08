@@ -81,10 +81,6 @@ impl std::fmt::Debug for HnswIndexBuilder {
 
 #[async_trait::async_trait]
 impl IndexBuilder for HnswIndexBuilder {
-    fn mergeable(&self) -> bool {
-        false
-    }
-
     fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }

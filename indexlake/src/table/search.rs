@@ -143,12 +143,6 @@ async fn search_inline_rows(
     let inline_index_records = catalog_helper
         .get_inline_indexes(&[index_def.index_id])
         .await?;
-    if inline_index_records.len() > 1 && !index_builder.mergeable() {
-        return Err(ILError::internal(format!(
-            "Index {} is not mergeable but has multi inline index records",
-            index_def.name
-        )));
-    }
 
     for record in inline_index_records {
         index_builder.read_bytes(&record.index_data)?;

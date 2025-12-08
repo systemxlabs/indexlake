@@ -84,34 +84,4 @@ impl IndexManager {
             })
             .collect()
     }
-
-    pub(crate) fn new_mergeable_index_builders(&self) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
-        let mut builders = Vec::new();
-        for index_def in &self.indexes {
-            let index_kind = self
-                .kinds
-                .get(&index_def.kind)
-                .expect("Index kind not found");
-            let builder = index_kind.builder(index_def)?;
-            if builder.mergeable() {
-                builders.push(builder);
-            }
-        }
-        Ok(builders)
-    }
-
-    pub(crate) fn new_non_mergeable_index_builders(&self) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
-        let mut builders = Vec::new();
-        for index_def in &self.indexes {
-            let index_kind = self
-                .kinds
-                .get(&index_def.kind)
-                .expect("Index kind not found");
-            let builder = index_kind.builder(index_def)?;
-            if !builder.mergeable() {
-                builders.push(builder);
-            }
-        }
-        Ok(builders)
-    }
 }

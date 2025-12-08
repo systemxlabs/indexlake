@@ -447,15 +447,10 @@ async fn index_scan_inline_rows(
     }
 
     // append index builders
-    for (index_name, builder) in index_builder_map.iter_mut() {
+    for (_index_name, builder) in index_builder_map.iter_mut() {
         let index_def = builder.index_def();
 
         if let Some(records) = inline_index_records_map.get(&index_def.index_id) {
-            if records.len() > 1 && !builder.mergeable() {
-                return Err(ILError::internal(format!(
-                    "Index {index_name} is not mergeable but has multi inline index records"
-                )));
-            }
             for record in records {
                 builder.read_bytes(&record.index_data)?;
             }

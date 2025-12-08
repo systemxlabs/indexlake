@@ -38,8 +38,6 @@ pub trait IndexKind: Debug + Send + Sync {
 
 #[async_trait::async_trait]
 pub trait IndexBuilder: Debug + Send + Sync {
-    fn mergeable(&self) -> bool;
-
     fn index_def(&self) -> &IndexDefinitionRef;
 
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()>;

@@ -46,10 +46,6 @@ impl BTreeIndexBuilder {
 
 #[async_trait::async_trait]
 impl IndexBuilder for BTreeIndexBuilder {
-    fn mergeable(&self) -> bool {
-        true
-    }
-
     fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }

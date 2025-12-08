@@ -1,19 +1,16 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
 use derive_with::With;
-use futures::StreamExt;
 use uuid::Uuid;
 
 use crate::catalog::{
-    Catalog, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity,
-    TransactionHelper, rows_to_record_batch,
+    Catalog, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity, TransactionHelper,
 };
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, build_parquet_writer};
-use crate::table::{Table, TableSchemaRef};
+use crate::table::Table;
 use crate::utils::{
     extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, rewrite_batch_schema,
     serialize_array,
@@ -58,9 +55,7 @@ pub(crate) async fn process_insert_into_inline_rows(
         return Ok(());
     }
 
-    let mut mergeable_index_builders = table.index_manager.new_mergeable_index_builders()?;
-    let mut non_mergeable_index_builders =
-        table.index_manager.new_non_mergeable_index_builders()?;
+    let mut index_builders = table.index_manager.new_index_builders()?;
 
     // insert inline rows
     for batch in batches {
@@ -80,22 +75,14 @@ pub(crate) async fn process_insert_into_inline_rows(
 
     // append index builders
     for batch in batches {
-        for builder in mergeable_index_builders.iter_mut() {
+        for builder in index_builders.iter_mut() {
             builder.append(batch)?;
         }
     }
 
-    append_non_mergeable_index_builders(
-        tx_helper,
-        &table.table_id,
-        &table.table_schema,
-        &mut non_mergeable_index_builders,
-    )
-    .await?;
-
     // build inline index records
     let mut inline_index_records = Vec::new();
-    for builder in mergeable_index_builders.iter_mut() {
+    for builder in index_builders.iter_mut() {
         let mut index_data = Vec::new();
         builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
@@ -103,24 +90,6 @@ pub(crate) async fn process_insert_into_inline_rows(
             index_data,
         });
     }
-    for builder in non_mergeable_index_builders.iter_mut() {
-        let mut index_data = Vec::new();
-        builder.write_bytes(&mut index_data)?;
-        inline_index_records.push(InlineIndexRecord {
-            index_id: builder.index_def().index_id,
-            index_data,
-        });
-    }
-
-    // clean non-mergeable inline index records
-    tx_helper
-        .delete_inline_indexes(
-            &non_mergeable_index_builders
-                .iter()
-                .map(|builder| builder.index_def().index_id)
-                .collect::<Vec<_>>(),
-        )
-        .await?;
 
     // insert inline index records
     tx_helper
@@ -465,30 +434,4 @@ pub(crate) fn record_batch_to_sql_values(
         column_values_list.push(column_values);
     }
     Ok(column_values_list)
-}
-
-pub(crate) async fn append_non_mergeable_index_builders(
-    tx_helper: &mut TransactionHelper,
-    table_id: &Uuid,
-    table_schema: &TableSchemaRef,
-    index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-) -> ILResult<()> {
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
-
-    let row_stream = tx_helper
-        .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
-        .await?;
-    let mut inline_stream = row_stream.chunks(100).map(move |rows| {
-        let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
-        Ok::<_, ILError>(batch)
-    });
-
-    while let Some(batch) = inline_stream.next().await {
-        let batch = batch?;
-        for builder in index_builders.iter_mut() {
-            builder.append(&batch)?;
-        }
-    }
-    Ok(())
 }

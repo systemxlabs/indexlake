@@ -61,10 +61,6 @@ impl Bm25IndexBuilder {
 
 #[async_trait::async_trait]
 impl IndexBuilder for Bm25IndexBuilder {
-    fn mergeable(&self) -> bool {
-        true
-    }
-
     fn index_def(&self) -> &IndexDefinitionRef {
         &self.index_def
     }
