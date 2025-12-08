@@ -542,6 +542,7 @@ pub(crate) async fn insert_task(
         max_lifetime: max_lifetime.as_millis() as i64,
     };
     tx_helper.insert_task(task).await?;
+    tx_helper.commit().await?;
     Ok(())
 }
 
