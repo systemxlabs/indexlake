@@ -4,6 +4,7 @@ pub mod utils;
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use indexlake::catalog::{Catalog, CatalogDataType, CatalogSchema, Column};
 use indexlake::storage::Storage;
@@ -71,7 +72,8 @@ pub async fn catalog_postgres() -> Arc<dyn Catalog> {
     let _ = POSTGRES_DB.get_or_init(setup_postgres_db);
     let builder = PostgresCatalogBuilder::new("localhost", 5432, "postgres", "password")
         .dbname("postgres")
-        .pool_max_size(50);
+        .pool_max_size(100)
+        .pool_idle_timeout(Some(Duration::from_secs(10)));
     let catalog = Arc::new(builder.build().await.unwrap());
 
     let schema = Arc::new(CatalogSchema::new(vec![Column::new(

@@ -170,6 +170,32 @@ impl FieldRecord {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct TaskRecord {
+    pub(crate) task_id: String,
+    pub(crate) start_at: i64,
+    pub(crate) max_lifetime: i64,
+}
+
+impl TaskRecord {
+    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
+        format!(
+            "({}, {}, {})",
+            catalog.sql_string_literal(&self.task_id),
+            self.start_at,
+            self.max_lifetime,
+        )
+    }
+
+    pub(crate) fn catalog_schema() -> CatalogSchema {
+        CatalogSchema::new(vec![
+            Column::new("task_id", CatalogDataType::Utf8, false),
+            Column::new("start_at", CatalogDataType::Int64, false),
+            Column::new("max_lifetime", CatalogDataType::Int64, false),
+        ])
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataFileRecord {
     pub data_file_id: Uuid,

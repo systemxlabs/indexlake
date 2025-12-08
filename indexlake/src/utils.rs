@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::iter::repeat_n;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use arrow::array::{
     Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions, StringArray,
@@ -302,4 +303,13 @@ pub(crate) fn complete_batch_missing_fields(
     }
     let new_batch = RecordBatch::try_new(target_schema, new_columns)?;
     Ok(new_batch)
+}
+
+pub fn timestamp_ms_from_now(duration: Duration) -> i64 {
+    let start_time = SystemTime::now();
+    let end_time = start_time + duration;
+    end_time
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis() as i64
 }

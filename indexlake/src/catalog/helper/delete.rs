@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 use uuid::Uuid;
 
 use crate::ILResult;
 use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper, inline_row_table_name};
 use crate::expr::Expr;
+use crate::utils::timestamp_ms_from_now;
 
 impl TransactionHelper {
     pub(crate) async fn delete_table(&mut self, table_id: &Uuid) -> ILResult<usize> {
@@ -78,6 +81,15 @@ impl TransactionHelper {
             .execute(&format!(
                 "DELETE FROM indexlake_task WHERE task_id = {}",
                 self.catalog.sql_string_literal(task_id)
+            ))
+            .await
+    }
+
+    pub(crate) async fn delete_expired_tasks(&mut self) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "DELETE FROM indexlake_task WHERE start_at + max_lifetime < {}",
+                timestamp_ms_from_now(Duration::ZERO),
             ))
             .await
     }

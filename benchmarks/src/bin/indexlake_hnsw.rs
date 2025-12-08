@@ -67,9 +67,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut progress = 0;
             while progress < task_rows {
                 let batch = new_hnsw_record_batch(insert_batch_size);
-                table.insert(TableInsertion::new(vec![batch])).await?;
+                table
+                    .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
+                    .await?;
                 progress += insert_batch_size;
             }
+            table
+                .insert(TableInsertion::new(vec![]).with_try_dump(true))
+                .await?;
             Ok::<_, ILError>(())
         });
         handles.push(handle);
@@ -89,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(100)).await;
 
     let start_time = Instant::now();
     let limit = 10;

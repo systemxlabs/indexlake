@@ -2,7 +2,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
-    TransactionHelper, inline_row_table_name,
+    TaskRecord, TransactionHelper, inline_row_table_name,
 };
 use crate::{ILError, ILResult};
 
@@ -54,6 +54,18 @@ impl TransactionHelper {
         Ok(())
     }
 
+    pub(crate) async fn insert_task(&mut self, task: TaskRecord) -> ILResult<usize> {
+        self.transaction
+            .execute(&format!(
+                "INSERT INTO indexlake_task ({}) VALUES {}",
+                TaskRecord::catalog_schema()
+                    .select_items(self.catalog.as_ref())
+                    .join(", "),
+                task.to_sql(self.catalog.as_ref())
+            ))
+            .await
+    }
+
     pub(crate) async fn insert_inline_rows(
         &mut self,
         table_id: &Uuid,
@@ -100,15 +112,6 @@ impl TransactionHelper {
             ))
             .await?;
         Ok(())
-    }
-
-    pub(crate) async fn insert_task(&mut self, task_id: &str) -> ILResult<usize> {
-        self.transaction
-            .execute(&format!(
-                "INSERT INTO indexlake_task VALUES ({})",
-                self.catalog.sql_string_literal(task_id)
-            ))
-            .await
     }
 
     pub(crate) async fn insert_data_files(

@@ -20,12 +20,15 @@ pub use update::*;
 
 use crate::catalog::{
     Catalog, CatalogHelper, DataFileRecord, FieldRecord, INTERNAL_ROW_ID_FIELD_NAME,
-    INTERNAL_ROW_ID_FIELD_REF, IndexFileRecord, Scalar, TransactionHelper, inline_row_table_name,
+    INTERNAL_ROW_ID_FIELD_REF, IndexFileRecord, Scalar, TaskRecord, TransactionHelper,
+    inline_row_table_name,
 };
 use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::{DataFileFormat, Storage};
-use crate::utils::{build_row_id_array, correct_batch_schema, sort_record_batches};
+use crate::utils::{
+    build_row_id_array, correct_batch_schema, sort_record_batches, timestamp_ms_from_now,
+};
 use crate::{ILError, ILResult, RecordBatchStream};
 use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::{DataType, SchemaRef};
@@ -35,6 +38,7 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub type TableSchemaRef = Arc<TableSchema>;
@@ -524,4 +528,28 @@ pub fn check_insert_batch_field(batch_field: &Field, table_field: &Field) -> ILR
     }
 
     Ok(())
+}
+
+pub(crate) async fn insert_task(
+    catalog: &Arc<dyn Catalog>,
+    task_id: String,
+    max_lifetime: Duration,
+) -> ILResult<()> {
+    let mut tx_helper = TransactionHelper::new(catalog).await?;
+    let task = TaskRecord {
+        task_id,
+        start_at: timestamp_ms_from_now(Duration::ZERO),
+        max_lifetime: max_lifetime.as_millis() as i64,
+    };
+    tx_helper.insert_task(task).await?;
+    Ok(())
+}
+
+pub(crate) async fn task_exists(catalog: &Arc<dyn Catalog>, task_id: &str) -> ILResult<bool> {
+    let mut tx_helper = TransactionHelper::new(catalog).await?;
+    tx_helper.delete_expired_tasks().await?;
+    let exists = tx_helper.task_exists(task_id).await?;
+    tx_helper.commit().await?;
+
+    Ok(exists)
 }

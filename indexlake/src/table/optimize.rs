@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    time::Duration,
+};
 
 use arrow::array::RecordBatch;
 use futures::StreamExt;
@@ -10,7 +13,7 @@ use crate::{
     catalog::{DataFileRecord, IndexFileRecord, RowValidity, TransactionHelper},
     index::IndexBuilder,
     storage::{EntryMode, build_parquet_writer, read_data_file_by_record},
-    table::Table,
+    table::{Table, insert_task, task_exists},
     utils::extract_row_ids_from_record_batch,
 };
 
@@ -36,8 +39,7 @@ pub(crate) async fn process_table_optimization(
 
 async fn cleanup_orphan_files(table: &Table, last_modified_before: i64) -> ILResult<()> {
     let task_id = format!("cleanup-orphan-files-{}", table.table_id);
-    let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
-    if tx_helper.insert_task(&task_id).await.is_err() {
+    if task_exists(&table.catalog, &task_id).await? {
         debug!(
             "[indexlake] Table {} already has a cleanup orphan files task",
             table.table_id
@@ -45,6 +47,22 @@ async fn cleanup_orphan_files(table: &Table, last_modified_before: i64) -> ILRes
         return Ok(());
     }
 
+    if insert_task(
+        &table.catalog,
+        task_id.clone(),
+        Duration::from_secs(24 * 60 * 60),
+    )
+    .await
+    .is_err()
+    {
+        debug!(
+            "[indexlake] Table {} already has a cleanup orphan files task",
+            table.table_id
+        );
+        return Ok(());
+    }
+
+    let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
     let data_files = tx_helper.get_data_files(&table.table_id).await?;
     let index_files = tx_helper.get_table_index_files(&table.table_id).await?;
     let existing_files = data_files
@@ -77,8 +95,7 @@ async fn cleanup_orphan_files(table: &Table, last_modified_before: i64) -> ILRes
 
 async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult<()> {
     let task_id = format!("merge-data-files-{}", table.table_id);
-    let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
-    if tx_helper.insert_task(&task_id).await.is_err() {
+    if task_exists(&table.catalog, &task_id).await? {
         debug!(
             "[indexlake] Table {} already has a merge data files task",
             table.table_id
@@ -86,6 +103,22 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
         return Ok(());
     }
 
+    if insert_task(
+        &table.catalog,
+        task_id.clone(),
+        Duration::from_secs(24 * 60 * 60),
+    )
+    .await
+    .is_err()
+    {
+        debug!(
+            "[indexlake] Table {} already has a merge data files task",
+            table.table_id
+        );
+        return Ok(());
+    }
+
+    let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
     let matched_data_files = data_file_records
         .into_iter()

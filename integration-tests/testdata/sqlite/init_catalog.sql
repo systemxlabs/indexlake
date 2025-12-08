@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS indexlake_field (
 );
 
 CREATE TABLE IF NOT EXISTS indexlake_task (
-    task_id VARCHAR PRIMARY KEY
+    task_id VARCHAR PRIMARY KEY,
+    start_at BIGINT NOT NULL,
+    max_lifetime BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS indexlake_data_file (

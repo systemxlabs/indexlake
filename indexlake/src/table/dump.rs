@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use log::{debug, error};
@@ -13,7 +13,7 @@ use crate::catalog::{
 use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
-use crate::table::{Table, TableConfig, TableSchemaRef};
+use crate::table::{Table, TableConfig, TableSchemaRef, insert_task, task_exists};
 use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
@@ -32,7 +32,7 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
                 return Ok(false);
             }
             let task_id = format!("dump-table-{}", table_id);
-            if catalog_helper.task_exists(&task_id).await? {
+            if task_exists(&catalog, &task_id).await? {
                 return Ok(false);
             }
 
@@ -84,8 +84,14 @@ impl DumpTask {
     async fn run(&self) -> ILResult<bool> {
         let now = Instant::now();
 
-        let mut tx_helper = TransactionHelper::new(&self.catalog).await?;
-        if tx_helper.insert_task(&self.task_id).await.is_err() {
+        if insert_task(
+            &self.catalog,
+            self.task_id.clone(),
+            Duration::from_secs(12 * 60 * 60),
+        )
+        .await
+        .is_err()
+        {
             debug!(
                 "[indexlake] Table {} already has a dump task",
                 self.table_id
@@ -93,6 +99,7 @@ impl DumpTask {
             return Ok(false);
         }
 
+        let mut tx_helper = TransactionHelper::new(&self.catalog).await?;
         let inline_row_count = tx_helper.count_inline_rows(&self.table_id).await?;
         if inline_row_count < self.table_config.inline_row_count_limit as i64 {
             return Ok(false);

@@ -79,6 +79,24 @@ impl TransactionHelper {
         }
     }
 
+    pub(crate) async fn task_exists(&mut self, task_id: &str) -> ILResult<bool> {
+        let schema = Arc::new(CatalogSchema::new(vec![Column::new(
+            "task_id",
+            CatalogDataType::Utf8,
+            false,
+        )]));
+        let rows = self
+            .query_rows(
+                &format!(
+                    "SELECT task_id FROM indexlake_task WHERE task_id = {}",
+                    self.catalog.sql_string_literal(task_id)
+                ),
+                schema,
+            )
+            .await?;
+        Ok(!rows.is_empty())
+    }
+
     pub(crate) async fn scan_inline_rows(
         &mut self,
         table_id: &Uuid,
@@ -543,24 +561,6 @@ impl CatalogHelper {
             }
             None => Ok(0),
         }
-    }
-
-    pub(crate) async fn task_exists(&self, task_id: &str) -> ILResult<bool> {
-        let schema = Arc::new(CatalogSchema::new(vec![Column::new(
-            "task_id",
-            CatalogDataType::Utf8,
-            false,
-        )]));
-        let rows = self
-            .query_rows(
-                &format!(
-                    "SELECT task_id FROM indexlake_task WHERE task_id = {}",
-                    self.catalog.sql_string_literal(task_id)
-                ),
-                schema,
-            )
-            .await?;
-        Ok(!rows.is_empty())
     }
 
     pub(crate) async fn get_inline_indexes(
