@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
-        inline_row_count_limit: insert_batch_size,
+        inline_row_count_limit: 10000,
         parquet_row_group_size: 100,
         preferred_data_file_format: DataFileFormat::ParquetV2,
     };
@@ -101,16 +101,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         projection: None,
     };
     let mut stream = table.search(table_search).await?;
-    let mut batches = vec![];
+    let mut search_count = 0;
     while let Some(batch) = stream.next().await {
         let batch = batch?;
-        batches.push(batch);
+        search_count += batch.num_rows();
     }
+    assert_eq!(search_count, limit);
 
     let search_cost_time = start_time.elapsed();
     println!(
         "IndexLake Hnsw: searched {} rows in {}ms",
-        limit,
+        search_count,
         search_cost_time.as_millis()
     );
 
