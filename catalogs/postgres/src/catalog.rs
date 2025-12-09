@@ -11,6 +11,8 @@ use indexlake::{ILError, ILResult};
 use log::{error, trace};
 use uuid::Uuid;
 
+use crate::SqlDisplay;
+
 #[derive(Debug, Clone)]
 pub struct PostgresCatalog {
     pool: Pool<PostgresConnectionManager<NoTls>>,
@@ -34,7 +36,9 @@ impl Catalog for PostgresCatalog {
         let pg_row_stream = conn
             .query_raw(sql, Vec::<String>::new())
             .await
-            .map_err(|e| ILError::catalog(format!("failed to query postgres: {sql} {e}")))?;
+            .map_err(|e| {
+                ILError::catalog(format!("failed to query postgres: {} {e}", SqlDisplay(sql)))
+            })?;
 
         let stream = pg_row_stream.map(move |row| {
             let pg_row =
@@ -254,7 +258,9 @@ impl Transaction for PostgresTransaction {
             .conn
             .query_raw(sql, Vec::<String>::new())
             .await
-            .map_err(|e| ILError::catalog(format!("failed to query postgres: {sql} {e}")))?;
+            .map_err(|e| {
+                ILError::catalog(format!("failed to query postgres: {} {e}", SqlDisplay(sql)))
+            })?;
 
         let stream = pg_row_stream.map(move |row| {
             let pg_row =
@@ -271,17 +277,24 @@ impl Transaction for PostgresTransaction {
             .execute(sql, &[])
             .await
             .map(|r| r as usize)
-            .map_err(|e| ILError::catalog(format!("failed to execute postgres: {sql} {e}")))
+            .map_err(|e| {
+                ILError::catalog(format!(
+                    "failed to execute postgres: {} {e}",
+                    SqlDisplay(sql)
+                ))
+            })
     }
 
     async fn execute_batch(&mut self, sqls: &[String]) -> ILResult<()> {
         trace!("postgres txn execute batch: {:?}", sqls);
         self.check_done()?;
         let sql = sqls.join(";");
-        self.conn
-            .batch_execute(&sql)
-            .await
-            .map_err(|e| ILError::catalog(format!("failed to execute batch postgres: {sql} {e}")))
+        self.conn.batch_execute(&sql).await.map_err(|e| {
+            ILError::catalog(format!(
+                "failed to execute batch postgres: {} {e}",
+                SqlDisplay(&sql)
+            ))
+        })
     }
 
     async fn commit(&mut self) -> ILResult<()> {
