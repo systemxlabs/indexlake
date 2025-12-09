@@ -536,6 +536,7 @@ pub(crate) async fn insert_task(
     max_lifetime: Duration,
 ) -> ILResult<()> {
     let mut tx_helper = TransactionHelper::new(catalog).await?;
+    tx_helper.delete_expired_tasks().await?;
     let task = TaskRecord {
         task_id,
         start_at: timestamp_ms_from_now(Duration::ZERO),
@@ -544,13 +545,4 @@ pub(crate) async fn insert_task(
     tx_helper.insert_task(task).await?;
     tx_helper.commit().await?;
     Ok(())
-}
-
-pub(crate) async fn task_exists(catalog: &Arc<dyn Catalog>, task_id: &str) -> ILResult<bool> {
-    let mut tx_helper = TransactionHelper::new(catalog).await?;
-    tx_helper.delete_expired_tasks().await?;
-    let exists = tx_helper.task_exists(task_id).await?;
-    tx_helper.commit().await?;
-
-    Ok(exists)
 }

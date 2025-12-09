@@ -13,7 +13,7 @@ use crate::catalog::{
 use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
-use crate::table::{Table, TableConfig, TableSchemaRef, insert_task, task_exists};
+use crate::table::{Table, TableConfig, TableSchemaRef, insert_task};
 use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
@@ -32,7 +32,7 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
                 return Ok(false);
             }
             let task_id = format!("dump-table-{}", table_id);
-            if task_exists(&catalog, &task_id).await? {
+            if catalog_helper.task_exists(&task_id).await? {
                 return Ok(false);
             }
 
