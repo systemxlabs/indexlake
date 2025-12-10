@@ -37,6 +37,10 @@ impl IndexManager {
         self.kinds.get(kind)
     }
 
+    pub(crate) fn index_ids(&self) -> Vec<Uuid> {
+        self.indexes.iter().map(|index| index.index_id).collect()
+    }
+
     pub(crate) fn any_index_contains_field(&self, field_id: &Uuid) -> bool {
         let field_id_str = hex::encode(field_id);
         self.indexes
