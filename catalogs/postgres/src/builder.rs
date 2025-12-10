@@ -32,7 +32,7 @@ impl PostgresCatalogBuilder {
             password: password.into(),
             dbname: None,
             pool_max_size: 100,
-            pool_min_idle: Some(5),
+            pool_min_idle: None,
             pool_idle_timeout: Some(Duration::from_secs(60)),
         }
     }
