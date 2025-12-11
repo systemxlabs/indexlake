@@ -7,13 +7,9 @@ use datafusion::common::stats::Precision;
 use datafusion::common::{DFSchema, Statistics};
 use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
-use datafusion::functions_aggregate::sum::sum_udaf;
 use datafusion::logical_expr::TableProviderFilterPushDown;
 use datafusion::logical_expr::dml::InsertOp;
-use datafusion::physical_expr::aggregate::AggregateExprBuilder;
 use datafusion::physical_plan::ExecutionPlan;
-use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
-use datafusion::physical_plan::expressions::col;
 use datafusion::prelude::Expr;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
@@ -22,7 +18,7 @@ use log::warn;
 
 use crate::{
     IndexLakeInsertExec, IndexLakeScanExec, datafusion_expr_to_indexlake_expr,
-    indexlake_scalar_to_datafusion_scalar, make_count_schema,
+    indexlake_scalar_to_datafusion_scalar,
 };
 
 #[derive(Debug)]
@@ -32,7 +28,7 @@ pub struct IndexLakeTable {
     column_defaults: HashMap<String, Expr>,
     hide_row_id: bool,
     scan_concurrency: Option<usize>,
-    insert_partitions: Option<usize>,
+    stream_insert_threshold: usize,
 }
 
 impl IndexLakeTable {
@@ -53,7 +49,7 @@ impl IndexLakeTable {
             column_defaults,
             hide_row_id: false,
             scan_concurrency: None,
-            insert_partitions: None,
+            stream_insert_threshold: 1000,
         })
     }
 
@@ -72,8 +68,8 @@ impl IndexLakeTable {
         self
     }
 
-    pub fn with_insert_partitions(mut self, insert_partitions: Option<usize>) -> Self {
-        self.insert_partitions = insert_partitions;
+    pub fn with_stream_insert_threshold(mut self, stream_insert_threshold: usize) -> Self {
+        self.stream_insert_threshold = stream_insert_threshold;
         self
     }
 }
@@ -203,24 +199,9 @@ impl TableProvider for IndexLakeTable {
             self.table.clone(),
             input,
             insert_op,
-            self.insert_partitions,
+            self.stream_insert_threshold,
         )?;
 
-        let count_schema = make_count_schema();
-        let agg_expr =
-            AggregateExprBuilder::new(sum_udaf(), vec![col("count", count_schema.as_ref())?])
-                .schema(count_schema.clone())
-                .alias("count")
-                .build()?;
-        let group_by = PhysicalGroupBy::new_single(vec![]);
-        let agg_exec = AggregateExec::try_new(
-            AggregateMode::Single,
-            group_by,
-            vec![Arc::new(agg_expr)],
-            vec![None],
-            Arc::new(insert_exec),
-            count_schema,
-        )?;
-        Ok(Arc::new(agg_exec))
+        Ok(Arc::new(insert_exec))
     }
 }

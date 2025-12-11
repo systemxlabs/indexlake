@@ -9,10 +9,11 @@ use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
-    PlanProperties,
+    DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
+    Partitioning, PlanProperties,
 };
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
+use indexlake::ILError;
 use indexlake::table::{Table, TableInsertion};
 
 #[derive(Debug)]
@@ -20,7 +21,7 @@ pub struct IndexLakeInsertExec {
     pub table: Arc<Table>,
     pub input: Arc<dyn ExecutionPlan>,
     pub insert_op: InsertOp,
-    pub insert_partitions: Option<usize>,
+    pub stream_insert_threshold: usize,
     cache: PlanProperties,
 }
 
@@ -29,7 +30,7 @@ impl IndexLakeInsertExec {
         table: Arc<Table>,
         input: Arc<dyn ExecutionPlan>,
         insert_op: InsertOp,
-        insert_partitions: Option<usize>,
+        stream_insert_threshold: usize,
     ) -> Result<Self, DataFusionError> {
         match insert_op {
             InsertOp::Append | InsertOp::Overwrite => {}
@@ -40,16 +41,9 @@ impl IndexLakeInsertExec {
             }
         }
 
-        let partition_count = match insert_partitions {
-            Some(partitions) => {
-                std::cmp::min(partitions, input.output_partitioning().partition_count())
-            }
-            None => input.output_partitioning().partition_count(),
-        };
-
         let cache = PlanProperties::new(
             EquivalenceProperties::new(make_count_schema()),
-            Partitioning::UnknownPartitioning(partition_count),
+            Partitioning::UnknownPartitioning(1),
             input.pipeline_behavior(),
             input.boundedness(),
         );
@@ -58,7 +52,7 @@ impl IndexLakeInsertExec {
             table,
             input,
             insert_op,
-            insert_partitions,
+            stream_insert_threshold,
             cache,
         })
     }
@@ -77,6 +71,10 @@ impl ExecutionPlan for IndexLakeInsertExec {
         &self.cache
     }
 
+    fn required_input_distribution(&self) -> Vec<Distribution> {
+        vec![Distribution::SinglePartition]
+    }
+
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
         vec![&self.input]
     }
@@ -89,7 +87,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
             self.table.clone(),
             children[0].clone(),
             self.insert_op,
-            self.insert_partitions,
+            self.stream_insert_threshold,
         )?;
         Ok(Arc::new(exec))
     }
@@ -99,9 +97,17 @@ impl ExecutionPlan for IndexLakeInsertExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream, DataFusionError> {
+        if partition != 0 {
+            return Err(DataFusionError::Execution(
+                "IndexLakeInsertExec can only be executed on a single partition".to_string(),
+            ));
+        }
+
         let mut input_stream = self.input.execute(partition, context)?;
         let table = self.table.clone();
+        let input = self.input.clone();
         let insert_op = self.insert_op;
+        let stream_insert_threshold = self.stream_insert_threshold;
 
         let stream = futures::stream::once(async move {
             match insert_op {
@@ -119,24 +125,45 @@ impl ExecutionPlan for IndexLakeInsertExec {
                 }
             }
 
-            let mut count = 0i64;
-            while let Some(batch) = input_stream.next().await {
-                let batch = batch?;
-                count += batch.num_rows() as i64;
+            match input.partition_statistics(None).map(|stat| stat.num_rows) {
+                Ok(Precision::Exact(num_rows)) | Ok(Precision::Inexact(num_rows))
+                    if num_rows > stream_insert_threshold =>
+                {
+                    let stream = input_stream
+                        .map_err(|err| {
+                            ILError::invalid_input(format!(
+                                "Failed to get batch from stream: {err}"
+                            ))
+                        })
+                        .boxed();
+                    let count = table.stream_insert(stream).await.map_err(|e| {
+                        DataFusionError::Execution(format!(
+                            "Failed to stream insert into indexlake: {e}"
+                        ))
+                    })?;
+                    make_result_batch(count as i64)
+                }
+                _ => {
+                    let mut count = 0i64;
+                    while let Some(batch) = input_stream.next().await {
+                        let batch = batch?;
+                        count += batch.num_rows() as i64;
 
-                table
-                    .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
-                    .await
-                    .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+                        table
+                            .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
+                            .await
+                            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+                    }
+
+                    // trigger dump
+                    table
+                        .insert(TableInsertion::new(vec![]).with_try_dump(true))
+                        .await
+                        .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+
+                    make_result_batch(count)
+                }
             }
-
-            // trigger dump
-            table
-                .insert(TableInsertion::new(vec![]).with_try_dump(true))
-                .await
-                .map_err(|e| DataFusionError::Execution(e.to_string()))?;
-
-            make_result_batch(count)
         })
         .boxed();
 

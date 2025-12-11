@@ -27,7 +27,7 @@ message IndexLakeInsertExecNode {
   string namespace_name = 1;
   string table_name = 2;
   datafusion.InsertOp insert_op = 3;
-  optional uint32 insert_partitions = 4;
+  uint32 stream_insert_threshold = 4;
 }
 
 message Projection {

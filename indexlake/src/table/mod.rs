@@ -151,7 +151,7 @@ impl Table {
         Ok(())
     }
 
-    pub async fn stream_insert(&self, stream: RecordBatchStream) -> ILResult<()> {
+    pub async fn stream_insert(&self, stream: RecordBatchStream) -> ILResult<usize> {
         let table_schema = self.table_schema.clone();
         let stream = stream
             .map(move |batch| {
@@ -162,9 +162,9 @@ impl Table {
             })
             .boxed();
 
-        process_bypass_insert(self, stream).await?;
+        let count = process_bypass_insert(self, stream).await?;
 
-        Ok(())
+        Ok(count)
     }
 
     pub async fn scan(&self, scan: TableScan) -> ILResult<RecordBatchStream> {

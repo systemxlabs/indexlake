@@ -117,7 +117,7 @@ pub(crate) async fn process_insert_into_inline_rows_with_tx(
 pub(crate) async fn process_bypass_insert(
     table: &Table,
     batch_stream: RecordBatchStream,
-) -> ILResult<()> {
+) -> ILResult<usize> {
     let data_file_id = uuid::Uuid::now_v7();
     let relative_path = DataFileRecord::build_relative_path(
         &table.namespace_id,
@@ -185,7 +185,7 @@ pub(crate) async fn process_bypass_insert(
     tx_helper.insert_index_files(&index_file_records).await?;
     tx_helper.commit().await?;
 
-    Ok(())
+    Ok(record_count)
 }
 
 pub(crate) fn build_sql_values(
