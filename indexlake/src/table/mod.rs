@@ -27,7 +27,8 @@ use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::{DataFileFormat, Storage};
 use crate::utils::{
-    build_row_id_array, correct_batch_schema, sort_record_batches, timestamp_ms_from_now,
+    build_row_id_array, correct_batch_schema, rewrite_batch_schema, sort_record_batches,
+    timestamp_ms_from_now,
 };
 use crate::{ILError, ILResult, RecordBatchStream};
 use arrow::array::{ArrayRef, RecordBatch};
@@ -134,9 +135,11 @@ impl Table {
                 rewritten_batches =
                     sort_record_batches(&rewritten_batches, INTERNAL_ROW_ID_FIELD_NAME)?;
             }
-            let mut tx_helper = self.transaction_helper().await?;
-            process_bypass_insert(&mut tx_helper, self, &rewritten_batches).await?;
-            tx_helper.commit().await?;
+            process_bypass_insert(
+                self,
+                futures::stream::iter(rewritten_batches).map(Ok).boxed(),
+            )
+            .await?;
         } else {
             process_insert_into_inline_rows_without_tx(self, &rewritten_batches).await?;
 
@@ -144,6 +147,22 @@ impl Table {
                 try_run_dump_task(self).await?;
             }
         }
+
+        Ok(())
+    }
+
+    pub async fn stream_insert(&self, stream: RecordBatchStream) -> ILResult<()> {
+        let table_schema = self.table_schema.clone();
+        let stream = stream
+            .map(move |batch| {
+                let batch = batch?;
+                let batch = rewrite_batch_schema(&batch, &table_schema.field_name_id_map)?;
+                let mut batches = check_and_rewrite_insert_batches(&[batch], &table_schema, true)?;
+                Ok::<_, ILError>(batches.remove(0))
+            })
+            .boxed();
+
+        process_bypass_insert(self, stream).await?;
 
         Ok(())
     }

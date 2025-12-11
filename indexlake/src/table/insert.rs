@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
 use derive_with::With;
+use futures::StreamExt;
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -15,7 +16,7 @@ use crate::utils::{
     extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, rewrite_batch_schema,
     serialize_array,
 };
-use crate::{ILError, ILResult};
+use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, With)]
 pub struct TableInsertion {
@@ -114,9 +115,8 @@ pub(crate) async fn process_insert_into_inline_rows_with_tx(
 }
 
 pub(crate) async fn process_bypass_insert(
-    tx_helper: &mut TransactionHelper,
     table: &Table,
-    batches: &[RecordBatch],
+    batch_stream: RecordBatchStream,
 ) -> ILResult<()> {
     let data_file_id = uuid::Uuid::now_v7();
     let relative_path = DataFileRecord::build_relative_path(
@@ -130,7 +130,7 @@ pub(crate) async fn process_bypass_insert(
 
     let row_ids = match table.config.preferred_data_file_format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
-            write_parquet_file(table, &relative_path, batches, &mut index_builders).await?
+            write_parquet_file(table, &relative_path, batch_stream, &mut index_builders).await?
         }
     };
     let record_count = row_ids.len();
@@ -141,18 +141,6 @@ pub(crate) async fn process_bypass_insert(
         .metadata()
         .await?
         .size;
-
-    tx_helper
-        .insert_data_files(&[DataFileRecord {
-            data_file_id,
-            table_id: table.table_id,
-            format: table.config.preferred_data_file_format,
-            relative_path: relative_path.clone(),
-            size: size as i64,
-            record_count: record_count as i64,
-            validity: RowValidity::new(record_count),
-        }])
-        .await?;
 
     // update index files
     let mut index_file_records = Vec::new();
@@ -182,7 +170,20 @@ pub(crate) async fn process_bypass_insert(
         });
     }
 
+    let mut tx_helper = table.transaction_helper().await?;
+    tx_helper
+        .insert_data_files(&[DataFileRecord {
+            data_file_id,
+            table_id: table.table_id,
+            format: table.config.preferred_data_file_format,
+            relative_path: relative_path.clone(),
+            size: size as i64,
+            record_count: record_count as i64,
+            validity: RowValidity::new(record_count),
+        }])
+        .await?;
     tx_helper.insert_index_files(&index_file_records).await?;
+    tx_helper.commit().await?;
 
     Ok(())
 }
@@ -225,7 +226,7 @@ pub(crate) fn build_inline_indexes(
 async fn write_parquet_file(
     table: &Table,
     relative_path: &str,
-    batches: &[RecordBatch],
+    mut batch_stream: RecordBatchStream,
     index_builders: &mut Vec<Box<dyn IndexBuilder>>,
 ) -> ILResult<Vec<Uuid>> {
     let output_file = table.storage.create(relative_path).await?;
@@ -238,13 +239,14 @@ async fn write_parquet_file(
     )?;
 
     let mut row_ids = Vec::new();
-    for batch in batches {
-        let row_id_array = extract_row_id_array_from_record_batch(batch)?;
+    while let Some(batch) = batch_stream.next().await {
+        let batch = batch?;
+        let row_id_array = extract_row_id_array_from_record_batch(&batch)?;
         row_ids.extend(fixed_size_binary_array_to_uuids(&row_id_array)?);
 
-        arrow_writer.write(batch).await?;
+        arrow_writer.write(&batch).await?;
         for builder in index_builders.iter_mut() {
-            builder.append(batch)?;
+            builder.append(&batch)?;
         }
     }
 
