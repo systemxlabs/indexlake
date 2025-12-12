@@ -87,7 +87,7 @@ impl Default for TableScan {
             filters: vec![],
             batch_size: 1024,
             partition: TableScanPartition::single_partition(),
-            concurrency: num_cpus::get(),
+            concurrency: 1,
             metadata_columns: vec![],
         }
     }

@@ -151,10 +151,8 @@ impl ExecutionPlan for IndexLakeScanExec {
 
         if let Some(limit) = self.limit {
             scan.batch_size = limit;
-            scan.concurrency = limit / 10000 + 1;
         }
 
-        // Override auto concurrency
         if let Some(concurrency) = self.concurrency {
             scan.concurrency = concurrency;
         }
