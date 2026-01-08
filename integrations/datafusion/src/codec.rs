@@ -162,13 +162,20 @@ fn load_table(
     namespace_name: &str,
     table_name: &str,
 ) -> Result<Table, DataFusionError> {
-    tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(async {
-            client
-                .load_table(namespace_name, table_name)
-                .await
-                .map_err(|e| DataFusionError::Internal(e.to_string()))
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("create runtime")
+                .block_on(async {
+                    client
+                        .load_table(namespace_name, table_name)
+                        .await
+                        .map_err(|e| DataFusionError::Internal(e.to_string()))
+                })
         })
+        .join()
+        .map_err(|e| DataFusionError::Internal(format!("Thread panicked: {e:?}")))?
     })
 }
 

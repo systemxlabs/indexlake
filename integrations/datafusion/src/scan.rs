@@ -19,6 +19,7 @@ use datafusion::physical_plan::{
 };
 use datafusion::prelude::Expr;
 use futures::{StreamExt, TryStreamExt};
+use indexlake::ILError;
 use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
 use log::error;
@@ -177,10 +178,17 @@ impl ExecutionPlan for IndexLakeScanExec {
     ) -> Result<Statistics, DataFusionError> {
         let scan_partition = self.get_scan_partition(partition);
 
-        let row_count_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { self.table.count(scan_partition).await })
+        let row_count_result = std::thread::scope(|s| {
+            s.spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .expect("create runtime")
+                    .block_on(async { self.table.count(scan_partition).await })
+            })
+            .join()
+            .map_err(|e| ILError::internal(format!("Thread panicked: {e:?}")))?
         });
+
         match row_count_result {
             Ok(row_count) => {
                 if self.filters.is_empty() {

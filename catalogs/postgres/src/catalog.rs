@@ -325,13 +325,23 @@ impl Drop for PostgresTransaction {
         if self.done {
             return;
         }
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                if let Err(e) = self.conn.batch_execute("ROLLBACK").await {
-                    error!("[indexlake] failed to rollback postgres txn: {e}");
-                }
-            });
+        // TODO use pg Client inner method
+        let result = std::thread::scope(|s| {
+            s.spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .expect("create runtime")
+                    .block_on(async {
+                        if let Err(e) = self.conn.batch_execute("ROLLBACK").await {
+                            error!("[indexlake] failed to rollback postgres txn: {e}");
+                        }
+                    })
+            })
+            .join()
         });
+        if let Err(e) = result {
+            error!("[indexlake] transaction drop thread panicked: {e:?}");
+        }
     }
 }
 

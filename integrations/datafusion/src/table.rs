@@ -11,6 +11,7 @@ use datafusion::logical_expr::TableProviderFilterPushDown;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::Expr;
+use indexlake::ILError;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
 use indexlake::utils::schema_without_row_id;
@@ -166,13 +167,21 @@ impl TableProvider for IndexLakeTable {
     }
 
     fn statistics(&self) -> Option<Statistics> {
-        let row_count_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.table
-                    .count(TableScanPartition::single_partition())
-                    .await
+        let row_count_result = std::thread::scope(|s| {
+            s.spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .expect("create runtime")
+                    .block_on(async {
+                        self.table
+                            .count(TableScanPartition::single_partition())
+                            .await
+                    })
             })
+            .join()
+            .map_err(|e| ILError::internal(format!("Thread panicked: {e:?}")))?
         });
+
         match row_count_result {
             Ok(row_count) => Some(Statistics {
                 num_rows: Precision::Exact(row_count),
