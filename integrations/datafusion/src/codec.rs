@@ -12,6 +12,7 @@ use indexlake::Client;
 use indexlake::catalog::{DataFileRecord, RowValidity};
 use indexlake::storage::DataFileFormat;
 use indexlake::table::Table;
+use indexlake::utils::panic_payload_as_str;
 use prost::Message;
 use uuid::Uuid;
 
@@ -165,6 +166,7 @@ fn load_table(
     std::thread::scope(|s| {
         s.spawn(|| {
             tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .expect("create runtime")
                 .block_on(async {
@@ -175,7 +177,9 @@ fn load_table(
                 })
         })
         .join()
-        .map_err(|e| DataFusionError::Internal(format!("Thread panicked: {e:?}")))?
+        .map_err(|e| {
+            DataFusionError::Internal(format!("Thread panicked: {:?}", panic_payload_as_str(&e)))
+        })?
     })
 }
 

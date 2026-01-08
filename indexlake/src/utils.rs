@@ -313,3 +313,20 @@ pub fn timestamp_ms_from_now(duration: Duration) -> i64 {
         .expect("Time went backwards")
         .as_millis() as i64
 }
+
+pub fn panic_payload_as_str(payload: &Box<dyn std::any::Any + Send>) -> Option<&str> {
+    // Panic payloads are almost always `String` (if invoked with formatting arguments)
+    // or `&'static str` (if invoked with a string literal).
+    //
+    // Non-string panic payloads have niche use-cases,
+    // so we don't really need to worry about those.
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return Some(s);
+    }
+
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        return Some(s);
+    }
+
+    None
+}

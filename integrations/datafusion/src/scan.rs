@@ -22,6 +22,7 @@ use futures::{StreamExt, TryStreamExt};
 use indexlake::ILError;
 use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
+use indexlake::utils::panic_payload_as_str;
 use log::error;
 
 use crate::datafusion_expr_to_indexlake_expr;
@@ -181,12 +182,15 @@ impl ExecutionPlan for IndexLakeScanExec {
         let row_count_result = std::thread::scope(|s| {
             s.spawn(|| {
                 tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
                     .build()
                     .expect("create runtime")
                     .block_on(async { self.table.count(scan_partition).await })
             })
             .join()
-            .map_err(|e| ILError::internal(format!("Thread panicked: {e:?}")))?
+            .map_err(|e| {
+                ILError::internal(format!("Thread panicked: {:?}", panic_payload_as_str(&e)))
+            })?
         });
 
         match row_count_result {

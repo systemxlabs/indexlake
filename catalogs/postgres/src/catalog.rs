@@ -7,6 +7,7 @@ use indexlake::catalog::{
     Catalog, CatalogDataType, CatalogSchemaRef, Row, RowStream, Scalar, Transaction,
 };
 use indexlake::expr::{BinaryExpr, Expr};
+use indexlake::utils::panic_payload_as_str;
 use indexlake::{ILError, ILResult};
 use log::{error, trace};
 use uuid::Uuid;
@@ -329,6 +330,7 @@ impl Drop for PostgresTransaction {
         let result = std::thread::scope(|s| {
             s.spawn(|| {
                 tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
                     .build()
                     .expect("create runtime")
                     .block_on(async {
@@ -340,7 +342,10 @@ impl Drop for PostgresTransaction {
             .join()
         });
         if let Err(e) = result {
-            error!("[indexlake] transaction drop thread panicked: {e:?}");
+            error!(
+                "[indexlake] transaction drop thread panicked: {:?}",
+                panic_payload_as_str(&e)
+            );
         }
     }
 }

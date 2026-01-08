@@ -14,7 +14,7 @@ use datafusion::prelude::Expr;
 use indexlake::ILError;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
-use indexlake::utils::schema_without_row_id;
+use indexlake::utils::{panic_payload_as_str, schema_without_row_id};
 use log::warn;
 
 use crate::{
@@ -170,6 +170,7 @@ impl TableProvider for IndexLakeTable {
         let row_count_result = std::thread::scope(|s| {
             s.spawn(|| {
                 tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
                     .build()
                     .expect("create runtime")
                     .block_on(async {
@@ -179,7 +180,9 @@ impl TableProvider for IndexLakeTable {
                     })
             })
             .join()
-            .map_err(|e| ILError::internal(format!("Thread panicked: {e:?}")))?
+            .map_err(|e| {
+                ILError::internal(format!("Thread panicked: {:?}", panic_payload_as_str(&e)))
+            })?
         });
 
         match row_count_result {
