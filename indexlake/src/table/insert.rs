@@ -4,13 +4,14 @@ use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
 use derive_with::With;
 use futures::StreamExt;
+use parquet::arrow::AsyncArrowWriter;
 use uuid::Uuid;
 
 use crate::catalog::{
     Catalog, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity, TransactionHelper,
 };
 use crate::index::IndexBuilder;
-use crate::storage::{DataFileFormat, build_parquet_writer};
+use crate::storage::{DataFileFormat, OutputFile, build_parquet_writer};
 use crate::table::Table;
 use crate::utils::{rewrite_batch_schema, serialize_array};
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -180,8 +181,12 @@ async fn write_parquet_files(
     let mut index_file_records = Vec::new();
 
     // Initialize first file writer
-    let (mut current_data_file_id, mut current_relative_path, mut current_writer, mut current_index_builders) =
-        create_new_parquet_writer(table).await?;
+    let (
+        mut current_data_file_id,
+        mut current_relative_path,
+        mut current_writer,
+        mut current_index_builders,
+    ) = create_new_parquet_writer(table).await?;
     let mut current_row_count = 0usize;
 
     while let Some(batch) = batch_stream.next().await {
@@ -212,8 +217,12 @@ async fn write_parquet_files(
             index_file_records.extend(idx_records);
 
             // Create new writer for next batches
-            (current_data_file_id, current_relative_path, current_writer, current_index_builders) =
-                create_new_parquet_writer(table).await?;
+            (
+                current_data_file_id,
+                current_relative_path,
+                current_writer,
+                current_index_builders,
+            ) = create_new_parquet_writer(table).await?;
             current_row_count = 0;
         }
     }
@@ -241,7 +250,7 @@ async fn create_new_parquet_writer(
 ) -> ILResult<(
     Uuid,
     String,
-    parquet::arrow::async_writer::AsyncArrowWriter<Box<dyn crate::storage::OutputFile>>,
+    AsyncArrowWriter<Box<dyn OutputFile>>,
     Vec<Box<dyn IndexBuilder>>,
 )> {
     let data_file_id = Uuid::now_v7();
@@ -265,7 +274,7 @@ async fn create_new_parquet_writer(
 
 async fn finish_parquet_file(
     table: &Table,
-    writer: parquet::arrow::async_writer::AsyncArrowWriter<Box<dyn crate::storage::OutputFile>>,
+    writer: AsyncArrowWriter<Box<dyn OutputFile>>,
     mut index_builders: Vec<Box<dyn IndexBuilder>>,
     data_file_id: Uuid,
     relative_path: String,
