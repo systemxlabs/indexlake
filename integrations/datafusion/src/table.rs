@@ -11,10 +11,10 @@ use datafusion::logical_expr::TableProviderFilterPushDown;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::Expr;
+use indexlake::Client;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
 use indexlake::utils::schema_without_row_id;
-use indexlake::Client;
 use log::warn;
 
 use crate::{

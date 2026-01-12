@@ -17,6 +17,8 @@ use indexlake::table::{Table, TableInsertion};
 use indexlake::{Client, ILError};
 use tokio::sync::Mutex;
 
+use crate::get_or_load_table_inner;
+
 #[derive(Debug)]
 pub struct IndexLakeInsertExec {
     pub client: Arc<Client>,
@@ -110,7 +112,8 @@ impl ExecutionPlan for IndexLakeInsertExec {
             children[0].clone(),
             self.insert_op,
             self.stream_insert_threshold,
-        )?;
+        )?
+        .with_table_mutex(self.table.clone());
         Ok(Arc::new(exec))
     }
 
@@ -135,13 +138,10 @@ impl ExecutionPlan for IndexLakeInsertExec {
         let stream_insert_threshold = self.stream_insert_threshold;
 
         let stream = futures::stream::once(async move {
-            let table = get_or_load_table_inner(
-                &table_mutex,
-                &client,
-                &namespace_name,
-                &table_name,
-            )
-            .await?;
+            let table =
+                get_or_load_table_inner(&table_mutex, &client, &namespace_name, &table_name)
+                    .await
+                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
             match insert_op {
                 InsertOp::Append => {}
@@ -220,25 +220,6 @@ pub fn make_count_schema() -> SchemaRef {
         DataType::Int64,
         false,
     )]))
-}
-
-async fn get_or_load_table_inner(
-    table_mutex: &Arc<Mutex<Option<Arc<Table>>>>,
-    client: &Arc<Client>,
-    namespace_name: &str,
-    table_name: &str,
-) -> Result<Arc<Table>, DataFusionError> {
-    let mut guard = table_mutex.lock().await;
-    if let Some(table) = guard.as_ref() {
-        return Ok(table.clone());
-    }
-    let table = client
-        .load_table(namespace_name, table_name)
-        .await
-        .map_err(|e| DataFusionError::Internal(e.to_string()))?;
-    let table = Arc::new(table);
-    *guard = Some(table.clone());
-    Ok(table)
 }
 
 impl DisplayAs for IndexLakeInsertExec {

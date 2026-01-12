@@ -5,9 +5,8 @@ pub struct IndexLakePhysicalPlanNode {
         oneof = "index_lake_physical_plan_node::IndexLakePhysicalPlanType",
         tags = "1, 2"
     )]
-    pub index_lake_physical_plan_type: ::core::option::Option<
-        index_lake_physical_plan_node::IndexLakePhysicalPlanType,
-    >,
+    pub index_lake_physical_plan_type:
+        ::core::option::Option<index_lake_physical_plan_node::IndexLakePhysicalPlanType>,
 }
 /// Nested message and enum types in `IndexLakePhysicalPlanNode`.
 pub mod index_lake_physical_plan_node {

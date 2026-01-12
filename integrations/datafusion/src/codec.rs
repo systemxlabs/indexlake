@@ -168,19 +168,19 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 }
 
 fn serialize_schema(schema: &SchemaRef) -> Result<ProtoSchema, DataFusionError> {
-    let proto: ProtoSchema = schema.as_ref().try_into().map_err(|e| {
-        DataFusionError::Internal(format!("Failed to serialize schema: {e:?}"))
-    })?;
+    let proto: ProtoSchema = schema
+        .as_ref()
+        .try_into()
+        .map_err(|e| DataFusionError::Internal(format!("Failed to serialize schema: {e:?}")))?;
     Ok(proto)
 }
 
 fn parse_schema(proto: Option<ProtoSchema>) -> Result<SchemaRef, DataFusionError> {
-    let proto = proto.ok_or_else(|| {
-        DataFusionError::Internal("Missing schema in protobuf".to_string())
-    })?;
-    let schema: datafusion::arrow::datatypes::Schema = (&proto).try_into().map_err(|e| {
-        DataFusionError::Internal(format!("Failed to parse schema: {e:?}"))
-    })?;
+    let proto =
+        proto.ok_or_else(|| DataFusionError::Internal("Missing schema in protobuf".to_string()))?;
+    let schema: datafusion::arrow::datatypes::Schema = (&proto)
+        .try_into()
+        .map_err(|e| DataFusionError::Internal(format!("Failed to parse schema: {e:?}")))?;
     Ok(Arc::new(schema))
 }
 

@@ -21,7 +21,7 @@ use datafusion::prelude::Expr;
 use futures::{StreamExt, TryStreamExt};
 use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
-use indexlake::Client;
+use indexlake::{Client, ILResult};
 use log::error;
 use tokio::sync::Mutex;
 
@@ -189,13 +189,10 @@ impl ExecutionPlan for IndexLakeScanExec {
         let limit = self.limit;
 
         let fut = async move {
-            let table = get_or_load_table_inner(
-                &table_mutex,
-                &client,
-                &namespace_name,
-                &table_name,
-            )
-            .await?;
+            let table =
+                get_or_load_table_inner(&table_mutex, &client, &namespace_name, &table_name)
+                    .await
+                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
             get_batch_stream(table, projected_schema.clone(), scan, limit).await
         };
         let stream = futures::stream::once(fut).try_flatten();
@@ -207,15 +204,52 @@ impl ExecutionPlan for IndexLakeScanExec {
 
     fn partition_statistics(
         &self,
-        _partition: Option<usize>,
+        partition: Option<usize>,
     ) -> Result<Statistics, DataFusionError> {
-        // Return unknown statistics to avoid blocking.
-        // The actual statistics will be computed lazily if needed.
-        Ok(Statistics {
-            num_rows: Precision::Absent,
-            total_byte_size: Precision::Absent,
-            column_statistics: Statistics::unknown_column(&self.schema()),
-        })
+        let scan_partition = self.get_scan_partition(partition);
+
+        let table_mutex = self.table.clone();
+        let client = self.client.clone();
+        let namespace_name = self.namespace_name.clone();
+        let table_name = self.table_name.clone();
+
+        let row_count_result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let table =
+                    get_or_load_table_inner(&table_mutex, &client, &namespace_name, &table_name)
+                        .await?;
+                table.count(scan_partition).await
+            })
+        });
+        match row_count_result {
+            Ok(row_count) => {
+                if self.filters.is_empty() {
+                    if let Some(limit) = self.limit {
+                        Ok(Statistics {
+                            num_rows: Precision::Exact(std::cmp::min(row_count, limit)),
+                            total_byte_size: Precision::Absent,
+                            column_statistics: Statistics::unknown_column(&self.schema()),
+                        })
+                    } else {
+                        Ok(Statistics {
+                            num_rows: Precision::Exact(row_count),
+                            total_byte_size: Precision::Absent,
+                            column_statistics: Statistics::unknown_column(&self.schema()),
+                        })
+                    }
+                } else {
+                    Ok(Statistics {
+                        num_rows: Precision::Inexact(row_count),
+                        total_byte_size: Precision::Absent,
+                        column_statistics: Statistics::unknown_column(&self.schema()),
+                    })
+                }
+            }
+            Err(e) => Err(DataFusionError::Plan(format!(
+                "Error getting indexlake table {}.{} row count: {:?}",
+                self.namespace_name, self.table_name, e
+            ))),
+        }
     }
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
@@ -231,7 +265,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             self.filters.clone(),
             limit,
         ) {
-            Ok(exec) => Some(Arc::new(exec)),
+            Ok(exec) => Some(Arc::new(exec.with_table_mutex(self.table.clone()))),
             Err(e) => {
                 error!("[indexlake] Failed to create IndexLakeScanExec with fetch: {e}");
                 None
@@ -292,20 +326,17 @@ fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
     true
 }
 
-async fn get_or_load_table_inner(
+pub(crate) async fn get_or_load_table_inner(
     table_mutex: &Arc<Mutex<Option<Arc<Table>>>>,
     client: &Arc<Client>,
     namespace_name: &str,
     table_name: &str,
-) -> Result<Arc<Table>, DataFusionError> {
+) -> ILResult<Arc<Table>> {
     let mut guard = table_mutex.lock().await;
     if let Some(table) = guard.as_ref() {
         return Ok(table.clone());
     }
-    let table = client
-        .load_table(namespace_name, table_name)
-        .await
-        .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+    let table = client.load_table(namespace_name, table_name).await?;
     let table = Arc::new(table);
     *guard = Some(table.clone());
     Ok(table)
