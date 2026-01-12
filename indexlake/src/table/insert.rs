@@ -255,20 +255,20 @@ async fn write_parquet_files(
     }
 
     // Finish the last file if it has any data
-    if let Some(writer) = current_writer {
-        if current_row_count > 0 {
-            let (data_record, idx_records) = finish_parquet_file(
-                table,
-                writer,
-                current_index_builders.unwrap(),
-                current_data_file_id.unwrap(),
-                current_relative_path.unwrap(),
-                current_row_count,
-            )
-            .await?;
-            data_file_records.push(data_record);
-            index_file_records.extend(idx_records);
-        }
+    if let Some(writer) = current_writer
+        && current_row_count > 0
+    {
+        let (data_record, idx_records) = finish_parquet_file(
+            table,
+            writer,
+            current_index_builders.unwrap(),
+            current_data_file_id.unwrap(),
+            current_relative_path.unwrap(),
+            current_row_count,
+        )
+        .await?;
+        data_file_records.push(data_record);
+        index_file_records.extend(idx_records);
     }
 
     Ok((data_file_records, index_file_records))
