@@ -36,6 +36,8 @@ pub struct IndexLakeScanExecNode {
     pub filters: ::prost::alloc::vec::Vec<::datafusion_proto::protobuf::LogicalExprNode>,
     #[prost(uint32, optional, tag = "8")]
     pub limit: ::core::option::Option<u32>,
+    #[prost(message, optional, tag = "9")]
+    pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IndexLakeInsertExecNode {

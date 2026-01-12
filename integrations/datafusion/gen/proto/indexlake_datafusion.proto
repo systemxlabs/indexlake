@@ -21,6 +21,7 @@ message IndexLakeScanExecNode {
   Projection projection = 6;
   repeated datafusion.LogicalExprNode filters = 7;
   optional uint32 limit = 8;
+  datafusion_common.Schema schema = 9;
 }
 
 message IndexLakeInsertExecNode {

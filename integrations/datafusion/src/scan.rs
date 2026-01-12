@@ -21,13 +21,19 @@ use datafusion::prelude::Expr;
 use futures::{StreamExt, TryStreamExt};
 use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
+use indexlake::{Client, ILResult};
 use log::error;
+use tokio::sync::Mutex;
 
 use crate::datafusion_expr_to_indexlake_expr;
 
 #[derive(Debug)]
 pub struct IndexLakeScanExec {
-    pub table: Arc<Table>,
+    pub client: Arc<Client>,
+    pub namespace_name: String,
+    pub table_name: String,
+    pub table: Arc<Mutex<Option<Arc<Table>>>>,
+    pub output_schema: SchemaRef,
     pub partition_count: usize,
     pub data_files: Option<Arc<Vec<DataFileRecord>>>,
     pub concurrency: Option<usize>,
@@ -39,8 +45,12 @@ pub struct IndexLakeScanExec {
 }
 
 impl IndexLakeScanExec {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
-        table: Arc<Table>,
+        client: Arc<Client>,
+        namespace_name: String,
+        table_name: String,
+        output_schema: SchemaRef,
         partition_count: usize,
         data_files: Option<Arc<Vec<DataFileRecord>>>,
         concurrency: Option<usize>,
@@ -48,7 +58,7 @@ impl IndexLakeScanExec {
         filters: Vec<Expr>,
         limit: Option<usize>,
     ) -> Result<Self, DataFusionError> {
-        let projected_schema = project_schema(&table.output_schema, projection.as_ref())?;
+        let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema),
             Partitioning::UnknownPartitioning(partition_count),
@@ -59,7 +69,11 @@ impl IndexLakeScanExec {
             .as_ref()
             .map(|files| calc_data_file_partition_ranges(partition_count, files.len()));
         Ok(Self {
-            table,
+            client,
+            namespace_name,
+            table_name,
+            output_schema,
+            table: Arc::new(Mutex::new(None)),
             partition_count,
             data_files,
             concurrency,
@@ -69,6 +83,17 @@ impl IndexLakeScanExec {
             data_file_partition_ranges,
             properties,
         })
+    }
+
+    pub fn with_table(self, table: Option<Arc<Table>>) -> Self {
+        Self {
+            table: Arc::new(Mutex::new(table)),
+            ..self
+        }
+    }
+
+    pub fn with_table_mutex(self, table: Arc<Mutex<Option<Arc<Table>>>>) -> Self {
+        Self { table, ..self }
     }
 
     pub fn get_scan_partition(&self, partition: Option<usize>) -> TableScanPartition {
@@ -135,7 +160,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             )));
         }
 
-        let df_schema = DFSchema::try_from(self.table.output_schema.clone())?;
+        let df_schema = DFSchema::try_from(self.output_schema.as_ref().clone())?;
         let il_filters = self
             .filters
             .iter()
@@ -158,15 +183,21 @@ impl ExecutionPlan for IndexLakeScanExec {
         }
 
         let projected_schema = self.schema();
-        let fut = get_batch_stream(
-            self.table.clone(),
-            projected_schema.clone(),
-            scan,
-            self.limit,
-        );
+        let table_mutex = self.table.clone();
+        let client = self.client.clone();
+        let namespace_name = self.namespace_name.clone();
+        let table_name = self.table_name.clone();
+        let limit = self.limit;
+
+        let fut = async move {
+            let table = get_or_load_table(&table_mutex, &client, &namespace_name, &table_name)
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            get_batch_stream(table, projected_schema.clone(), scan, limit).await
+        };
         let stream = futures::stream::once(fut).try_flatten();
         Ok(Box::pin(RecordBatchStreamAdapter::new(
-            projected_schema,
+            self.schema(),
             stream,
         )))
     }
@@ -177,9 +208,17 @@ impl ExecutionPlan for IndexLakeScanExec {
     ) -> Result<Statistics, DataFusionError> {
         let scan_partition = self.get_scan_partition(partition);
 
+        let table_mutex = self.table.clone();
+        let client = self.client.clone();
+        let namespace_name = self.namespace_name.clone();
+        let table_name = self.table_name.clone();
+
         let row_count_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { self.table.count(scan_partition).await })
+            tokio::runtime::Handle::current().block_on(async {
+                let table =
+                    get_or_load_table(&table_mutex, &client, &namespace_name, &table_name).await?;
+                table.count(scan_partition).await
+            })
         });
         match row_count_result {
             Ok(row_count) => {
@@ -207,14 +246,17 @@ impl ExecutionPlan for IndexLakeScanExec {
             }
             Err(e) => Err(DataFusionError::Plan(format!(
                 "Error getting indexlake table {}.{} row count: {:?}",
-                self.table.namespace_name, self.table.table_name, e
+                self.namespace_name, self.table_name, e
             ))),
         }
     }
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
         match IndexLakeScanExec::try_new(
-            self.table.clone(),
+            self.client.clone(),
+            self.namespace_name.clone(),
+            self.table_name.clone(),
+            self.output_schema.clone(),
             self.partition_count,
             self.data_files.clone(),
             self.concurrency,
@@ -222,7 +264,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             self.filters.clone(),
             limit,
         ) {
-            Ok(exec) => Some(Arc::new(exec)),
+            Ok(exec) => Some(Arc::new(exec.with_table_mutex(self.table.clone()))),
             Err(e) => {
                 error!("[indexlake] Failed to create IndexLakeScanExec with fetch: {e}");
                 None
@@ -240,10 +282,10 @@ impl DisplayAs for IndexLakeScanExec {
         write!(
             f,
             "IndexLakeScanExec: table={}.{}, partitions={}",
-            self.table.namespace_name, self.table.table_name, self.partition_count
+            self.namespace_name, self.table_name, self.partition_count
         )?;
         let projected_schema = self.schema();
-        if !schema_projection_equals(&projected_schema, &self.table.output_schema) {
+        if !schema_projection_equals(&projected_schema, &self.output_schema) {
             write!(
                 f,
                 ", projection={}",
@@ -281,6 +323,22 @@ fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
         }
     }
     true
+}
+
+pub(crate) async fn get_or_load_table(
+    table_mutex: &Arc<Mutex<Option<Arc<Table>>>>,
+    client: &Arc<Client>,
+    namespace_name: &str,
+    table_name: &str,
+) -> ILResult<Arc<Table>> {
+    let mut guard = table_mutex.lock().await;
+    if let Some(table) = guard.as_ref() {
+        return Ok(table.clone());
+    }
+    let table = client.load_table(namespace_name, table_name).await?;
+    let table = Arc::new(table);
+    *guard = Some(table.clone());
+    Ok(table)
 }
 
 async fn get_batch_stream(

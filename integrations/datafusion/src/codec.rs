@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::error::DataFusionError;
 use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::dml::InsertOp;
@@ -8,10 +9,9 @@ use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
 use datafusion_proto::logical_plan::from_proto::parse_exprs;
 use datafusion_proto::logical_plan::to_proto::serialize_exprs;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
-use indexlake::Client;
+use datafusion_proto::protobuf::Schema as ProtoSchema;
 use indexlake::catalog::{DataFileRecord, RowValidity};
 use indexlake::storage::DataFileFormat;
-use indexlake::table::Table;
 use prost::Message;
 use uuid::Uuid;
 
@@ -52,7 +52,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
         match indexlake_plan {
             IndexLakePhysicalPlanType::Scan(node) => {
-                let table = load_table(&self.client, &node.namespace_name, &node.table_name)?;
+                let schema = parse_schema(node.schema)?;
 
                 let data_files = parse_data_files(node.data_files)?;
 
@@ -61,7 +61,10 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     parse_exprs(&node.filters, registry, &DefaultLogicalExtensionCodec {})?;
 
                 Ok(Arc::new(IndexLakeScanExec::try_new(
-                    Arc::new(table),
+                    self.client.clone(),
+                    node.namespace_name,
+                    node.table_name,
+                    schema,
                     node.partition_count as usize,
                     data_files,
                     node.concurrency.map(|c| c as usize),
@@ -79,12 +82,12 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 }
                 let input = inputs[0].clone();
 
-                let table = load_table(&self.client, &node.namespace_name, &node.table_name)?;
-
                 let insert_op = parse_insert_op(node.insert_op)?;
 
                 Ok(Arc::new(IndexLakeInsertExec::try_new(
-                    Arc::new(table),
+                    self.client.clone(),
+                    node.namespace_name,
+                    node.table_name,
                     input,
                     insert_op,
                     node.stream_insert_threshold as usize,
@@ -105,17 +108,20 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
             let data_files = serialize_data_files(exec.data_files.as_ref())?;
 
+            let schema = serialize_schema(&exec.output_schema)?;
+
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Scan(
                     IndexLakeScanExecNode {
-                        namespace_name: exec.table.namespace_name.clone(),
-                        table_name: exec.table.table_name.clone(),
+                        namespace_name: exec.namespace_name.clone(),
+                        table_name: exec.table_name.clone(),
                         partition_count: exec.partition_count as u32,
                         data_files,
                         concurrency: exec.concurrency.map(|c| c as u32),
                         projection,
                         filters,
                         limit: exec.limit.map(|l| l as u32),
+                        schema: Some(schema),
                     },
                 )),
             };
@@ -133,8 +139,8 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Insert(
                     IndexLakeInsertExecNode {
-                        namespace_name: exec.table.namespace_name.clone(),
-                        table_name: exec.table.table_name.clone(),
+                        namespace_name: exec.namespace_name.clone(),
+                        table_name: exec.table_name.clone(),
                         insert_op,
                         stream_insert_threshold: exec.stream_insert_threshold as u32,
                     },
@@ -157,19 +163,21 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
     }
 }
 
-fn load_table(
-    client: &Client,
-    namespace_name: &str,
-    table_name: &str,
-) -> Result<Table, DataFusionError> {
-    tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(async {
-            client
-                .load_table(namespace_name, table_name)
-                .await
-                .map_err(|e| DataFusionError::Internal(e.to_string()))
-        })
-    })
+fn serialize_schema(schema: &SchemaRef) -> Result<ProtoSchema, DataFusionError> {
+    let proto: ProtoSchema = schema
+        .as_ref()
+        .try_into()
+        .map_err(|e| DataFusionError::Internal(format!("Failed to serialize schema: {e:?}")))?;
+    Ok(proto)
+}
+
+fn parse_schema(proto: Option<ProtoSchema>) -> Result<SchemaRef, DataFusionError> {
+    let proto =
+        proto.ok_or_else(|| DataFusionError::Internal("Missing schema in protobuf".to_string()))?;
+    let schema: datafusion::arrow::datatypes::Schema = (&proto)
+        .try_into()
+        .map_err(|e| DataFusionError::Internal(format!("Failed to parse schema: {e:?}")))?;
+    Ok(Arc::new(schema))
 }
 
 fn serialize_projection(projection: Option<&Vec<usize>>) -> Option<crate::protobuf::Projection> {

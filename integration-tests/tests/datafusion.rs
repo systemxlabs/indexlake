@@ -39,7 +39,7 @@ async fn datafusion_full_scan(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
@@ -77,7 +77,7 @@ async fn datafusion_scan_with_projection(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
@@ -137,7 +137,7 @@ async fn datafusion_scan_with_filters(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table where age > 21").await;
@@ -173,7 +173,8 @@ async fn datafusion_scan_hide_row_id_with_filters(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?.with_hide_row_id(true);
+    let df_table =
+        IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?.with_hide_row_id(true);
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
@@ -217,7 +218,7 @@ async fn datafusion_scan_with_row_id_filter(
 
     let first_row_id_bytes = read_first_row_id_bytes_from_table(&table).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
@@ -260,7 +261,7 @@ async fn datafusion_scan_with_projection_filter(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
     let table_str = datafusion_scan(
@@ -300,7 +301,7 @@ async fn datafusion_scan_with_limit(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
     let df = session.sql("SELECT * FROM indexlake_table limit 2").await?;
@@ -335,7 +336,7 @@ async fn datafusion_full_insert(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
@@ -430,7 +431,7 @@ async fn datafusion_partial_insert(
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
@@ -477,10 +478,10 @@ async fn datafusion_scan_serialization(
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
-    let client = Client::new(catalog, storage);
+    let client = Arc::new(Client::new(catalog, storage));
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(client.clone(), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
     let df = session.sql("SELECT * FROM indexlake_table").await?;
@@ -490,7 +491,7 @@ async fn datafusion_scan_serialization(
         DisplayableExecutionPlan::new(plan.as_ref()).indent(true)
     );
 
-    let codec = IndexLakePhysicalCodec::new(Arc::new(client));
+    let codec = IndexLakePhysicalCodec::new(client.clone());
     let mut plan_buf: Vec<u8> = vec![];
     let plan_proto = PhysicalPlanNode::try_from_physical_plan(plan, &codec)?;
     plan_proto.try_encode(&mut plan_buf)?;
@@ -537,10 +538,10 @@ async fn datafusion_insert_serialization(
 ) -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
-    let client = Client::new(catalog, storage);
+    let client = Arc::new(Client::new(catalog, storage));
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(client.clone(), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
     let df = session
@@ -552,7 +553,7 @@ async fn datafusion_insert_serialization(
         DisplayableExecutionPlan::new(plan.as_ref()).indent(true)
     );
 
-    let codec = IndexLakePhysicalCodec::new(Arc::new(client));
+    let codec = IndexLakePhysicalCodec::new(client.clone());
     let mut plan_buf: Vec<u8> = vec![];
     let plan_proto = PhysicalPlanNode::try_from_physical_plan(plan, &codec)?;
     plan_proto.try_encode(&mut plan_buf)?;
@@ -616,7 +617,7 @@ async fn datafusion_count1_with_filter(
     let client = Client::new(catalog, storage);
     let table = prepare_simple_testing_table(&client, format).await?;
 
-    let df_table = IndexLakeTable::try_new(Arc::new(table))?;
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 

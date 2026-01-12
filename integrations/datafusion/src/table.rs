@@ -11,6 +11,7 @@ use datafusion::logical_expr::TableProviderFilterPushDown;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::Expr;
+use indexlake::Client;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
 use indexlake::utils::schema_without_row_id;
@@ -23,6 +24,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct IndexLakeTable {
+    client: Arc<Client>,
     table: Arc<Table>,
     scan_partitions: usize,
     column_defaults: HashMap<String, Expr>,
@@ -32,7 +34,7 @@ pub struct IndexLakeTable {
 }
 
 impl IndexLakeTable {
-    pub fn try_new(table: Arc<Table>) -> Result<Self, DataFusionError> {
+    pub fn try_new(client: Arc<Client>, table: Arc<Table>) -> Result<Self, DataFusionError> {
         let mut column_defaults = HashMap::new();
         for field_record in table.field_records.iter() {
             if let Some(default_value) = &field_record.default_value {
@@ -44,6 +46,7 @@ impl IndexLakeTable {
             }
         }
         Ok(Self {
+            client,
             table,
             scan_partitions: 16,
             column_defaults,
@@ -128,14 +131,18 @@ impl TableProvider for IndexLakeTable {
         };
 
         let exec = IndexLakeScanExec::try_new(
-            self.table.clone(),
+            self.client.clone(),
+            self.table.namespace_name.clone(),
+            self.table.table_name.clone(),
+            self.table.output_schema.clone(),
             self.scan_partitions,
             data_files,
             self.scan_concurrency,
             il_projection,
             filters.to_vec(),
             limit,
-        )?;
+        )?
+        .with_table(Some(self.table.clone()));
         Ok(Arc::new(exec))
     }
 
@@ -196,11 +203,14 @@ impl TableProvider for IndexLakeTable {
         insert_op: InsertOp,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let insert_exec = IndexLakeInsertExec::try_new(
-            self.table.clone(),
+            self.client.clone(),
+            self.table.namespace_name.clone(),
+            self.table.table_name.clone(),
             input,
             insert_op,
             self.stream_insert_threshold,
-        )?;
+        )?
+        .with_table(Some(self.table.clone()));
 
         Ok(Arc::new(insert_exec))
     }
