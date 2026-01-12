@@ -12,10 +12,7 @@ use crate::catalog::{
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, build_parquet_writer};
 use crate::table::Table;
-use crate::utils::{
-    extract_row_id_array_from_record_batch, fixed_size_binary_array_to_uuids, rewrite_batch_schema,
-    serialize_array,
-};
+use crate::utils::{rewrite_batch_schema, serialize_array};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, With)]
@@ -118,72 +115,23 @@ pub(crate) async fn process_bypass_insert(
     table: &Table,
     batch_stream: RecordBatchStream,
 ) -> ILResult<usize> {
-    let data_file_id = uuid::Uuid::now_v7();
-    let relative_path = DataFileRecord::build_relative_path(
-        &table.namespace_id,
-        &table.table_id,
-        &data_file_id,
-        table.config.preferred_data_file_format,
-    );
-
-    let mut index_builders = table.index_manager.new_index_builders()?;
-
-    let row_ids = match table.config.preferred_data_file_format {
+    let (data_file_records, index_file_records) = match table.config.preferred_data_file_format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
-            write_parquet_file(table, &relative_path, batch_stream, &mut index_builders).await?
+            write_parquet_files(table, batch_stream).await?
         }
     };
-    let record_count = row_ids.len();
-    let size = table
-        .storage
-        .open(&relative_path)
-        .await?
-        .metadata()
-        .await?
-        .size;
 
-    // update index files
-    let mut index_file_records = Vec::new();
-    for index_builder in index_builders.iter_mut() {
-        let index_file_id = Uuid::now_v7();
-        let relative_path = IndexFileRecord::build_relative_path(
-            &table.namespace_id,
-            &table.table_id,
-            &index_file_id,
-        );
-        let output_file = table.storage.create(&relative_path).await?;
-        index_builder.write_file(output_file).await?;
-        let size = table
-            .storage
-            .open(&relative_path)
-            .await?
-            .metadata()
-            .await?
-            .size;
-        index_file_records.push(IndexFileRecord {
-            index_file_id,
-            table_id: table.table_id,
-            index_id: index_builder.index_def().index_id,
-            data_file_id,
-            relative_path,
-            size: size as i64,
-        });
+    let record_count: usize = data_file_records
+        .iter()
+        .map(|r| r.record_count as usize)
+        .sum();
+
+    if record_count > 0 {
+        let mut tx_helper = table.transaction_helper().await?;
+        tx_helper.insert_data_files(&data_file_records).await?;
+        tx_helper.insert_index_files(&index_file_records).await?;
+        tx_helper.commit().await?;
     }
-
-    let mut tx_helper = table.transaction_helper().await?;
-    tx_helper
-        .insert_data_files(&[DataFileRecord {
-            data_file_id,
-            table_id: table.table_id,
-            format: table.config.preferred_data_file_format,
-            relative_path: relative_path.clone(),
-            size: size as i64,
-            record_count: record_count as i64,
-            validity: RowValidity::new(record_count),
-        }])
-        .await?;
-    tx_helper.insert_index_files(&index_file_records).await?;
-    tx_helper.commit().await?;
 
     Ok(record_count)
 }
@@ -223,36 +171,165 @@ pub(crate) fn build_inline_indexes(
     Ok(inline_index_records)
 }
 
-async fn write_parquet_file(
+async fn write_parquet_files(
     table: &Table,
-    relative_path: &str,
     mut batch_stream: RecordBatchStream,
-    index_builders: &mut Vec<Box<dyn IndexBuilder>>,
-) -> ILResult<Vec<Uuid>> {
-    let output_file = table.storage.create(relative_path).await?;
+) -> ILResult<(Vec<DataFileRecord>, Vec<IndexFileRecord>)> {
+    let row_limit = table.config.inline_row_count_limit;
+    let mut data_file_records = Vec::new();
+    let mut index_file_records = Vec::new();
 
-    let mut arrow_writer = build_parquet_writer(
-        output_file,
-        table.table_schema.arrow_schema.clone(),
-        table.config.parquet_row_group_size,
-        table.config.preferred_data_file_format,
-    )?;
+    // Current file state
+    let mut current_data_file_id: Option<Uuid> = None;
+    let mut current_relative_path: Option<String> = None;
+    let mut current_writer: Option<
+        parquet::arrow::async_writer::AsyncArrowWriter<Box<dyn crate::storage::OutputFile>>,
+    > = None;
+    let mut current_index_builders: Option<Vec<Box<dyn IndexBuilder>>> = None;
+    let mut current_row_count = 0usize;
 
-    let mut row_ids = Vec::new();
     while let Some(batch) = batch_stream.next().await {
         let batch = batch?;
-        let row_id_array = extract_row_id_array_from_record_batch(&batch)?;
-        row_ids.extend(fixed_size_binary_array_to_uuids(&row_id_array)?);
+        let batch_rows = batch.num_rows();
+        if batch_rows == 0 {
+            continue;
+        }
 
-        arrow_writer.write(&batch).await?;
-        for builder in index_builders.iter_mut() {
-            builder.append(&batch)?;
+        let mut batch_offset = 0;
+        while batch_offset < batch_rows {
+            // Initialize a new file writer if needed
+            if current_writer.is_none() {
+                let data_file_id = Uuid::now_v7();
+                let relative_path = DataFileRecord::build_relative_path(
+                    &table.namespace_id,
+                    &table.table_id,
+                    &data_file_id,
+                    table.config.preferred_data_file_format,
+                );
+                let output_file = table.storage.create(&relative_path).await?;
+                let arrow_writer = build_parquet_writer(
+                    output_file,
+                    table.table_schema.arrow_schema.clone(),
+                    table.config.parquet_row_group_size,
+                    table.config.preferred_data_file_format,
+                )?;
+
+                current_data_file_id = Some(data_file_id);
+                current_relative_path = Some(relative_path);
+                current_writer = Some(arrow_writer);
+                current_index_builders = Some(table.index_manager.new_index_builders()?);
+                current_row_count = 0;
+            }
+
+            let writer = current_writer.as_mut().unwrap();
+            let index_builders = current_index_builders.as_mut().unwrap();
+
+            let remaining_capacity = row_limit.saturating_sub(current_row_count);
+            let rows_to_write = (batch_rows - batch_offset).min(remaining_capacity);
+
+            if rows_to_write > 0 {
+                let slice = batch.slice(batch_offset, rows_to_write);
+                writer.write(&slice).await?;
+                for builder in index_builders.iter_mut() {
+                    builder.append(&slice)?;
+                }
+                current_row_count += rows_to_write;
+                batch_offset += rows_to_write;
+            }
+
+            // Close file if it reached the limit
+            if current_row_count >= row_limit {
+                let (data_record, idx_records) = finish_parquet_file(
+                    table,
+                    current_writer.take().unwrap(),
+                    current_index_builders.take().unwrap(),
+                    current_data_file_id.take().unwrap(),
+                    current_relative_path.take().unwrap(),
+                    current_row_count,
+                )
+                .await?;
+                data_file_records.push(data_record);
+                index_file_records.extend(idx_records);
+            }
         }
     }
 
-    arrow_writer.close().await?;
+    // Finish the last file if it has any data
+    if let Some(writer) = current_writer {
+        if current_row_count > 0 {
+            let (data_record, idx_records) = finish_parquet_file(
+                table,
+                writer,
+                current_index_builders.unwrap(),
+                current_data_file_id.unwrap(),
+                current_relative_path.unwrap(),
+                current_row_count,
+            )
+            .await?;
+            data_file_records.push(data_record);
+            index_file_records.extend(idx_records);
+        }
+    }
 
-    Ok(row_ids)
+    Ok((data_file_records, index_file_records))
+}
+
+async fn finish_parquet_file(
+    table: &Table,
+    writer: parquet::arrow::async_writer::AsyncArrowWriter<Box<dyn crate::storage::OutputFile>>,
+    mut index_builders: Vec<Box<dyn IndexBuilder>>,
+    data_file_id: Uuid,
+    relative_path: String,
+    record_count: usize,
+) -> ILResult<(DataFileRecord, Vec<IndexFileRecord>)> {
+    writer.close().await?;
+
+    let size = table
+        .storage
+        .open(&relative_path)
+        .await?
+        .metadata()
+        .await?
+        .size;
+
+    let data_file_record = DataFileRecord {
+        data_file_id,
+        table_id: table.table_id,
+        format: table.config.preferred_data_file_format,
+        relative_path,
+        size: size as i64,
+        record_count: record_count as i64,
+        validity: RowValidity::new(record_count),
+    };
+
+    let mut index_file_records = Vec::new();
+    for index_builder in index_builders.iter_mut() {
+        let index_file_id = Uuid::now_v7();
+        let index_relative_path = IndexFileRecord::build_relative_path(
+            &table.namespace_id,
+            &table.table_id,
+            &index_file_id,
+        );
+        let output_file = table.storage.create(&index_relative_path).await?;
+        index_builder.write_file(output_file).await?;
+        let index_size = table
+            .storage
+            .open(&index_relative_path)
+            .await?
+            .metadata()
+            .await?
+            .size;
+        index_file_records.push(IndexFileRecord {
+            index_file_id,
+            table_id: table.table_id,
+            index_id: index_builder.index_def().index_id,
+            data_file_id,
+            relative_path: index_relative_path,
+            size: index_size as i64,
+        });
+    }
+
+    Ok((data_file_record, index_file_records))
 }
 
 macro_rules! extract_sql_values {
