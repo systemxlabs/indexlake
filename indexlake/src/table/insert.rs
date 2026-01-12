@@ -179,13 +179,9 @@ async fn write_parquet_files(
     let mut data_file_records = Vec::new();
     let mut index_file_records = Vec::new();
 
-    // Current file state
-    let mut current_data_file_id: Option<Uuid> = None;
-    let mut current_relative_path: Option<String> = None;
-    let mut current_writer: Option<
-        parquet::arrow::async_writer::AsyncArrowWriter<Box<dyn crate::storage::OutputFile>>,
-    > = None;
-    let mut current_index_builders: Option<Vec<Box<dyn IndexBuilder>>> = None;
+    // Initialize first file writer
+    let (mut current_data_file_id, mut current_relative_path, mut current_writer, mut current_index_builders) =
+        create_new_parquet_writer(table).await?;
     let mut current_row_count = 0usize;
 
     while let Some(batch) = batch_stream.next().await {
@@ -195,65 +191,41 @@ async fn write_parquet_files(
             continue;
         }
 
-        // Initialize a new file writer if needed
-        if current_writer.is_none() {
-            let data_file_id = Uuid::now_v7();
-            let relative_path = DataFileRecord::build_relative_path(
-                &table.namespace_id,
-                &table.table_id,
-                &data_file_id,
-                table.config.preferred_data_file_format,
-            );
-            let output_file = table.storage.create(&relative_path).await?;
-            let arrow_writer = build_parquet_writer(
-                output_file,
-                table.table_schema.arrow_schema.clone(),
-                table.config.parquet_row_group_size,
-                table.config.preferred_data_file_format,
-            )?;
-
-            current_data_file_id = Some(data_file_id);
-            current_relative_path = Some(relative_path);
-            current_writer = Some(arrow_writer);
-            current_index_builders = Some(table.index_manager.new_index_builders()?);
-            current_row_count = 0;
-        }
-
-        let writer = current_writer.as_mut().unwrap();
-        let index_builders = current_index_builders.as_mut().unwrap();
-
-        writer.write(&batch).await?;
-        for builder in index_builders.iter_mut() {
+        current_writer.write(&batch).await?;
+        for builder in current_index_builders.iter_mut() {
             builder.append(&batch)?;
         }
         current_row_count += batch_rows;
 
-        // Close file if it reached the limit
+        // Close file and create new one if it reached the limit
         if current_row_count >= row_limit {
             let (data_record, idx_records) = finish_parquet_file(
                 table,
-                current_writer.take().unwrap(),
-                current_index_builders.take().unwrap(),
-                current_data_file_id.take().unwrap(),
-                current_relative_path.take().unwrap(),
+                current_writer,
+                current_index_builders,
+                current_data_file_id,
+                current_relative_path,
                 current_row_count,
             )
             .await?;
             data_file_records.push(data_record);
             index_file_records.extend(idx_records);
+
+            // Create new writer for next batches
+            (current_data_file_id, current_relative_path, current_writer, current_index_builders) =
+                create_new_parquet_writer(table).await?;
+            current_row_count = 0;
         }
     }
 
     // Finish the last file if it has any data
-    if let Some(writer) = current_writer
-        && current_row_count > 0
-    {
+    if current_row_count > 0 {
         let (data_record, idx_records) = finish_parquet_file(
             table,
-            writer,
-            current_index_builders.unwrap(),
-            current_data_file_id.unwrap(),
-            current_relative_path.unwrap(),
+            current_writer,
+            current_index_builders,
+            current_data_file_id,
+            current_relative_path,
             current_row_count,
         )
         .await?;
@@ -262,6 +234,33 @@ async fn write_parquet_files(
     }
 
     Ok((data_file_records, index_file_records))
+}
+
+async fn create_new_parquet_writer(
+    table: &Table,
+) -> ILResult<(
+    Uuid,
+    String,
+    parquet::arrow::async_writer::AsyncArrowWriter<Box<dyn crate::storage::OutputFile>>,
+    Vec<Box<dyn IndexBuilder>>,
+)> {
+    let data_file_id = Uuid::now_v7();
+    let relative_path = DataFileRecord::build_relative_path(
+        &table.namespace_id,
+        &table.table_id,
+        &data_file_id,
+        table.config.preferred_data_file_format,
+    );
+    let output_file = table.storage.create(&relative_path).await?;
+    let arrow_writer = build_parquet_writer(
+        output_file,
+        table.table_schema.arrow_schema.clone(),
+        table.config.parquet_row_group_size,
+        table.config.preferred_data_file_format,
+    )?;
+    let index_builders = table.index_manager.new_index_builders()?;
+
+    Ok((data_file_id, relative_path, arrow_writer, index_builders))
 }
 
 async fn finish_parquet_file(
