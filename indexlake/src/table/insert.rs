@@ -195,62 +195,52 @@ async fn write_parquet_files(
             continue;
         }
 
-        let mut batch_offset = 0;
-        while batch_offset < batch_rows {
-            // Initialize a new file writer if needed
-            if current_writer.is_none() {
-                let data_file_id = Uuid::now_v7();
-                let relative_path = DataFileRecord::build_relative_path(
-                    &table.namespace_id,
-                    &table.table_id,
-                    &data_file_id,
-                    table.config.preferred_data_file_format,
-                );
-                let output_file = table.storage.create(&relative_path).await?;
-                let arrow_writer = build_parquet_writer(
-                    output_file,
-                    table.table_schema.arrow_schema.clone(),
-                    table.config.parquet_row_group_size,
-                    table.config.preferred_data_file_format,
-                )?;
+        // Initialize a new file writer if needed
+        if current_writer.is_none() {
+            let data_file_id = Uuid::now_v7();
+            let relative_path = DataFileRecord::build_relative_path(
+                &table.namespace_id,
+                &table.table_id,
+                &data_file_id,
+                table.config.preferred_data_file_format,
+            );
+            let output_file = table.storage.create(&relative_path).await?;
+            let arrow_writer = build_parquet_writer(
+                output_file,
+                table.table_schema.arrow_schema.clone(),
+                table.config.parquet_row_group_size,
+                table.config.preferred_data_file_format,
+            )?;
 
-                current_data_file_id = Some(data_file_id);
-                current_relative_path = Some(relative_path);
-                current_writer = Some(arrow_writer);
-                current_index_builders = Some(table.index_manager.new_index_builders()?);
-                current_row_count = 0;
-            }
+            current_data_file_id = Some(data_file_id);
+            current_relative_path = Some(relative_path);
+            current_writer = Some(arrow_writer);
+            current_index_builders = Some(table.index_manager.new_index_builders()?);
+            current_row_count = 0;
+        }
 
-            let writer = current_writer.as_mut().unwrap();
-            let index_builders = current_index_builders.as_mut().unwrap();
+        let writer = current_writer.as_mut().unwrap();
+        let index_builders = current_index_builders.as_mut().unwrap();
 
-            let remaining_capacity = row_limit.saturating_sub(current_row_count);
-            let rows_to_write = (batch_rows - batch_offset).min(remaining_capacity);
+        writer.write(&batch).await?;
+        for builder in index_builders.iter_mut() {
+            builder.append(&batch)?;
+        }
+        current_row_count += batch_rows;
 
-            if rows_to_write > 0 {
-                let slice = batch.slice(batch_offset, rows_to_write);
-                writer.write(&slice).await?;
-                for builder in index_builders.iter_mut() {
-                    builder.append(&slice)?;
-                }
-                current_row_count += rows_to_write;
-                batch_offset += rows_to_write;
-            }
-
-            // Close file if it reached the limit
-            if current_row_count >= row_limit {
-                let (data_record, idx_records) = finish_parquet_file(
-                    table,
-                    current_writer.take().unwrap(),
-                    current_index_builders.take().unwrap(),
-                    current_data_file_id.take().unwrap(),
-                    current_relative_path.take().unwrap(),
-                    current_row_count,
-                )
-                .await?;
-                data_file_records.push(data_record);
-                index_file_records.extend(idx_records);
-            }
+        // Close file if it reached the limit
+        if current_row_count >= row_limit {
+            let (data_record, idx_records) = finish_parquet_file(
+                table,
+                current_writer.take().unwrap(),
+                current_index_builders.take().unwrap(),
+                current_data_file_id.take().unwrap(),
+                current_relative_path.take().unwrap(),
+                current_row_count,
+            )
+            .await?;
+            data_file_records.push(data_record);
+            index_file_records.extend(idx_records);
         }
     }
 
