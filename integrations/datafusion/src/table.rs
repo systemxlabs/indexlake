@@ -14,6 +14,7 @@ use datafusion::prelude::Expr;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
 use indexlake::utils::schema_without_row_id;
+use indexlake::Client;
 use log::warn;
 
 use crate::{
@@ -23,6 +24,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct IndexLakeTable {
+    client: Arc<Client>,
     table: Arc<Table>,
     scan_partitions: usize,
     column_defaults: HashMap<String, Expr>,
@@ -32,7 +34,7 @@ pub struct IndexLakeTable {
 }
 
 impl IndexLakeTable {
-    pub fn try_new(table: Arc<Table>) -> Result<Self, DataFusionError> {
+    pub fn try_new(client: Arc<Client>, table: Arc<Table>) -> Result<Self, DataFusionError> {
         let mut column_defaults = HashMap::new();
         for field_record in table.field_records.iter() {
             if let Some(default_value) = &field_record.default_value {
@@ -44,6 +46,7 @@ impl IndexLakeTable {
             }
         }
         Ok(Self {
+            client,
             table,
             scan_partitions: 16,
             column_defaults,
@@ -128,6 +131,7 @@ impl TableProvider for IndexLakeTable {
         };
 
         let exec = IndexLakeScanExec::try_new(
+            self.client.clone(),
             self.table.clone(),
             self.scan_partitions,
             data_files,
@@ -196,6 +200,7 @@ impl TableProvider for IndexLakeTable {
         insert_op: InsertOp,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let insert_exec = IndexLakeInsertExec::try_new(
+            self.client.clone(),
             self.table.clone(),
             input,
             insert_op,

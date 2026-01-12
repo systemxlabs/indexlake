@@ -5,8 +5,9 @@ pub struct IndexLakePhysicalPlanNode {
         oneof = "index_lake_physical_plan_node::IndexLakePhysicalPlanType",
         tags = "1, 2"
     )]
-    pub index_lake_physical_plan_type:
-        ::core::option::Option<index_lake_physical_plan_node::IndexLakePhysicalPlanType>,
+    pub index_lake_physical_plan_type: ::core::option::Option<
+        index_lake_physical_plan_node::IndexLakePhysicalPlanType,
+    >,
 }
 /// Nested message and enum types in `IndexLakePhysicalPlanNode`.
 pub mod index_lake_physical_plan_node {
@@ -36,6 +37,8 @@ pub struct IndexLakeScanExecNode {
     pub filters: ::prost::alloc::vec::Vec<::datafusion_proto::protobuf::LogicalExprNode>,
     #[prost(uint32, optional, tag = "8")]
     pub limit: ::core::option::Option<u32>,
+    #[prost(message, optional, tag = "9")]
+    pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IndexLakeInsertExecNode {
@@ -47,6 +50,8 @@ pub struct IndexLakeInsertExecNode {
     pub insert_op: i32,
     #[prost(uint32, tag = "4")]
     pub stream_insert_threshold: u32,
+    #[prost(message, optional, tag = "5")]
+    pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Projection {
