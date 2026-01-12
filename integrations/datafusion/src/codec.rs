@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::index_lake_physical_plan_node::IndexLakePhysicalPlanType;
 use crate::{
     DataFile, DataFiles, IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode,
-    IndexLakeScanExec, IndexLakeScanExecNode,
+    IndexLakeScanExec, IndexLakeScanExecNode, LazyTable,
 };
 
 #[derive(Debug)]
@@ -60,10 +60,11 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 let filters =
                     parse_exprs(&node.filters, registry, &DefaultLogicalExtensionCodec {})?;
 
+                let lazy_table =
+                    LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
+
                 Ok(Arc::new(IndexLakeScanExec::try_new(
-                    self.client.clone(),
-                    node.namespace_name,
-                    node.table_name,
+                    lazy_table,
                     schema,
                     node.partition_count as usize,
                     data_files,
@@ -84,10 +85,11 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
                 let insert_op = parse_insert_op(node.insert_op)?;
 
+                let lazy_table =
+                    LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
+
                 Ok(Arc::new(IndexLakeInsertExec::try_new(
-                    self.client.clone(),
-                    node.namespace_name,
-                    node.table_name,
+                    lazy_table,
                     input,
                     insert_op,
                     node.stream_insert_threshold as usize,
@@ -113,8 +115,8 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Scan(
                     IndexLakeScanExecNode {
-                        namespace_name: exec.namespace_name.clone(),
-                        table_name: exec.table_name.clone(),
+                        namespace_name: exec.lazy_table.namespace_name.clone(),
+                        table_name: exec.lazy_table.table_name.clone(),
                         partition_count: exec.partition_count as u32,
                         data_files,
                         concurrency: exec.concurrency.map(|c| c as u32),
@@ -139,8 +141,8 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Insert(
                     IndexLakeInsertExecNode {
-                        namespace_name: exec.namespace_name.clone(),
-                        table_name: exec.table_name.clone(),
+                        namespace_name: exec.lazy_table.namespace_name.clone(),
+                        table_name: exec.lazy_table.table_name.clone(),
                         insert_op,
                         stream_insert_threshold: exec.stream_insert_threshold as u32,
                     },

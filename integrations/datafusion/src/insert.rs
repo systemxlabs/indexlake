@@ -13,18 +13,14 @@ use datafusion::physical_plan::{
     Partitioning, PlanProperties,
 };
 use futures::{StreamExt, TryStreamExt};
-use indexlake::table::{Table, TableInsertion};
-use indexlake::{Client, ILError};
-use tokio::sync::Mutex;
+use indexlake::ILError;
+use indexlake::table::TableInsertion;
 
-use crate::get_or_load_table;
+use crate::LazyTable;
 
 #[derive(Debug)]
 pub struct IndexLakeInsertExec {
-    pub client: Arc<Client>,
-    pub namespace_name: String,
-    pub table_name: String,
-    pub table: Arc<Mutex<Option<Arc<Table>>>>,
+    pub lazy_table: LazyTable,
     pub input: Arc<dyn ExecutionPlan>,
     pub insert_op: InsertOp,
     pub stream_insert_threshold: usize,
@@ -33,9 +29,7 @@ pub struct IndexLakeInsertExec {
 
 impl IndexLakeInsertExec {
     pub fn try_new(
-        client: Arc<Client>,
-        namespace_name: String,
-        table_name: String,
+        lazy_table: LazyTable,
         input: Arc<dyn ExecutionPlan>,
         insert_op: InsertOp,
         stream_insert_threshold: usize,
@@ -57,26 +51,12 @@ impl IndexLakeInsertExec {
         );
 
         Ok(Self {
-            client,
-            namespace_name,
-            table_name,
-            table: Arc::new(Mutex::new(None)),
+            lazy_table,
             input,
             insert_op,
             stream_insert_threshold,
             cache,
         })
-    }
-
-    pub fn with_table(self, table: Option<Arc<Table>>) -> Self {
-        Self {
-            table: Arc::new(Mutex::new(table)),
-            ..self
-        }
-    }
-
-    pub fn with_table_mutex(self, table: Arc<Mutex<Option<Arc<Table>>>>) -> Self {
-        Self { table, ..self }
     }
 }
 
@@ -106,14 +86,11 @@ impl ExecutionPlan for IndexLakeInsertExec {
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let exec = IndexLakeInsertExec::try_new(
-            self.client.clone(),
-            self.namespace_name.clone(),
-            self.table_name.clone(),
+            self.lazy_table.clone(),
             children[0].clone(),
             self.insert_op,
             self.stream_insert_threshold,
-        )?
-        .with_table_mutex(self.table.clone());
+        )?;
         Ok(Arc::new(exec))
     }
 
@@ -129,16 +106,14 @@ impl ExecutionPlan for IndexLakeInsertExec {
         }
 
         let mut input_stream = self.input.execute(partition, context)?;
-        let table_mutex = self.table.clone();
-        let client = self.client.clone();
-        let namespace_name = self.namespace_name.clone();
-        let table_name = self.table_name.clone();
+        let lazy_table = self.lazy_table.clone();
         let input = self.input.clone();
         let insert_op = self.insert_op;
         let stream_insert_threshold = self.stream_insert_threshold;
 
         let stream = futures::stream::once(async move {
-            let table = get_or_load_table(&table_mutex, &client, &namespace_name, &table_name)
+            let table = lazy_table
+                .get_or_load()
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
@@ -226,7 +201,7 @@ impl DisplayAs for IndexLakeInsertExec {
         write!(
             f,
             "IndexLakeInsertExec: table={}.{}",
-            self.namespace_name, self.table_name
+            self.lazy_table.namespace_name, self.lazy_table.table_name
         )?;
         if let Ok(stats) = self.input.partition_statistics(None) {
             match stats.num_rows {
