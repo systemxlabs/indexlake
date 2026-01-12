@@ -16,6 +16,7 @@ use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
 use indexlake::utils::schema_without_row_id;
 use log::warn;
+use tokio::sync::Mutex;
 
 use crate::{
     IndexLakeInsertExec, IndexLakeScanExec, datafusion_expr_to_indexlake_expr,
@@ -130,10 +131,15 @@ impl TableProvider for IndexLakeTable {
             projection.cloned()
         };
 
-        let exec = IndexLakeScanExec::try_new(
+        let lazy_table = LazyTable::new(
             self.client.clone(),
             self.table.namespace_name.clone(),
             self.table.table_name.clone(),
+        )
+        .with_table(self.table.clone());
+
+        let exec = IndexLakeScanExec::try_new(
+            lazy_table,
             self.table.output_schema.clone(),
             self.scan_partitions,
             data_files,
@@ -141,8 +147,7 @@ impl TableProvider for IndexLakeTable {
             il_projection,
             filters.to_vec(),
             limit,
-        )?
-        .with_table(Some(self.table.clone()));
+        )?;
         Ok(Arc::new(exec))
     }
 
@@ -202,16 +207,75 @@ impl TableProvider for IndexLakeTable {
         input: Arc<dyn ExecutionPlan>,
         insert_op: InsertOp,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let insert_exec = IndexLakeInsertExec::try_new(
+        let lazy_table = LazyTable::new(
             self.client.clone(),
             self.table.namespace_name.clone(),
             self.table.table_name.clone(),
+        )
+        .with_table(self.table.clone());
+
+        let insert_exec = IndexLakeInsertExec::try_new(
+            lazy_table,
             input,
             insert_op,
             self.stream_insert_threshold,
-        )?
-        .with_table(Some(self.table.clone()));
+        )?;
 
         Ok(Arc::new(insert_exec))
+    }
+}
+
+/// A lazy-loaded table holder containing client and table metadata.
+/// The actual Table is loaded on first access if not provided upfront.
+#[derive(Debug, Clone)]
+pub struct LazyTable {
+    pub client: Arc<Client>,
+    pub namespace_name: String,
+    pub table_name: String,
+    table: Arc<Mutex<Option<Arc<Table>>>>,
+}
+
+impl LazyTable {
+    /// Create a new LazyTable without a pre-loaded table.
+    pub fn new(client: Arc<Client>, namespace_name: String, table_name: String) -> Self {
+        Self {
+            client,
+            namespace_name,
+            table_name,
+            table: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Create a new LazyTable with a pre-loaded table.
+    pub fn with_table(mut self, table: Arc<Table>) -> Self {
+        self.table = Arc::new(Mutex::new(Some(table)));
+        self
+    }
+
+    /// Get the table, loading it lazily if not already loaded.
+    pub async fn get_or_load(&self) -> Result<Arc<Table>, indexlake::ILError> {
+        let mut guard = self.table.lock().await;
+        if let Some(table) = guard.as_ref() {
+            return Ok(table.clone());
+        }
+
+        let table = self
+            .client
+            .load_table(&self.namespace_name, &self.table_name)
+            .await?;
+        let table = Arc::new(table);
+        *guard = Some(table.clone());
+        Ok(table)
+    }
+
+    /// Get the inner table mutex for cloning to new instances.
+    pub fn table_mutex(&self) -> Arc<Mutex<Option<Arc<Table>>>> {
+        self.table.clone()
+    }
+
+    /// Create a new LazyTable with the same metadata but a different table mutex.
+    pub fn with_table_mutex(mut self, table: Arc<Mutex<Option<Arc<Table>>>>) -> Self {
+        self.table = table;
+        self
     }
 }
