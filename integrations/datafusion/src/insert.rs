@@ -32,41 +32,6 @@ pub struct IndexLakeInsertExec {
 impl IndexLakeInsertExec {
     pub fn try_new(
         client: Arc<Client>,
-        table: Arc<Table>,
-        input: Arc<dyn ExecutionPlan>,
-        insert_op: InsertOp,
-        stream_insert_threshold: usize,
-    ) -> Result<Self, DataFusionError> {
-        match insert_op {
-            InsertOp::Append | InsertOp::Overwrite => {}
-            InsertOp::Replace => {
-                return Err(DataFusionError::NotImplemented(
-                    "Replace is not supported for indexlake table".to_string(),
-                ));
-            }
-        }
-
-        let cache = PlanProperties::new(
-            EquivalenceProperties::new(make_count_schema()),
-            Partitioning::UnknownPartitioning(1),
-            input.pipeline_behavior(),
-            input.boundedness(),
-        );
-
-        Ok(Self {
-            client,
-            namespace_name: table.namespace_name.clone(),
-            table_name: table.table_name.clone(),
-            table: Arc::new(Mutex::new(Some(table))),
-            input,
-            insert_op,
-            stream_insert_threshold,
-            cache,
-        })
-    }
-
-    pub fn try_new_without_table(
-        client: Arc<Client>,
         namespace_name: String,
         table_name: String,
         input: Arc<dyn ExecutionPlan>,
@@ -101,11 +66,15 @@ impl IndexLakeInsertExec {
         })
     }
 
-    pub fn with_table(self, table: Arc<Table>) -> Self {
+    pub fn with_table(self, table: Option<Arc<Table>>) -> Self {
         Self {
-            table: Arc::new(Mutex::new(Some(table))),
+            table: Arc::new(Mutex::new(table)),
             ..self
         }
+    }
+
+    pub fn with_table_mutex(self, table: Arc<Mutex<Option<Arc<Table>>>>) -> Self {
+        Self { table, ..self }
     }
 }
 
@@ -134,7 +103,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let exec = IndexLakeInsertExec::try_new_without_table(
+        let exec = IndexLakeInsertExec::try_new(
             self.client.clone(),
             self.namespace_name.clone(),
             self.table_name.clone(),

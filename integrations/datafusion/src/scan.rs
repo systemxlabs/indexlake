@@ -47,43 +47,6 @@ pub struct IndexLakeScanExec {
 impl IndexLakeScanExec {
     pub fn try_new(
         client: Arc<Client>,
-        table: Arc<Table>,
-        partition_count: usize,
-        data_files: Option<Arc<Vec<DataFileRecord>>>,
-        concurrency: Option<usize>,
-        projection: Option<Vec<usize>>,
-        filters: Vec<Expr>,
-        limit: Option<usize>,
-    ) -> Result<Self, DataFusionError> {
-        let projected_schema = project_schema(&table.output_schema, projection.as_ref())?;
-        let properties = PlanProperties::new(
-            EquivalenceProperties::new(projected_schema),
-            Partitioning::UnknownPartitioning(partition_count),
-            EmissionType::Incremental,
-            Boundedness::Bounded,
-        );
-        let data_file_partition_ranges = data_files
-            .as_ref()
-            .map(|files| calc_data_file_partition_ranges(partition_count, files.len()));
-        Ok(Self {
-            client,
-            namespace_name: table.namespace_name.clone(),
-            table_name: table.table_name.clone(),
-            output_schema: table.output_schema.clone(),
-            table: Arc::new(Mutex::new(Some(table))),
-            partition_count,
-            data_files,
-            concurrency,
-            projection,
-            filters,
-            limit,
-            data_file_partition_ranges,
-            properties,
-        })
-    }
-
-    pub fn try_new_without_table(
-        client: Arc<Client>,
         namespace_name: String,
         table_name: String,
         output_schema: SchemaRef,
@@ -121,11 +84,15 @@ impl IndexLakeScanExec {
         })
     }
 
-    pub fn with_table(self, table: Arc<Table>) -> Self {
+    pub fn with_table(self, table: Option<Arc<Table>>) -> Self {
         Self {
-            table: Arc::new(Mutex::new(Some(table))),
+            table: Arc::new(Mutex::new(table)),
             ..self
         }
+    }
+
+    pub fn with_table_mutex(self, table: Arc<Mutex<Option<Arc<Table>>>>) -> Self {
+        Self { table, ..self }
     }
 
     pub fn get_scan_partition(&self, partition: Option<usize>) -> TableScanPartition {
@@ -252,7 +219,7 @@ impl ExecutionPlan for IndexLakeScanExec {
     }
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
-        match IndexLakeScanExec::try_new_without_table(
+        match IndexLakeScanExec::try_new(
             self.client.clone(),
             self.namespace_name.clone(),
             self.table_name.clone(),

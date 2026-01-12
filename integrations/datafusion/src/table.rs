@@ -132,14 +132,17 @@ impl TableProvider for IndexLakeTable {
 
         let exec = IndexLakeScanExec::try_new(
             self.client.clone(),
-            self.table.clone(),
+            self.table.namespace_name.clone(),
+            self.table.table_name.clone(),
+            self.table.output_schema.clone(),
             self.scan_partitions,
             data_files,
             self.scan_concurrency,
             il_projection,
             filters.to_vec(),
             limit,
-        )?;
+        )?
+        .with_table(Some(self.table.clone()));
         Ok(Arc::new(exec))
     }
 
@@ -201,11 +204,13 @@ impl TableProvider for IndexLakeTable {
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let insert_exec = IndexLakeInsertExec::try_new(
             self.client.clone(),
-            self.table.clone(),
+            self.table.namespace_name.clone(),
+            self.table.table_name.clone(),
             input,
             insert_op,
             self.stream_insert_threshold,
-        )?;
+        )?
+        .with_table(Some(self.table.clone()));
 
         Ok(Arc::new(insert_exec))
     }
