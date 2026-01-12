@@ -65,8 +65,7 @@ impl IndexLakeInsertExec {
         })
     }
 
-    /// Create a lazy insert exec that will load the table on first execute.
-    pub fn try_new_lazy(
+    pub fn try_new_without_table(
         client: Arc<Client>,
         namespace_name: String,
         table_name: String,
@@ -101,6 +100,13 @@ impl IndexLakeInsertExec {
             cache,
         })
     }
+
+    pub fn with_table(self, table: Arc<Table>) -> Self {
+        Self {
+            table: Arc::new(Mutex::new(Some(table))),
+            ..self
+        }
+    }
 }
 
 impl ExecutionPlan for IndexLakeInsertExec {
@@ -128,7 +134,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let exec = IndexLakeInsertExec::try_new_lazy(
+        let exec = IndexLakeInsertExec::try_new_without_table(
             self.client.clone(),
             self.namespace_name.clone(),
             self.table_name.clone(),

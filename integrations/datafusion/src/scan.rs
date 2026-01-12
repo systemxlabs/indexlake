@@ -82,8 +82,7 @@ impl IndexLakeScanExec {
         })
     }
 
-    /// Create a lazy scan exec that will load the table on first execute.
-    pub fn try_new_lazy(
+    pub fn try_new_without_table(
         client: Arc<Client>,
         namespace_name: String,
         table_name: String,
@@ -120,6 +119,13 @@ impl IndexLakeScanExec {
             data_file_partition_ranges,
             properties,
         })
+    }
+
+    pub fn with_table(self, table: Arc<Table>) -> Self {
+        Self {
+            table: Arc::new(Mutex::new(Some(table))),
+            ..self
+        }
     }
 
     pub fn get_scan_partition(&self, partition: Option<usize>) -> TableScanPartition {
@@ -246,7 +252,7 @@ impl ExecutionPlan for IndexLakeScanExec {
     }
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
-        match IndexLakeScanExec::try_new_lazy(
+        match IndexLakeScanExec::try_new_without_table(
             self.client.clone(),
             self.namespace_name.clone(),
             self.table_name.clone(),

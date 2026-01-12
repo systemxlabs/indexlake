@@ -60,7 +60,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 let filters =
                     parse_exprs(&node.filters, registry, &DefaultLogicalExtensionCodec {})?;
 
-                Ok(Arc::new(IndexLakeScanExec::try_new_lazy(
+                Ok(Arc::new(IndexLakeScanExec::try_new_without_table(
                     self.client.clone(),
                     node.namespace_name,
                     node.table_name,
@@ -84,7 +84,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
                 let insert_op = parse_insert_op(node.insert_op)?;
 
-                Ok(Arc::new(IndexLakeInsertExec::try_new_lazy(
+                Ok(Arc::new(IndexLakeInsertExec::try_new_without_table(
                     self.client.clone(),
                     node.namespace_name,
                     node.table_name,
