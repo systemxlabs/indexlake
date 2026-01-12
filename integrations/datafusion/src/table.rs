@@ -267,15 +267,4 @@ impl LazyTable {
         *guard = Some(table.clone());
         Ok(table)
     }
-
-    /// Get the inner table mutex for cloning to new instances.
-    pub fn table_mutex(&self) -> Arc<Mutex<Option<Arc<Table>>>> {
-        self.table.clone()
-    }
-
-    /// Create a new LazyTable with the same metadata but a different table mutex.
-    pub fn with_table_mutex(mut self, table: Arc<Mutex<Option<Arc<Table>>>>) -> Self {
-        self.table = table;
-        self
-    }
 }

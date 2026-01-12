@@ -13,8 +13,8 @@ use datafusion::physical_plan::{
     Partitioning, PlanProperties,
 };
 use futures::{StreamExt, TryStreamExt};
-use indexlake::table::TableInsertion;
 use indexlake::ILError;
+use indexlake::table::TableInsertion;
 
 use crate::LazyTable;
 

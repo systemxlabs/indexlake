@@ -23,7 +23,7 @@ use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
 use log::error;
 
-use crate::{datafusion_expr_to_indexlake_expr, LazyTable};
+use crate::{LazyTable, datafusion_expr_to_indexlake_expr};
 
 #[derive(Debug)]
 pub struct IndexLakeScanExec {
