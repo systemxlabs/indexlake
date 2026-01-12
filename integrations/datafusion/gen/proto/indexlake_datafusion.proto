@@ -29,7 +29,6 @@ message IndexLakeInsertExecNode {
   string table_name = 2;
   datafusion.InsertOp insert_op = 3;
   uint32 stream_insert_threshold = 4;
-  datafusion_common.Schema schema = 5;
 }
 
 message Projection {

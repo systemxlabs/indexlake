@@ -17,7 +17,7 @@ use indexlake::table::{Table, TableInsertion};
 use indexlake::{Client, ILError};
 use tokio::sync::Mutex;
 
-use crate::get_or_load_table_inner;
+use crate::get_or_load_table;
 
 #[derive(Debug)]
 pub struct IndexLakeInsertExec {
@@ -138,10 +138,9 @@ impl ExecutionPlan for IndexLakeInsertExec {
         let stream_insert_threshold = self.stream_insert_threshold;
 
         let stream = futures::stream::once(async move {
-            let table =
-                get_or_load_table_inner(&table_mutex, &client, &namespace_name, &table_name)
-                    .await
-                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let table = get_or_load_table(&table_mutex, &client, &namespace_name, &table_name)
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
             match insert_op {
                 InsertOp::Append => {}

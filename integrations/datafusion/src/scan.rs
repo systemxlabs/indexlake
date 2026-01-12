@@ -45,6 +45,7 @@ pub struct IndexLakeScanExec {
 }
 
 impl IndexLakeScanExec {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         client: Arc<Client>,
         namespace_name: String,
@@ -189,10 +190,9 @@ impl ExecutionPlan for IndexLakeScanExec {
         let limit = self.limit;
 
         let fut = async move {
-            let table =
-                get_or_load_table_inner(&table_mutex, &client, &namespace_name, &table_name)
-                    .await
-                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let table = get_or_load_table(&table_mutex, &client, &namespace_name, &table_name)
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
             get_batch_stream(table, projected_schema.clone(), scan, limit).await
         };
         let stream = futures::stream::once(fut).try_flatten();
@@ -216,8 +216,7 @@ impl ExecutionPlan for IndexLakeScanExec {
         let row_count_result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let table =
-                    get_or_load_table_inner(&table_mutex, &client, &namespace_name, &table_name)
-                        .await?;
+                    get_or_load_table(&table_mutex, &client, &namespace_name, &table_name).await?;
                 table.count(scan_partition).await
             })
         });
@@ -326,7 +325,7 @@ fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
     true
 }
 
-pub(crate) async fn get_or_load_table_inner(
+pub(crate) async fn get_or_load_table(
     table_mutex: &Arc<Mutex<Option<Arc<Table>>>>,
     client: &Arc<Client>,
     namespace_name: &str,

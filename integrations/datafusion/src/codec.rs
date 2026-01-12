@@ -136,9 +136,6 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
         } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeInsertExec>() {
             let insert_op = serialize_insert_op(exec.insert_op);
 
-            // For insert, we use the input schema
-            let schema = serialize_schema(&exec.input.schema())?;
-
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Insert(
                     IndexLakeInsertExecNode {
@@ -146,7 +143,6 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         table_name: exec.table_name.clone(),
                         insert_op,
                         stream_insert_threshold: exec.stream_insert_threshold as u32,
-                        schema: Some(schema),
                     },
                 )),
             };

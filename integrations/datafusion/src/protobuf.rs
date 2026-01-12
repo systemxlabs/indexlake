@@ -49,8 +49,6 @@ pub struct IndexLakeInsertExecNode {
     pub insert_op: i32,
     #[prost(uint32, tag = "4")]
     pub stream_insert_threshold: u32,
-    #[prost(message, optional, tag = "5")]
-    pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Projection {
