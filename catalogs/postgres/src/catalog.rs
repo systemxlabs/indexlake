@@ -57,7 +57,10 @@ impl Catalog for PostgresCatalog {
         conn.batch_execute("START TRANSACTION")
             .await
             .map_err(|e| ILError::catalog(format!("failed to start postgres txn: {e}")))?;
-        Ok(Box::new(PostgresTransaction { conn, done: false }))
+        Ok(Box::new(PostgresTransaction {
+            conn: Some(conn),
+            done: false,
+        }))
     }
 
     async fn truncate(&self, table_name: &str) -> ILResult<()> {
@@ -233,7 +236,7 @@ impl Catalog for PostgresCatalog {
 
 #[derive(Debug)]
 pub struct PostgresTransaction {
-    conn: bb8::PooledConnection<'static, PostgresConnectionManager<NoTls>>,
+    conn: Option<bb8::PooledConnection<'static, PostgresConnectionManager<NoTls>>>,
     done: bool,
 }
 
@@ -246,6 +249,14 @@ impl PostgresTransaction {
         }
         Ok(())
     }
+
+    fn conn_mut(
+        &mut self,
+    ) -> ILResult<&mut bb8::PooledConnection<'static, PostgresConnectionManager<NoTls>>> {
+        self.conn
+            .as_mut()
+            .ok_or_else(|| ILError::catalog("connection already taken"))
+    }
 }
 
 #[async_trait::async_trait]
@@ -255,7 +266,7 @@ impl Transaction for PostgresTransaction {
         self.check_done()?;
 
         let pg_row_stream = self
-            .conn
+            .conn_mut()?
             .query_raw(sql, Vec::<String>::new())
             .await
             .map_err(|e| {
@@ -273,7 +284,7 @@ impl Transaction for PostgresTransaction {
     async fn execute(&mut self, sql: &str) -> ILResult<usize> {
         trace!("postgres txn execute: {sql}");
         self.check_done()?;
-        self.conn
+        self.conn_mut()?
             .execute(sql, &[])
             .await
             .map(|r| r as usize)
@@ -289,7 +300,7 @@ impl Transaction for PostgresTransaction {
         trace!("postgres txn execute batch: {:?}", sqls);
         self.check_done()?;
         let sql = sqls.join(";");
-        self.conn.batch_execute(&sql).await.map_err(|e| {
+        self.conn_mut()?.batch_execute(&sql).await.map_err(|e| {
             ILError::catalog(format!(
                 "failed to execute batch postgres: {} {e}",
                 SqlDisplay(&sql)
@@ -300,7 +311,7 @@ impl Transaction for PostgresTransaction {
     async fn commit(&mut self) -> ILResult<()> {
         trace!("postgres txn commit");
         self.check_done()?;
-        self.conn
+        self.conn_mut()?
             .batch_execute("COMMIT")
             .await
             .map_err(|e| ILError::catalog(format!("failed to commit postgres txn: {e}")))?;
@@ -311,7 +322,7 @@ impl Transaction for PostgresTransaction {
     async fn rollback(&mut self) -> ILResult<()> {
         trace!("postgres txn rollback");
         self.check_done()?;
-        self.conn
+        self.conn_mut()?
             .batch_execute("ROLLBACK")
             .await
             .map_err(|e| ILError::catalog(format!("failed to rollback postgres txn: {e}")))?;
@@ -325,13 +336,13 @@ impl Drop for PostgresTransaction {
         if self.done {
             return;
         }
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                if let Err(e) = self.conn.batch_execute("ROLLBACK").await {
+        if let Some(conn) = self.conn.take() {
+            tokio::spawn(async move {
+                if let Err(e) = conn.batch_execute("ROLLBACK").await {
                     error!("[indexlake] failed to rollback postgres txn: {e}");
                 }
             });
-        });
+        }
     }
 }
 
