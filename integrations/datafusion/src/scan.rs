@@ -33,6 +33,7 @@ pub struct IndexLakeScanExec {
     pub data_files: Option<Arc<Vec<DataFileRecord>>>,
     pub projection: Option<Vec<usize>>,
     pub filters: Vec<Expr>,
+    pub batch_size: usize,
     pub limit: Option<usize>,
     pub data_file_partition_ranges: Option<Vec<Option<Range<usize>>>>,
     properties: PlanProperties,
@@ -47,6 +48,7 @@ impl IndexLakeScanExec {
         data_files: Option<Arc<Vec<DataFileRecord>>>,
         projection: Option<Vec<usize>>,
         filters: Vec<Expr>,
+        batch_size: usize,
         limit: Option<usize>,
     ) -> Result<Self, DataFusionError> {
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
@@ -66,6 +68,7 @@ impl IndexLakeScanExec {
             data_files,
             projection,
             filters,
+            batch_size,
             limit,
             data_file_partition_ranges,
             properties,
@@ -145,14 +148,11 @@ impl ExecutionPlan for IndexLakeScanExec {
 
         let scan_partition = self.get_scan_partition(Some(partition));
 
-        let mut scan = TableScan::default()
+        let scan = TableScan::default()
             .with_projection(self.projection.clone())
             .with_filters(il_filters)
+            .with_batch_size(self.batch_size)
             .with_partition(scan_partition);
-
-        if let Some(limit) = self.limit {
-            scan.batch_size = limit;
-        }
 
         let projected_schema = self.schema();
         let lazy_table = self.lazy_table.clone();
@@ -224,6 +224,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             self.data_files.clone(),
             self.projection.clone(),
             self.filters.clone(),
+            self.batch_size,
             limit,
         ) {
             Ok(exec) => Some(Arc::new(exec)),

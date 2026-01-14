@@ -70,6 +70,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     data_files,
                     projection,
                     filters,
+                    node.batch_size as usize,
                     node.limit.map(|l| l as usize),
                 )?))
             }
@@ -120,6 +121,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         data_files,
                         projection,
                         filters,
+                        batch_size: exec.batch_size as u32,
                         limit: exec.limit.map(|l| l as u32),
                         schema: Some(schema),
                     },

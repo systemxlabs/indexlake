@@ -27,7 +27,8 @@ use crate::{
 pub struct IndexLakeTable {
     client: Arc<Client>,
     table: Arc<Table>,
-    scan_partitions: usize,
+    batch_size: usize,
+    num_scan_partitions: usize,
     column_defaults: HashMap<String, Expr>,
     hide_row_id: bool,
     bypass_insert_threshold: usize,
@@ -48,15 +49,21 @@ impl IndexLakeTable {
         Ok(Self {
             client,
             table,
-            scan_partitions: 16,
+            batch_size: 2048,
+            num_scan_partitions: 16,
             column_defaults,
             hide_row_id: false,
             bypass_insert_threshold: 1000,
         })
     }
 
-    pub fn with_scan_partitions(mut self, scan_partitions: usize) -> Self {
-        self.scan_partitions = scan_partitions;
+    pub fn with_batch_size(mut self, batch_size: usize) -> Self {
+        self.batch_size = batch_size;
+        self
+    }
+
+    pub fn with_num_scan_partitions(mut self, num_scan_partitions: usize) -> Self {
+        self.num_scan_partitions = num_scan_partitions;
         self
     }
 
@@ -134,10 +141,11 @@ impl TableProvider for IndexLakeTable {
         let exec = IndexLakeScanExec::try_new(
             lazy_table,
             self.table.output_schema.clone(),
-            self.scan_partitions,
+            self.num_scan_partitions,
             data_files,
             il_projection,
             filters.to_vec(),
+            self.batch_size,
             limit,
         )?;
         Ok(Arc::new(exec))
