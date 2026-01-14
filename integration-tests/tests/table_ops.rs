@@ -378,7 +378,7 @@ async fn table_data_types(
         ],
     )?;
     table
-        .insert(TableInsertion::new(vec![record_batch]).with_force_inline(true))
+        .insert(TableInsertion::new(vec![record_batch]))
         .await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
