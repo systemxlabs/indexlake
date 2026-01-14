@@ -23,7 +23,7 @@ pub struct IndexLakeInsertExec {
     pub lazy_table: LazyTable,
     pub input: Arc<dyn ExecutionPlan>,
     pub insert_op: InsertOp,
-    pub stream_insert_threshold: usize,
+    pub bypass_insert_threshold: usize,
     cache: PlanProperties,
 }
 
@@ -32,7 +32,7 @@ impl IndexLakeInsertExec {
         lazy_table: LazyTable,
         input: Arc<dyn ExecutionPlan>,
         insert_op: InsertOp,
-        stream_insert_threshold: usize,
+        bypass_insert_threshold: usize,
     ) -> Result<Self, DataFusionError> {
         match insert_op {
             InsertOp::Append | InsertOp::Overwrite => {}
@@ -54,7 +54,7 @@ impl IndexLakeInsertExec {
             lazy_table,
             input,
             insert_op,
-            stream_insert_threshold,
+            bypass_insert_threshold,
             cache,
         })
     }
@@ -89,7 +89,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
             self.lazy_table.clone(),
             children[0].clone(),
             self.insert_op,
-            self.stream_insert_threshold,
+            self.bypass_insert_threshold,
         )?;
         Ok(Arc::new(exec))
     }
@@ -109,7 +109,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
         let lazy_table = self.lazy_table.clone();
         let input = self.input.clone();
         let insert_op = self.insert_op;
-        let stream_insert_threshold = self.stream_insert_threshold;
+        let bypass_insert_threshold = self.bypass_insert_threshold;
 
         let stream = futures::stream::once(async move {
             let table = lazy_table
@@ -134,7 +134,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
 
             match input.partition_statistics(None).map(|stat| stat.num_rows) {
                 Ok(Precision::Exact(num_rows)) | Ok(Precision::Inexact(num_rows))
-                    if num_rows > stream_insert_threshold =>
+                    if num_rows > bypass_insert_threshold =>
                 {
                     let stream = input_stream
                         .map_err(|err| {
@@ -143,9 +143,9 @@ impl ExecutionPlan for IndexLakeInsertExec {
                             ))
                         })
                         .boxed();
-                    let count = table.stream_insert(stream).await.map_err(|e| {
+                    let count = table.bypass_insert(stream).await.map_err(|e| {
                         DataFusionError::Execution(format!(
-                            "Failed to stream insert into indexlake: {e}"
+                            "Failed to bypass insert into indexlake: {e}"
                         ))
                     })?;
                     make_result_batch(count as i64)

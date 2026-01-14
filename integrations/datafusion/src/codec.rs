@@ -92,7 +92,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     lazy_table,
                     input,
                     insert_op,
-                    node.stream_insert_threshold as usize,
+                    node.bypass_insert_threshold as usize,
                 )?))
             }
         }
@@ -144,7 +144,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         namespace_name: exec.lazy_table.namespace_name.clone(),
                         table_name: exec.lazy_table.table_name.clone(),
                         insert_op,
-                        stream_insert_threshold: exec.stream_insert_threshold as u32,
+                        bypass_insert_threshold: exec.bypass_insert_threshold as u32,
                     },
                 )),
             };

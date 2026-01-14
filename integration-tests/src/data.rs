@@ -284,7 +284,7 @@ pub async fn prepare_simple_vector_table(
         ],
     )?;
     table
-        .insert(TableInsertion::new(vec![record_batch]).with_force_inline(true))
+        .insert(TableInsertion::new(vec![record_batch]))
         .await?;
 
     // wait for dump task to finish

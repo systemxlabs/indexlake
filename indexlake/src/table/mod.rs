@@ -27,8 +27,7 @@ use crate::expr::Expr;
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::{DataFileFormat, Storage};
 use crate::utils::{
-    build_row_id_array, correct_batch_schema, rewrite_batch_schema, sort_record_batches,
-    timestamp_ms_from_now,
+    build_row_id_array, correct_batch_schema, rewrite_batch_schema, timestamp_ms_from_now,
 };
 use crate::{ILError, ILResult, RecordBatchStream};
 use arrow::array::{ArrayRef, RecordBatch};
@@ -120,38 +119,22 @@ impl Table {
 
     pub async fn insert(&self, insert: TableInsertion) -> ILResult<()> {
         let insert = insert.rewrite_columns(&self.table_schema.field_name_id_map)?;
-        let mut rewritten_batches = check_and_rewrite_insert_batches(
+        let rewritten_batches = check_and_rewrite_insert_batches(
             &insert.data,
             &self.table_schema,
             insert.ignore_row_id,
         )?;
-        let total_rows = rewritten_batches
-            .iter()
-            .map(|batch| batch.num_rows())
-            .sum::<usize>();
 
-        if total_rows >= self.config.inline_row_count_limit && !insert.force_inline {
-            if !insert.ignore_row_id {
-                rewritten_batches =
-                    sort_record_batches(&rewritten_batches, INTERNAL_ROW_ID_FIELD_NAME)?;
-            }
-            process_bypass_insert(
-                self,
-                futures::stream::iter(rewritten_batches).map(Ok).boxed(),
-            )
-            .await?;
-        } else {
-            process_insert_into_inline_rows_without_tx(self, &rewritten_batches).await?;
+        process_insert_into_inline_rows_without_tx(self, &rewritten_batches).await?;
 
-            if insert.try_dump {
-                try_run_dump_task(self).await?;
-            }
+        if insert.try_dump {
+            try_run_dump_task(self).await?;
         }
 
         Ok(())
     }
 
-    pub async fn stream_insert(&self, stream: RecordBatchStream) -> ILResult<usize> {
+    pub async fn bypass_insert(&self, stream: RecordBatchStream) -> ILResult<usize> {
         let table_schema = self.table_schema.clone();
         let stream = stream
             .map(move |batch| {

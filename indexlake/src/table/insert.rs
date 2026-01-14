@@ -19,7 +19,6 @@ use crate::{ILError, ILResult, RecordBatchStream};
 #[derive(Debug, With)]
 pub struct TableInsertion {
     pub data: Vec<RecordBatch>,
-    pub force_inline: bool,
     pub ignore_row_id: bool,
     pub try_dump: bool,
 }
@@ -28,7 +27,6 @@ impl TableInsertion {
     pub fn new(data: Vec<RecordBatch>) -> Self {
         Self {
             data,
-            force_inline: false,
             ignore_row_id: true,
             try_dump: true,
         }

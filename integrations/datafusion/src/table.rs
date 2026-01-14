@@ -31,7 +31,7 @@ pub struct IndexLakeTable {
     column_defaults: HashMap<String, Expr>,
     hide_row_id: bool,
     scan_concurrency: Option<usize>,
-    stream_insert_threshold: usize,
+    bypass_insert_threshold: usize,
 }
 
 impl IndexLakeTable {
@@ -53,7 +53,7 @@ impl IndexLakeTable {
             column_defaults,
             hide_row_id: false,
             scan_concurrency: None,
-            stream_insert_threshold: 1000,
+            bypass_insert_threshold: 1000,
         })
     }
 
@@ -72,8 +72,8 @@ impl IndexLakeTable {
         self
     }
 
-    pub fn with_stream_insert_threshold(mut self, stream_insert_threshold: usize) -> Self {
-        self.stream_insert_threshold = stream_insert_threshold;
+    pub fn with_bypass_insert_threshold(mut self, bypass_insert_threshold: usize) -> Self {
+        self.bypass_insert_threshold = bypass_insert_threshold;
         self
     }
 }
@@ -218,7 +218,7 @@ impl TableProvider for IndexLakeTable {
             lazy_table,
             input,
             insert_op,
-            self.stream_insert_threshold,
+            self.bypass_insert_threshold,
         )?;
 
         Ok(Arc::new(insert_exec))

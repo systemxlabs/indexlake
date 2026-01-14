@@ -89,7 +89,7 @@ async fn create_bm25_index(
         ],
     )?;
     table
-        .insert(TableInsertion::new(vec![record_batch]).with_force_inline(true))
+        .insert(TableInsertion::new(vec![record_batch]))
         .await?;
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
