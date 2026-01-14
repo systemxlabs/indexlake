@@ -17,11 +17,10 @@ message IndexLakeScanExecNode {
   string table_name = 2;
   uint32 partition_count = 3;
   DataFiles data_files = 4;
-  optional uint32 concurrency = 5;
-  Projection projection = 6;
-  repeated datafusion.LogicalExprNode filters = 7;
-  optional uint32 limit = 8;
-  datafusion_common.Schema schema = 9;
+  Projection projection = 5;
+  repeated datafusion.LogicalExprNode filters = 6;
+  optional uint32 limit = 7;
+  datafusion_common.Schema schema = 8;
 }
 
 message IndexLakeInsertExecNode {

@@ -31,7 +31,6 @@ pub struct IndexLakeScanExec {
     pub output_schema: SchemaRef,
     pub partition_count: usize,
     pub data_files: Option<Arc<Vec<DataFileRecord>>>,
-    pub concurrency: Option<usize>,
     pub projection: Option<Vec<usize>>,
     pub filters: Vec<Expr>,
     pub limit: Option<usize>,
@@ -46,7 +45,6 @@ impl IndexLakeScanExec {
         output_schema: SchemaRef,
         partition_count: usize,
         data_files: Option<Arc<Vec<DataFileRecord>>>,
-        concurrency: Option<usize>,
         projection: Option<Vec<usize>>,
         filters: Vec<Expr>,
         limit: Option<usize>,
@@ -66,7 +64,6 @@ impl IndexLakeScanExec {
             output_schema,
             partition_count,
             data_files,
-            concurrency,
             projection,
             filters,
             limit,
@@ -157,10 +154,6 @@ impl ExecutionPlan for IndexLakeScanExec {
             scan.batch_size = limit;
         }
 
-        if let Some(concurrency) = self.concurrency {
-            scan.concurrency = concurrency;
-        }
-
         let projected_schema = self.schema();
         let lazy_table = self.lazy_table.clone();
         let limit = self.limit;
@@ -229,7 +222,6 @@ impl ExecutionPlan for IndexLakeScanExec {
             self.output_schema.clone(),
             self.partition_count,
             self.data_files.clone(),
-            self.concurrency,
             self.projection.clone(),
             self.filters.clone(),
             limit,
@@ -275,9 +267,6 @@ impl DisplayAs for IndexLakeScanExec {
         }
         if let Some(limit) = self.limit {
             write!(f, ", limit={limit}")?;
-        }
-        if let Some(concurrency) = self.concurrency {
-            write!(f, ", concurrency={concurrency}")?;
         }
         Ok(())
     }

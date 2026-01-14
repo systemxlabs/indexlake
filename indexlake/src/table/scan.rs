@@ -27,7 +27,6 @@ pub struct TableScan {
     pub filters: Vec<Expr>,
     pub batch_size: usize,
     pub partition: TableScanPartition,
-    pub concurrency: usize,
     pub metadata_columns: Vec<MetadataColumn>,
 }
 
@@ -41,11 +40,6 @@ impl TableScan {
         if self.batch_size == 0 {
             return Err(ILError::invalid_input(
                 "batch_size must be greater than 0".to_string(),
-            ));
-        }
-        if self.concurrency == 0 {
-            return Err(ILError::invalid_input(
-                "concurrency must be greater than 0".to_string(),
             ));
         }
         self.partition.validate()?;
@@ -87,7 +81,6 @@ impl Default for TableScan {
             filters: vec![],
             batch_size: 1024,
             partition: TableScanPartition::single_partition(),
-            concurrency: 1,
             metadata_columns: vec![],
         }
     }
@@ -247,9 +240,7 @@ async fn process_table_scan(
         };
         futs.push(fut);
     }
-    let stream = futures::stream::iter(futs)
-        .buffer_unordered(scan.concurrency)
-        .try_flatten();
+    let stream = futures::stream::iter(futs).buffered(1).try_flatten();
 
     streams.push(Box::pin(stream));
 
@@ -402,9 +393,7 @@ async fn process_index_scan(
         };
         futs.push(fut);
     }
-    let stream = futures::stream::iter(futs)
-        .buffer_unordered(scan.concurrency)
-        .try_flatten();
+    let stream = futures::stream::iter(futs).buffered(1).try_flatten();
 
     streams.push(Box::pin(stream));
 

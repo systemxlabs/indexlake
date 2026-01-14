@@ -30,7 +30,6 @@ pub struct IndexLakeTable {
     scan_partitions: usize,
     column_defaults: HashMap<String, Expr>,
     hide_row_id: bool,
-    scan_concurrency: Option<usize>,
     bypass_insert_threshold: usize,
 }
 
@@ -52,7 +51,6 @@ impl IndexLakeTable {
             scan_partitions: 16,
             column_defaults,
             hide_row_id: false,
-            scan_concurrency: None,
             bypass_insert_threshold: 1000,
         })
     }
@@ -64,11 +62,6 @@ impl IndexLakeTable {
 
     pub fn with_hide_row_id(mut self, hide_row_id: bool) -> Self {
         self.hide_row_id = hide_row_id;
-        self
-    }
-
-    pub fn with_scan_concurrency(mut self, scan_concurrency: Option<usize>) -> Self {
-        self.scan_concurrency = scan_concurrency;
         self
     }
 
@@ -143,7 +136,6 @@ impl TableProvider for IndexLakeTable {
             self.table.output_schema.clone(),
             self.scan_partitions,
             data_files,
-            self.scan_concurrency,
             il_projection,
             filters.to_vec(),
             limit,
