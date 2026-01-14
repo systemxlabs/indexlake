@@ -8,7 +8,7 @@ use crate::catalog::{
 };
 use crate::index::{IndexDefinition, IndexKind, IndexManager};
 use crate::storage::Storage;
-use crate::table::{MetadataColumn, Table, TableCreation, TableSchema, process_create_table};
+use crate::table::{Table, TableCreation, TableSchema, process_create_table};
 use crate::{ILError, ILResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -176,22 +176,6 @@ pub(crate) fn check_schema_contains_system_column(schema: &Schema) -> ILResult<(
     if schema.field_with_name(INTERNAL_ROW_ID_FIELD_NAME).is_ok() {
         return Err(ILError::invalid_input(format!(
             "Schema contains system column: {INTERNAL_ROW_ID_FIELD_NAME}"
-        )));
-    }
-
-    let location_kind_field = MetadataColumn::LocationKind.to_field();
-    let location_kind_field_name = location_kind_field.name();
-    if schema.field_with_name(location_kind_field_name).is_ok() {
-        return Err(ILError::invalid_input(format!(
-            "Schema contains system column: {location_kind_field_name}"
-        )));
-    }
-
-    let location_field = MetadataColumn::Location.to_field();
-    let location_field_name = location_field.name();
-    if schema.field_with_name(location_field_name).is_ok() {
-        return Err(ILError::invalid_input(format!(
-            "Schema contains system column: {location_field_name}"
         )));
     }
 

@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::iter::repeat_n;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use arrow::array::{
-    Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions, StringArray,
+    Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions,
 };
 use arrow::datatypes::{FieldRef, Schema};
 use arrow::ipc::reader::StreamReader;
@@ -14,7 +13,6 @@ use uuid::Uuid;
 
 use crate::catalog::{INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use crate::expr::{Expr, visited_columns};
-use crate::table::MetadataColumn;
 use crate::{ILError, ILResult};
 
 pub fn schema_without_row_id(schema: &Schema) -> Schema {
@@ -25,60 +23,6 @@ pub fn schema_without_row_id(schema: &Schema) -> Schema {
         .cloned()
         .collect::<Vec<_>>();
     Schema::new_with_metadata(fields, schema.metadata().clone())
-}
-
-pub fn append_new_fields_to_schema(schema: &Schema, new_fields: &[FieldRef]) -> Schema {
-    let mut fields = schema.fields.to_vec();
-    fields.extend(new_fields.iter().cloned());
-    Schema::new_with_metadata(fields, schema.metadata().clone())
-}
-
-pub fn record_batch_with_location_kind(
-    record_batch: &RecordBatch,
-    location_kind: &str,
-) -> ILResult<RecordBatch> {
-    let new_schema = append_new_fields_to_schema(
-        record_batch.schema_ref(),
-        &[MetadataColumn::LocationKind.to_field()],
-    );
-
-    let mut arrays = record_batch.columns().to_vec();
-    let location_kind_array = Arc::new(StringArray::from_iter_values(repeat_n(
-        location_kind,
-        record_batch.num_rows(),
-    )));
-    arrays.push(location_kind_array);
-
-    let options = RecordBatchOptions::new().with_row_count(Some(record_batch.num_rows()));
-    Ok(RecordBatch::try_new_with_options(
-        Arc::new(new_schema),
-        arrays,
-        &options,
-    )?)
-}
-
-pub fn record_batch_with_location(
-    record_batch: &RecordBatch,
-    location: &str,
-) -> ILResult<RecordBatch> {
-    let new_schema = append_new_fields_to_schema(
-        record_batch.schema_ref(),
-        &[MetadataColumn::Location.to_field()],
-    );
-
-    let mut arrays = record_batch.columns().to_vec();
-    let location_array = Arc::new(StringArray::from_iter_values(repeat_n(
-        location,
-        record_batch.num_rows(),
-    )));
-    arrays.push(location_array);
-
-    let options = RecordBatchOptions::new().with_row_count(Some(record_batch.num_rows()));
-    Ok(RecordBatch::try_new_with_options(
-        Arc::new(new_schema),
-        arrays,
-        &options,
-    )?)
 }
 
 pub fn extract_row_id_array_from_record_batch(

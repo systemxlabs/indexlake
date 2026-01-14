@@ -8,7 +8,7 @@ use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::prelude::SessionContext;
 use futures::TryStreamExt;
 use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
-use indexlake::table::{MetadataColumn, Table, TableScan, TableSearch};
+use indexlake::table::{Table, TableScan, TableSearch};
 use indexlake::utils::{project_schema, schema_without_row_id};
 use indexlake::{ILError, ILResult};
 
@@ -39,11 +39,6 @@ pub fn sort_record_batches(batches: &[RecordBatch], sort_col: &str) -> ILResult<
 
 pub async fn full_table_scan(table: &Table) -> ILResult<String> {
     table_scan(table, TableScan::default()).await
-}
-
-pub async fn full_table_scan_with_location_kind(table: &Table) -> ILResult<String> {
-    let scan = TableScan::default().with_metadata_columns(vec![MetadataColumn::LocationKind]);
-    table_scan(table, scan).await
 }
 
 pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {

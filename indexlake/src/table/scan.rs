@@ -1,24 +1,21 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
-use arrow_schema::{DataType, Field, FieldRef, Schema};
+use arrow_schema::Schema;
 use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-    inline_row_table_name, rows_to_record_batch,
+    rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, split_conjunction_filters};
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::read_data_file_by_record;
 use crate::table::{Table, TableSchemaRef};
-use crate::utils::{
-    append_new_fields_to_schema, project_schema, record_batch_with_location,
-    record_batch_with_location_kind,
-};
+use crate::utils::project_schema;
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, Clone, derive_with::With)]
@@ -27,7 +24,6 @@ pub struct TableScan {
     pub filters: Vec<Expr>,
     pub batch_size: usize,
     pub partition: TableScanPartition,
-    pub metadata_columns: Vec<MetadataColumn>,
 }
 
 impl TableScan {
@@ -52,15 +48,7 @@ impl TableScan {
         } else {
             table_schema.clone()
         };
-        let schema = append_new_fields_to_schema(
-            &projected_schema,
-            &self
-                .metadata_columns
-                .iter()
-                .map(|column| column.to_field())
-                .collect::<Vec<_>>(),
-        );
-        Ok(Arc::new(schema))
+        Ok(Arc::new(projected_schema))
     }
 
     pub fn rewrite_columns(mut self, field_name_id_map: &HashMap<String, Uuid>) -> ILResult<Self> {
@@ -81,31 +69,6 @@ impl Default for TableScan {
             filters: vec![],
             batch_size: 1024,
             partition: TableScanPartition::single_partition(),
-            metadata_columns: vec![],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum MetadataColumn {
-    LocationKind,
-    Location,
-}
-
-impl MetadataColumn {
-    pub fn to_field(&self) -> FieldRef {
-        static LOCATION_KIND_FIELD: LazyLock<FieldRef> = LazyLock::new(|| {
-            Arc::new(Field::new(
-                "_indexlake_location_kind",
-                DataType::Utf8,
-                false,
-            ))
-        });
-        static LOCATION_FIELD: LazyLock<FieldRef> =
-            LazyLock::new(|| Arc::new(Field::new("_indexlake_location", DataType::Utf8, false)));
-        match self {
-            MetadataColumn::LocationKind => LOCATION_KIND_FIELD.clone(),
-            MetadataColumn::Location => LOCATION_FIELD.clone(),
         }
     }
 }
@@ -209,8 +172,6 @@ async fn process_table_scan(
         let projection = scan.projection.clone();
         let filters = scan.filters.clone();
         let batch_size = scan.batch_size;
-        let metadata_columns = scan.metadata_columns.clone();
-        let location = format!("data_file_{}", data_file_record.data_file_id);
         let fut = async move {
             let stream = read_data_file_by_record(
                 storage.as_ref(),
@@ -222,20 +183,6 @@ async fn process_table_scan(
                 batch_size,
             )
             .await?;
-            let stream = stream.map(move |batch| {
-                let mut batch = batch?;
-                for meta_column in metadata_columns.iter() {
-                    match meta_column {
-                        MetadataColumn::LocationKind => {
-                            batch = record_batch_with_location_kind(&batch, "data_file")?;
-                        }
-                        MetadataColumn::Location => {
-                            batch = record_batch_with_location(&batch, location.as_str())?;
-                        }
-                    }
-                }
-                Ok::<_, ILError>(batch)
-            });
             Ok::<_, ILError>(stream)
         };
         futs.push(fut);
@@ -305,25 +252,13 @@ async fn scan_inline_rows(
     }
 
     let arrow_filter = merge_filters(arrow_filters);
-    let metadata_columns = scan.metadata_columns.clone();
-    let inline_row_table_name = inline_row_table_name(table_id);
 
     let row_stream = catalog_helper
         .scan_inline_rows(table_id, &catalog_schema, None, &db_filters)
         .await?;
     let inline_stream = Box::pin(row_stream.chunks(scan.batch_size).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let mut batch = rows_to_record_batch(&projected_schema, &rows)?;
-        for meta_column in metadata_columns.iter() {
-            match meta_column {
-                MetadataColumn::LocationKind => {
-                    batch = record_batch_with_location_kind(&batch, "inline")?;
-                }
-                MetadataColumn::Location => {
-                    batch = record_batch_with_location(&batch, inline_row_table_name.as_str())?;
-                }
-            }
-        }
+        let batch = rows_to_record_batch(&projected_schema, &rows)?;
         if let Some(arrow_filter) = &arrow_filter {
             let bool_array = arrow_filter.condition_eval(&batch)?;
             let filtered_batch = arrow::compute::filter_record_batch(&batch, &bool_array)?;
