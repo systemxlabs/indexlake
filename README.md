@@ -7,7 +7,8 @@
 **IndexLake** is an experimental table format with extensible index and inline table support.
 
 - **Extensible Index System**: Pluggable index types (BM25, B-Tree, HNSW, R*-tree)
-- **Inline tables**: Store small datasets directly within the catalog
+- **Inline Tables**: Store small datasets directly within the catalog
+- **ACID Transaction**: Support transaction through sql catalog
 - **Flexible Catalog**: PostgreSQL and SQLite catalog support
 - **Flexible Storage**: Local filesystem and S3-compatible storage backends
 - **DataFusion Integration**: Native Apache DataFusion support for SQL query workloads
