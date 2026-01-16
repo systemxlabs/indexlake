@@ -141,7 +141,10 @@ async fn bypass_insert_table(
         table_schema.clone(),
         vec![Arc::new(Int64Array::from_iter_values(0..3))],
     )?;
-    table.insert(TableInsertion::new(vec![batch])).await?;
+    let count = table
+        .bypass_insert(Box::pin(futures::stream::iter(vec![Ok(batch)])))
+        .await?;
+    assert_eq!(count, 3);
 
     assert_inline_row_count(&table, |count| count == 0).await?;
     assert_data_file_count(&table, |count| count == 1).await?;

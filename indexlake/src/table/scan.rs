@@ -1,9 +1,12 @@
 use std::collections::{HashMap, HashSet};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
+use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use arrow_schema::Schema;
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,7 +16,7 @@ use crate::catalog::{
 };
 use crate::expr::{Expr, merge_filters, split_conjunction_filters};
 use crate::index::{FilterSupport, IndexManager};
-use crate::storage::read_data_file_by_record;
+use crate::storage::{Storage, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -151,47 +154,25 @@ async fn process_table_scan(
     table: &Table,
     scan: TableScan,
 ) -> ILResult<RecordBatchStream> {
-    let mut streams: Vec<RecordBatchStream> = if scan.partition.contains_inline_rows() {
-        // Scan inline rows
-        let inline_stream = Box::pin(
-            scan_inline_rows(catalog_helper, &table.table_id, &table.table_schema, &scan).await?,
-        );
-        vec![inline_stream]
+    let inline_row_stream = if scan.partition.contains_inline_rows() {
+        scan_inline_rows(catalog_helper, &table.table_id, &table.table_schema, &scan).await?
     } else {
-        vec![]
+        Box::pin(futures::stream::iter(vec![]))
     };
 
-    // Scan data files
-    let data_file_records =
-        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition).await?;
-
-    let mut futs = Vec::with_capacity(data_file_records.len());
-    for data_file_record in data_file_records {
-        let storage = table.storage.clone();
-        let table_schema = table.table_schema.clone();
-        let projection = scan.projection.clone();
-        let filters = scan.filters.clone();
-        let batch_size = scan.batch_size;
-        let fut = async move {
-            let stream = read_data_file_by_record(
-                storage.as_ref(),
-                &table_schema,
-                &data_file_record,
-                projection,
-                filters,
-                None,
-                batch_size,
-            )
+    let partitioned_data_file_records =
+        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition.clone())
             .await?;
-            Ok::<_, ILError>(stream)
-        };
-        futs.push(fut);
-    }
-    let stream = futures::stream::iter(futs).buffered(1).try_flatten();
 
-    streams.push(Box::pin(stream));
+    let scanner = TablePartitionScanner::new(
+        table.table_schema.clone(),
+        table.storage.clone(),
+        inline_row_stream,
+        partitioned_data_file_records,
+        scan,
+    );
 
-    Ok(Box::pin(futures::stream::select_all(streams)))
+    Ok(Box::pin(scanner))
 }
 
 pub(crate) async fn get_partitioned_data_file_records(
@@ -563,4 +544,139 @@ fn assign_index_filters(
         }
     }
     Ok(index_filter_assignment)
+}
+
+enum ScanState {
+    InlineRowStreaming(RecordBatchStream),
+    GettingDataFileStream {
+        idx: usize,
+        fut: Pin<Box<dyn Future<Output = ILResult<RecordBatchStream>> + Send>>,
+    },
+    DataFileStreaming {
+        idx: usize,
+        stream: RecordBatchStream,
+    },
+    Done,
+}
+
+/// A scanner that streams record batches from both inline rows and data files.
+pub struct TablePartitionScanner {
+    table_schema: TableSchemaRef,
+    storage: Arc<dyn Storage>,
+    partitioned_data_file_records: Vec<DataFileRecord>,
+    scan: TableScan,
+    state: ScanState,
+}
+
+impl TablePartitionScanner {
+    /// Create a new `TablePartitionScanner`.
+    pub fn new(
+        table_schema: TableSchemaRef,
+        storage: Arc<dyn Storage>,
+        inline_row_stream: RecordBatchStream,
+        partitioned_data_file_records: Vec<DataFileRecord>,
+        scan: TableScan,
+    ) -> Self {
+        let state = ScanState::InlineRowStreaming(inline_row_stream);
+
+        Self {
+            table_schema,
+            storage,
+            partitioned_data_file_records,
+            scan,
+            state,
+        }
+    }
+
+    #[allow(clippy::let_and_return)]
+    fn get_stream_future(
+        &self,
+        record: DataFileRecord,
+    ) -> Pin<Box<dyn Future<Output = ILResult<RecordBatchStream>> + Send>> {
+        let fut = {
+            let storage = Arc::clone(&self.storage);
+            let table_schema = Arc::clone(&self.table_schema);
+            let projection = self.scan.projection.clone();
+            let filters = self.scan.filters.clone();
+            let batch_size = self.scan.batch_size;
+
+            Box::pin(async move {
+                read_data_file_by_record(
+                    storage.as_ref(),
+                    &table_schema,
+                    &record,
+                    projection,
+                    filters,
+                    None,
+                    batch_size,
+                )
+                .await
+            })
+        };
+        fut
+    }
+}
+
+impl Stream for TablePartitionScanner {
+    type Item = ILResult<RecordBatch>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let data_file_records_count = self.partitioned_data_file_records.len();
+        loop {
+            match &mut self.state {
+                ScanState::InlineRowStreaming(stream) => {
+                    let stream = Pin::new(stream);
+                    match stream.poll_next(cx) {
+                        Poll::Ready(Some(result)) => return Poll::Ready(Some(result)),
+                        Poll::Ready(None) => {
+                            // Inline rows done, transition to Done
+                            if data_file_records_count == 0 {
+                                self.state = ScanState::Done;
+                            } else {
+                                let first_data_file_record =
+                                    self.partitioned_data_file_records[0].clone();
+                                let fut = self.get_stream_future(first_data_file_record);
+                                self.state = ScanState::GettingDataFileStream { idx: 0, fut };
+                            }
+                            continue;
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                ScanState::GettingDataFileStream { idx, fut } => {
+                    let mut fut = Pin::new(fut);
+                    match fut.as_mut().poll(cx) {
+                        Poll::Ready(Ok(stream)) => {
+                            self.state = ScanState::DataFileStreaming { idx: *idx, stream };
+                            continue;
+                        }
+                        Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                ScanState::DataFileStreaming { idx, stream } => {
+                    let stream = Pin::new(stream);
+                    match stream.poll_next(cx) {
+                        Poll::Ready(Some(result)) => return Poll::Ready(Some(result)),
+                        Poll::Ready(None) => {
+                            // Current file done, move to next
+                            if *idx == data_file_records_count - 1 {
+                                self.state = ScanState::Done;
+                            } else {
+                                let next_idx = *idx + 1;
+                                let data_file_record =
+                                    self.partitioned_data_file_records[next_idx].clone();
+                                let fut = self.get_stream_future(data_file_record);
+                                self.state =
+                                    ScanState::GettingDataFileStream { idx: next_idx, fut };
+                            }
+                            continue;
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                ScanState::Done => return Poll::Ready(None),
+            }
+        }
+    }
 }
