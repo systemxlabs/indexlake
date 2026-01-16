@@ -27,6 +27,8 @@ pub struct TableScan {
     pub filters: Vec<Expr>,
     pub batch_size: usize,
     pub partition: TableScanPartition,
+    pub offset: usize,
+    pub limit: Option<usize>,
 }
 
 impl TableScan {
@@ -72,6 +74,8 @@ impl Default for TableScan {
             filters: vec![],
             batch_size: 1024,
             partition: TableScanPartition::single_partition(),
+            offset: 0,
+            limit: None,
         }
     }
 }
@@ -566,6 +570,7 @@ pub struct TablePartitionScanner {
     partitioned_data_file_records: Vec<DataFileRecord>,
     scan: TableScan,
     state: ScanState,
+    output_rows: usize,
 }
 
 impl TablePartitionScanner {
@@ -585,6 +590,7 @@ impl TablePartitionScanner {
             partitioned_data_file_records,
             scan,
             state,
+            output_rows: 0,
         }
     }
 
@@ -623,14 +629,24 @@ impl Stream for TablePartitionScanner {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let data_file_records_count = self.partitioned_data_file_records.len();
         loop {
+            let limit_reached = self.is_limit_reached();
             match &mut self.state {
                 ScanState::InlineRowStreaming(stream) => {
                     let stream = Pin::new(stream);
                     match stream.poll_next(cx) {
-                        Poll::Ready(Some(result)) => return Poll::Ready(Some(result)),
+                        Poll::Ready(Some(Ok(batch))) => {
+                            let batch = self.apply_limit_offset(batch);
+                            if batch.num_rows() > 0 {
+                                return Poll::Ready(Some(Ok(batch)));
+                            } else if limit_reached {
+                                self.state = ScanState::Done;
+                                continue;
+                            }
+                        }
+                        Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
                         Poll::Ready(None) => {
-                            // Inline rows done, transition to Done
-                            if data_file_records_count == 0 {
+                            // Inline rows done, transition to Done or data files
+                            if limit_reached || data_file_records_count == 0 {
                                 self.state = ScanState::Done;
                             } else {
                                 let first_data_file_record =
@@ -657,10 +673,19 @@ impl Stream for TablePartitionScanner {
                 ScanState::DataFileStreaming { idx, stream } => {
                     let stream = Pin::new(stream);
                     match stream.poll_next(cx) {
-                        Poll::Ready(Some(result)) => return Poll::Ready(Some(result)),
+                        Poll::Ready(Some(Ok(batch))) => {
+                            let batch = self.apply_limit_offset(batch);
+                            if batch.num_rows() > 0 {
+                                return Poll::Ready(Some(Ok(batch)));
+                            } else if limit_reached {
+                                self.state = ScanState::Done;
+                                continue;
+                            }
+                        }
+                        Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
                         Poll::Ready(None) => {
                             // Current file done, move to next
-                            if *idx == data_file_records_count - 1 {
+                            if limit_reached || *idx == data_file_records_count - 1 {
                                 self.state = ScanState::Done;
                             } else {
                                 let next_idx = *idx + 1;
@@ -677,6 +702,68 @@ impl Stream for TablePartitionScanner {
                 }
                 ScanState::Done => return Poll::Ready(None),
             }
+        }
+    }
+}
+
+impl TablePartitionScanner {
+    /// Check if the limit has been reached.
+    fn is_limit_reached(&self) -> bool {
+        if let Some(limit) = self.scan.limit {
+            self.output_rows >= self.scan.offset + limit
+        } else {
+            false
+        }
+    }
+
+    /// Apply offset and limit to a batch.
+    fn apply_limit_offset(&mut self, batch: RecordBatch) -> RecordBatch {
+        let num_rows = batch.num_rows();
+        if num_rows == 0 {
+            return batch;
+        }
+
+        let offset = self.scan.offset;
+        let limit = self.scan.limit;
+
+        // Calculate the range of rows to keep from this batch
+        let batch_start = self.output_rows;
+        let batch_end = batch_start + num_rows;
+
+        // Calculate the slice of this batch to return
+        let slice_start = offset.saturating_sub(batch_start);
+        let slice_end = if let Some(limit) = limit {
+            (offset + limit).saturating_sub(batch_start)
+        } else {
+            num_rows
+        };
+
+        // Update output_rows count
+        self.output_rows = batch_end;
+
+        // If the batch is completely before offset, skip it
+        if batch_end <= offset {
+            return RecordBatch::new_empty(batch.schema());
+        }
+
+        // If the batch is completely after limit, skip it
+        if let Some(limit) = limit
+            && batch_start >= offset + limit
+        {
+            return RecordBatch::new_empty(batch.schema());
+        }
+
+        // Slice the batch if needed
+        if slice_start < num_rows {
+            let slice_len = (slice_end - slice_start).min(num_rows - slice_start);
+            if slice_len == num_rows && slice_start == 0 {
+                // No slicing needed
+                return batch;
+            }
+            // Slice the batch
+            batch.slice(slice_start, slice_len)
+        } else {
+            RecordBatch::new_empty(batch.schema())
         }
     }
 }

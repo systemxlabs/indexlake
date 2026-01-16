@@ -94,6 +94,77 @@ async fn scan_with_filters(
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
 #[tokio::test(flavor = "multi_thread")]
+async fn scan_with_limit_offset(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let scan = TableScan::default().with_limit(1).with_offset(2);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+------+-----+
+| name | age |
++------+-----+
+| Bob  | 21  |
++------+-----+"#
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_with_limit_offset_filter(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let scan = TableScan::default()
+        .with_filters(vec![col("age").gt(lit(20))])
+        .with_limit(1)
+        .with_offset(1);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+------+-----+
+| name | age |
++------+-----+
+| Bob  | 21  |
++------+-----+"#
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
 async fn auto_partition_scan(
     #[future(awt)]
     #[case]
