@@ -11,8 +11,6 @@ use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::display::ProjectSchemaDisplay;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
-use datafusion::physical_plan::limit::LimitStream;
-use datafusion::physical_plan::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
@@ -152,18 +150,18 @@ impl ExecutionPlan for IndexLakeScanExec {
             .with_projection(self.projection.clone())
             .with_filters(il_filters)
             .with_batch_size(self.batch_size)
-            .with_partition(scan_partition);
+            .with_partition(scan_partition)
+            .with_limit(self.limit);
 
         let projected_schema = self.schema();
         let lazy_table = self.lazy_table.clone();
-        let limit = self.limit;
 
         let fut = async move {
             let table = lazy_table
                 .get_or_load()
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
-            get_batch_stream(table, projected_schema.clone(), scan, limit).await
+            get_batch_stream(table, projected_schema.clone(), scan).await
         };
         let stream = futures::stream::once(fut).try_flatten();
         Ok(Box::pin(RecordBatchStreamAdapter::new(
@@ -289,7 +287,6 @@ async fn get_batch_stream(
     table: Arc<Table>,
     projected_schema: SchemaRef,
     mut scan: TableScan,
-    limit: Option<usize>,
 ) -> Result<SendableRecordBatchStream, DataFusionError> {
     let stream = if scan.projection == Some(Vec::new()) {
         scan.projection = Some(vec![0]);
@@ -313,10 +310,10 @@ async fn get_batch_stream(
             .map_err(|e| DataFusionError::Execution(e.to_string()))?
     };
     let stream = stream.map_err(|e| DataFusionError::Execution(e.to_string()));
-    let stream = Box::pin(RecordBatchStreamAdapter::new(projected_schema, stream));
-    let metrics = BaselineMetrics::new(&ExecutionPlanMetricsSet::new(), 0);
-    let limit_stream = LimitStream::new(stream, 0, limit, metrics);
-    Ok(Box::pin(limit_stream))
+    Ok(Box::pin(RecordBatchStreamAdapter::new(
+        projected_schema,
+        stream,
+    )))
 }
 
 fn calc_data_file_partition_ranges(
