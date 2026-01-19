@@ -490,29 +490,40 @@ pub fn check_and_rewrite_insert_batches(
                     };
                     arrays.push(batch.column(batch_field_idx).clone());
                 }
-            } else if let Ok(batch_field_idx) = batch_schema.index_of(internal_field_name) {
-                let batch_field = batch_schema
-                    .fields
-                    .get(batch_field_idx)
-                    .cloned()
-                    .expect("field index should be valid");
-                check_insert_batch_field(&batch_field, table_field)?;
-
-                fields.push(batch_field);
-                arrays.push(batch.column(batch_field_idx).clone());
             } else {
                 let Ok(field_id) = Uuid::parse_str(internal_field_name) else {
                     return Err(ILError::internal(format!(
                         "Failed to parse internal field name {internal_field_name} to uuid"
                     )));
                 };
-                if let Some(default_value) = table_schema.field_id_default_value_map.get(&field_id)
+                let output_field_name =
+                    table_schema
+                        .field_id_name_map
+                        .get(&field_id)
+                        .ok_or_else(|| {
+                            ILError::internal(format!(
+                                "Failed to find output field name for {field_id}"
+                            ))
+                        })?;
+
+                if let Ok(batch_field_idx) = batch_schema.index_of(internal_field_name) {
+                    let batch_field = batch_schema
+                        .fields
+                        .get(batch_field_idx)
+                        .cloned()
+                        .expect("field index should be valid");
+                    check_insert_batch_field(&batch_field, table_field, output_field_name)?;
+
+                    fields.push(batch_field);
+                    arrays.push(batch.column(batch_field_idx).clone());
+                } else if let Some(default_value) =
+                    table_schema.field_id_default_value_map.get(&field_id)
                 {
                     fields.push(table_field.clone());
                     arrays.push(default_value.to_array_of_size(batch.num_rows())?);
                 } else {
                     return Err(ILError::invalid_input(format!(
-                        "Missing field {internal_field_name} (no default value) in record batch",
+                        "Missing field {output_field_name} (no default value) in record batch",
                     )));
                 }
             }
@@ -525,13 +536,17 @@ pub fn check_and_rewrite_insert_batches(
     Ok(rewritten_batches)
 }
 
-pub fn check_insert_batch_field(batch_field: &Field, table_field: &Field) -> ILResult<()> {
+pub fn check_insert_batch_field(
+    batch_field: &Field,
+    table_field: &Field,
+    output_field_name: &str,
+) -> ILResult<()> {
     if batch_field.name() != table_field.name()
         || batch_field.data_type() != table_field.data_type()
         || batch_field.is_nullable() != table_field.is_nullable()
     {
         return Err(ILError::invalid_input(format!(
-            "Invalid batch field: {batch_field:?}, expected field: {table_field:?}",
+            "Invalid batch field of name {output_field_name}: {batch_field:?}, expected field: {table_field:?}",
         )));
     }
 
