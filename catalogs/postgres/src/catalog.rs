@@ -4,7 +4,8 @@ use bb8_postgres::PostgresConnectionManager;
 use bb8_postgres::tokio_postgres::NoTls;
 use futures::StreamExt;
 use indexlake::catalog::{
-    Catalog, CatalogDataType, CatalogSchemaRef, Row, RowStream, Scalar, Transaction,
+    Catalog, CatalogDataType, CatalogDatabase, CatalogSchemaRef, Row, RowStream, Scalar,
+    Transaction,
 };
 use indexlake::expr::{BinaryExpr, Expr};
 use indexlake::{ILError, ILResult};
@@ -26,6 +27,10 @@ impl PostgresCatalog {
 
 #[async_trait::async_trait]
 impl Catalog for PostgresCatalog {
+    fn database(&self) -> CatalogDatabase {
+        CatalogDatabase::Postgres
+    }
+
     async fn query(&self, sql: &str, schema: CatalogSchemaRef) -> ILResult<RowStream<'static>> {
         trace!("postgres query: {sql}");
         let conn = self

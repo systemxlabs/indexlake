@@ -1,3 +1,4 @@
+mod database;
 mod helper;
 mod record;
 mod row;
@@ -5,6 +6,7 @@ mod scalar;
 mod schema;
 
 use arrow_schema::Schema;
+pub use database::*;
 pub(crate) use helper::*;
 pub use record::*;
 pub use row::*;
@@ -34,6 +36,8 @@ pub static INTERNAL_ROW_ID_FIELD_REF: LazyLock<FieldRef> = LazyLock::new(|| {
 
 #[async_trait::async_trait]
 pub trait Catalog: Debug + Send + Sync {
+    fn database(&self) -> CatalogDatabase;
+
     async fn query(&self, sql: &str, schema: CatalogSchemaRef) -> ILResult<RowStream<'static>>;
 
     /// Begin a new transaction.

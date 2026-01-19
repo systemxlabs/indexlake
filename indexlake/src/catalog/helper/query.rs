@@ -5,9 +5,9 @@ use uuid::Uuid;
 
 use crate::ILResult;
 use crate::catalog::{
-    CatalogDataType, CatalogHelper, CatalogSchema, CatalogSchemaRef, Column, DataFileRecord,
-    FieldRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord, IndexRecord, InlineIndexRecord, Row,
-    RowStream, TableRecord, TransactionHelper, inline_row_table_name,
+    CatalogDataType, CatalogDatabase, CatalogHelper, CatalogSchema, CatalogSchemaRef, Column,
+    DataFileRecord, FieldRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord, IndexRecord,
+    InlineIndexRecord, Row, RowStream, TableRecord, TransactionHelper, inline_row_table_name,
 };
 use crate::expr::Expr;
 use crate::utils::timestamp_ms_from_now;
@@ -356,7 +356,10 @@ impl CatalogHelper {
         };
 
         let offset_clause = if let Some(offset) = offset {
-            format!(" LIMIT 1000000 OFFSET {}", offset)
+            match self.catalog.database() {
+                CatalogDatabase::Sqlite => format!(" LIMIT {} OFFSET {}", i64::MAX, offset),
+                CatalogDatabase::Postgres => format!(" OFFSET {}", offset),
+            }
         } else {
             "".to_string()
         };

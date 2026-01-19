@@ -1,7 +1,8 @@
 use arrow::datatypes::Schema;
 use futures::StreamExt;
 use indexlake::catalog::{
-    Catalog, CatalogDataType, CatalogSchemaRef, Row, RowStream, Scalar, Transaction,
+    Catalog, CatalogDataType, CatalogDatabase, CatalogSchemaRef, Row, RowStream, Scalar,
+    Transaction,
 };
 use indexlake::expr::{BinaryExpr, Expr};
 use indexlake::{ILError, ILResult};
@@ -30,6 +31,10 @@ impl SqliteCatalog {
 
 #[async_trait::async_trait]
 impl Catalog for SqliteCatalog {
+    fn database(&self) -> CatalogDatabase {
+        CatalogDatabase::Sqlite
+    }
+
     async fn query(&self, sql: &str, schema: CatalogSchemaRef) -> ILResult<RowStream<'static>> {
         trace!("sqlite query: {sql}");
         let conn = rusqlite::Connection::open_with_flags(
