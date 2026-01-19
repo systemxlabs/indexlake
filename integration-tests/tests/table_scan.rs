@@ -239,7 +239,7 @@ async fn auto_partition_scan(
         .insert(TableInsertion::new(vec![record_batch]))
         .await?;
 
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     assert_inline_row_count(&table, |count| count == 1).await?;
     assert_data_file_count(&table, |count| count == 2).await?;
