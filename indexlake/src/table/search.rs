@@ -235,7 +235,13 @@ async fn read_inline_rows(
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
     let row_stream = catalog_helper
-        .scan_inline_rows(&table.table_id, &catalog_schema, Some(&inline_row_ids), &[])
+        .scan_inline_rows(
+            &table.table_id,
+            &catalog_schema,
+            Some(&inline_row_ids),
+            &[],
+            None,
+        )
         .await?;
     let rows: Vec<Row> = row_stream.try_collect::<Vec<_>>().await?;
     let batch = rows_to_record_batch(&projected_schema, &rows)?;

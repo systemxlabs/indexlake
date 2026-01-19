@@ -16,7 +16,7 @@ use crate::catalog::{
 };
 use crate::expr::{Expr, merge_filters, split_conjunction_filters};
 use crate::index::{FilterSupport, IndexManager};
-use crate::storage::{Storage, read_data_file_by_record};
+use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -64,6 +64,10 @@ impl TableScan {
             .collect::<ILResult<Vec<_>>>()?;
         self.filters = rewritten_filters;
         Ok(self)
+    }
+
+    pub fn offset_limit_required(&self) -> bool {
+        self.offset > 0 || self.limit.is_some()
     }
 }
 
@@ -158,10 +162,34 @@ async fn process_table_scan(
     table: &Table,
     scan: TableScan,
 ) -> ILResult<RecordBatchStream> {
-    let inline_row_stream = if scan.partition.contains_inline_rows() {
-        scan_inline_rows(catalog_helper, &table.table_id, &table.table_schema, &scan).await?
+    let inline_row_count = if scan.offset_limit_required() && scan.partition.contains_inline_rows()
+    {
+        fast_count_inlint_rows(catalog_helper, &table.table_id, &table.table_schema, &scan).await?
     } else {
-        Box::pin(futures::stream::iter(vec![]))
+        None
+    };
+
+    let (inline_row_stream, inline_row_skip_count) = if scan.partition.contains_inline_rows() {
+        // TODO we can skip stream if possible
+        let inline_offset = if let Some(row_count) = inline_row_count {
+            std::cmp::min(row_count, scan.offset)
+        } else {
+            0
+        };
+        let stream = scan_inline_rows(
+            catalog_helper,
+            &table.table_id,
+            &table.table_schema,
+            &scan,
+            inline_offset,
+        )
+        .await?;
+        (stream, inline_offset)
+    } else {
+        (
+            Box::pin(futures::stream::iter(vec![])) as RecordBatchStream,
+            0,
+        )
     };
 
     let partitioned_data_file_records =
@@ -172,6 +200,7 @@ async fn process_table_scan(
         table.table_schema.clone(),
         table.storage.clone(),
         inline_row_stream,
+        inline_row_skip_count,
         partitioned_data_file_records,
         scan,
     );
@@ -216,6 +245,7 @@ async fn scan_inline_rows(
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
     scan: &TableScan,
+    offset: usize,
 ) -> ILResult<RecordBatchStream> {
     let projected_schema = Arc::new(project_schema(
         &table_schema.arrow_schema,
@@ -239,20 +269,53 @@ async fn scan_inline_rows(
     let arrow_filter = merge_filters(arrow_filters);
 
     let row_stream = catalog_helper
-        .scan_inline_rows(table_id, &catalog_schema, None, &db_filters)
+        .scan_inline_rows(
+            table_id,
+            &catalog_schema,
+            None,
+            &db_filters,
+            if arrow_filter.is_some() {
+                None
+            } else {
+                Some(offset)
+            },
+        )
         .await?;
-    let inline_stream = Box::pin(row_stream.chunks(scan.batch_size).map(move |rows| {
-        let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(&projected_schema, &rows)?;
-        if let Some(arrow_filter) = &arrow_filter {
-            let bool_array = arrow_filter.condition_eval(&batch)?;
-            let filtered_batch = arrow::compute::filter_record_batch(&batch, &bool_array)?;
-            Ok(filtered_batch)
-        } else {
-            Ok(batch)
-        }
-    }));
+    let inline_stream = Box::pin(row_stream.skip(offset).chunks(scan.batch_size).map(
+        move |rows| {
+            let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
+            let batch = rows_to_record_batch(&projected_schema, &rows)?;
+            if let Some(arrow_filter) = &arrow_filter {
+                let bool_array = arrow_filter.condition_eval(&batch)?;
+                let filtered_batch = arrow::compute::filter_record_batch(&batch, &bool_array)?;
+                Ok(filtered_batch)
+            } else {
+                Ok(batch)
+            }
+        },
+    ));
     Ok(Box::pin(inline_stream))
+}
+
+async fn fast_count_inlint_rows(
+    catalog_helper: &CatalogHelper,
+    table_id: &Uuid,
+    table_schema: &TableSchemaRef,
+    scan: &TableScan,
+) -> ILResult<Option<usize>> {
+    for filter in scan.filters.iter() {
+        if !catalog_helper
+            .catalog
+            .supports_filter(filter, &table_schema.arrow_schema)?
+        {
+            return Ok(None);
+        }
+    }
+
+    let count = catalog_helper
+        .count_inline_rows(table_id, &scan.filters)
+        .await?;
+    Ok(Some(count as usize))
 }
 
 async fn process_index_scan(
@@ -410,6 +473,7 @@ async fn index_scan_inline_rows(
                     .as_slice(),
             ),
             non_index_filters,
+            None,
         )
         .await?;
     let inline_stream = row_stream.chunks(scan.batch_size).map(move |rows| {
@@ -550,11 +614,19 @@ fn assign_index_filters(
     Ok(index_filter_assignment)
 }
 
+type GettingDataFileStreamFut =
+    Pin<Box<dyn Future<Output = ILResult<GettingDataFileStreamResult>> + Send>>;
+
+enum GettingDataFileStreamResult {
+    Skip(usize),
+    Streaming(RecordBatchStream),
+}
+
 enum ScanState {
     InlineRowStreaming(RecordBatchStream),
     GettingDataFileStream {
         idx: usize,
-        fut: Pin<Box<dyn Future<Output = ILResult<RecordBatchStream>> + Send>>,
+        fut: GettingDataFileStreamFut,
     },
     DataFileStreaming {
         idx: usize,
@@ -579,10 +651,12 @@ impl TablePartitionScanner {
         table_schema: TableSchemaRef,
         storage: Arc<dyn Storage>,
         inline_row_stream: RecordBatchStream,
+        inline_row_skip_count: usize,
         partitioned_data_file_records: Vec<DataFileRecord>,
         scan: TableScan,
     ) -> Self {
         let state = ScanState::InlineRowStreaming(inline_row_stream);
+        let output_rows = inline_row_skip_count;
 
         Self {
             table_schema,
@@ -590,24 +664,55 @@ impl TablePartitionScanner {
             partitioned_data_file_records,
             scan,
             state,
-            output_rows: 0,
+            output_rows,
         }
     }
 
     #[allow(clippy::let_and_return)]
-    fn get_stream_future(
-        &self,
-        record: DataFileRecord,
-    ) -> Pin<Box<dyn Future<Output = ILResult<RecordBatchStream>> + Send>> {
+    fn get_stream_future(&self, record: DataFileRecord) -> GettingDataFileStreamFut {
         let fut = {
             let storage = Arc::clone(&self.storage);
             let table_schema = Arc::clone(&self.table_schema);
             let projection = self.scan.projection.clone();
             let filters = self.scan.filters.clone();
             let batch_size = self.scan.batch_size;
+            let output_rows = self.output_rows;
+            let offset = self.scan.offset;
+            let limit = self.scan.limit;
+            let needs_count = self.scan.offset_limit_required();
 
             Box::pin(async move {
-                read_data_file_by_record(
+                let count = if needs_count {
+                    Some(
+                        count_data_file_by_record(
+                            storage.as_ref(),
+                            &table_schema,
+                            &record,
+                            filters.clone(),
+                            None,
+                        )
+                        .await?,
+                    )
+                } else {
+                    None
+                };
+
+                // Check if we can skip the entire file based on offset
+                if let Some(file_count) = count {
+                    let file_end = output_rows + file_count;
+                    if file_end <= offset {
+                        // Skip entire file
+                        return Ok(GettingDataFileStreamResult::Skip(file_count));
+                    }
+                    // Check if file is after limit
+                    if let Some(limit) = limit
+                        && output_rows >= offset + limit
+                    {
+                        return Ok(GettingDataFileStreamResult::Skip(file_count));
+                    }
+                }
+
+                let stream = read_data_file_by_record(
                     storage.as_ref(),
                     &table_schema,
                     &record,
@@ -616,7 +721,8 @@ impl TablePartitionScanner {
                     None,
                     batch_size,
                 )
-                .await
+                .await?;
+                Ok(GettingDataFileStreamResult::Streaming(stream))
             })
         };
         fut
@@ -628,8 +734,8 @@ impl Stream for TablePartitionScanner {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let data_file_records_count = self.partitioned_data_file_records.len();
+
         loop {
-            let limit_reached = self.is_limit_reached();
             match &mut self.state {
                 ScanState::InlineRowStreaming(stream) => {
                     let stream = Pin::new(stream);
@@ -638,7 +744,7 @@ impl Stream for TablePartitionScanner {
                             let batch = self.apply_limit_offset(batch);
                             if batch.num_rows() > 0 {
                                 return Poll::Ready(Some(Ok(batch)));
-                            } else if limit_reached {
+                            } else if self.is_limit_reached() {
                                 self.state = ScanState::Done;
                                 continue;
                             }
@@ -646,7 +752,7 @@ impl Stream for TablePartitionScanner {
                         Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
                         Poll::Ready(None) => {
                             // Inline rows done, transition to Done or data files
-                            if limit_reached || data_file_records_count == 0 {
+                            if self.is_limit_reached() || data_file_records_count == 0 {
                                 self.state = ScanState::Done;
                             } else {
                                 let first_data_file_record =
@@ -660,10 +766,31 @@ impl Stream for TablePartitionScanner {
                     }
                 }
                 ScanState::GettingDataFileStream { idx, fut } => {
+                    let idx = *idx;
                     let mut fut = Pin::new(fut);
                     match fut.as_mut().poll(cx) {
-                        Poll::Ready(Ok(stream)) => {
-                            self.state = ScanState::DataFileStreaming { idx: *idx, stream };
+                        Poll::Ready(Ok(result)) => {
+                            match result {
+                                GettingDataFileStreamResult::Skip(count) => {
+                                    self.output_rows += count;
+
+                                    // Skip current file, move to next
+                                    if self.is_limit_reached() || idx == data_file_records_count - 1
+                                    {
+                                        self.state = ScanState::Done;
+                                    } else {
+                                        let next_idx = idx + 1;
+                                        let data_file_record =
+                                            self.partitioned_data_file_records[next_idx].clone();
+                                        let fut = self.get_stream_future(data_file_record);
+                                        self.state =
+                                            ScanState::GettingDataFileStream { idx: next_idx, fut };
+                                    }
+                                }
+                                GettingDataFileStreamResult::Streaming(stream) => {
+                                    self.state = ScanState::DataFileStreaming { idx, stream };
+                                }
+                            }
                             continue;
                         }
                         Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
@@ -671,13 +798,14 @@ impl Stream for TablePartitionScanner {
                     }
                 }
                 ScanState::DataFileStreaming { idx, stream } => {
+                    let idx = *idx;
                     let stream = Pin::new(stream);
                     match stream.poll_next(cx) {
                         Poll::Ready(Some(Ok(batch))) => {
                             let batch = self.apply_limit_offset(batch);
                             if batch.num_rows() > 0 {
                                 return Poll::Ready(Some(Ok(batch)));
-                            } else if limit_reached {
+                            } else if self.is_limit_reached() {
                                 self.state = ScanState::Done;
                                 continue;
                             }
@@ -685,10 +813,10 @@ impl Stream for TablePartitionScanner {
                         Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
                         Poll::Ready(None) => {
                             // Current file done, move to next
-                            if limit_reached || *idx == data_file_records_count - 1 {
+                            if self.is_limit_reached() || idx == data_file_records_count - 1 {
                                 self.state = ScanState::Done;
                             } else {
-                                let next_idx = *idx + 1;
+                                let next_idx = idx + 1;
                                 let data_file_record =
                                     self.partitioned_data_file_records[next_idx].clone();
                                 let fut = self.get_stream_future(data_file_record);

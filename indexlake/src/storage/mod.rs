@@ -2,7 +2,7 @@ mod parquet;
 
 use arrow::array::FixedSizeBinaryArray;
 use bytes::Bytes;
-use futures::Stream;
+use futures::{Stream, StreamExt, TryStreamExt};
 pub(crate) use parquet::*;
 use uuid::Uuid;
 
@@ -135,6 +135,43 @@ pub(crate) async fn read_data_file_by_record(
             )
             .await
         }
+    }
+}
+
+pub(crate) async fn count_data_file_by_record(
+    storage: &dyn Storage,
+    table_schema: &TableSchemaRef,
+    data_file_record: &DataFileRecord,
+    mut filters: Vec<Expr>,
+    row_ids: Option<Vec<Uuid>>,
+) -> ILResult<usize> {
+    if let Some(row_ids) = row_ids {
+        let row_id_filter = row_ids_in_list_expr(row_ids);
+        filters.push(row_id_filter);
+    }
+    if filters.is_empty() {
+        Ok(data_file_record.valid_row_count())
+    } else {
+        let stream = read_data_file_by_record(
+            storage,
+            table_schema,
+            data_file_record,
+            None,
+            filters,
+            None,
+            8096,
+        )
+        .await?;
+        let count: usize = stream
+            .map(|batch| {
+                let batch = batch?;
+                Ok::<_, ILError>(batch.num_rows())
+            })
+            .try_collect::<Vec<_>>()
+            .await?
+            .into_iter()
+            .sum();
+        Ok(count)
     }
 }
 

@@ -174,7 +174,9 @@ impl Table {
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
 
         let inline_row_count = if partition.contains_inline_rows() {
-            catalog_helper.count_inline_rows(&self.table_id).await? as usize
+            catalog_helper
+                .count_inline_rows(&self.table_id, &[])
+                .await? as usize
         } else {
             0
         };
@@ -191,7 +193,9 @@ impl Table {
 
     pub async fn inline_row_count(&self) -> ILResult<usize> {
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
-        let count = catalog_helper.count_inline_rows(&self.table_id).await?;
+        let count = catalog_helper
+            .count_inline_rows(&self.table_id, &[])
+            .await?;
         Ok(count as usize)
     }
 
@@ -280,7 +284,9 @@ impl Table {
     // Delete all rows in the table
     pub async fn truncate(&self) -> ILResult<usize> {
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
-        let inline_truncate_count = catalog_helper.count_inline_rows(&self.table_id).await?;
+        let inline_truncate_count = catalog_helper
+            .count_inline_rows(&self.table_id, &[])
+            .await?;
         let data_file_records = catalog_helper.get_data_files(&self.table_id).await?;
         let index_file_records = catalog_helper.get_table_index_files(&self.table_id).await?;
 

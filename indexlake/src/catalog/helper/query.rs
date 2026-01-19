@@ -285,7 +285,22 @@ impl CatalogHelper {
         Ok(indexes)
     }
 
-    pub(crate) async fn count_inline_rows(&self, table_id: &Uuid) -> ILResult<i64> {
+    pub(crate) async fn count_inline_rows(
+        &self,
+        table_id: &Uuid,
+        filters: &[Expr],
+    ) -> ILResult<i64> {
+        let filter_strs = filters
+            .iter()
+            .map(|f| self.catalog.unparse_expr(f))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let where_clause = if filter_strs.is_empty() {
+            "".to_string()
+        } else {
+            format!(" WHERE {}", filter_strs.join(" AND "))
+        };
+
         let schema = Arc::new(CatalogSchema::new(vec![Column::new(
             "count",
             CatalogDataType::Int64,
@@ -293,7 +308,10 @@ impl CatalogHelper {
         )]));
         let rows = self
             .query_rows(
-                &format!("SELECT COUNT(1) FROM {}", inline_row_table_name(table_id)),
+                &format!(
+                    "SELECT COUNT(1) FROM {}{where_clause}",
+                    inline_row_table_name(table_id)
+                ),
                 schema,
             )
             .await?;
@@ -307,6 +325,7 @@ impl CatalogHelper {
         table_schema: &CatalogSchemaRef,
         row_ids: Option<&[Uuid]>,
         filters: &[Expr],
+        offset: Option<usize>,
     ) -> ILResult<RowStream<'static>> {
         if let Some(row_ids) = row_ids
             && row_ids.is_empty()
@@ -336,10 +355,16 @@ impl CatalogHelper {
             format!(" WHERE {}", filter_strs.join(" AND "))
         };
 
+        let offset_clause = if let Some(offset) = offset {
+            format!(" LIMIT 1000000 OFFSET {}", offset)
+        } else {
+            "".to_string()
+        };
+
         self.catalog
             .query(
                 &format!(
-                    "SELECT {} FROM {}{where_clause}",
+                    "SELECT {} FROM {}{where_clause}{offset_clause}",
                     table_schema.select_items(self.catalog.as_ref()).join(", "),
                     inline_row_table_name(table_id),
                 ),

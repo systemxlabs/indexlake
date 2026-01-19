@@ -27,7 +27,7 @@ pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
     tokio::spawn(async move {
         let try_dump_fn = async || {
             let catalog_helper = CatalogHelper::new(catalog.clone());
-            let inline_row_count = catalog_helper.count_inline_rows(&table_id).await?;
+            let inline_row_count = catalog_helper.count_inline_rows(&table_id, &[]).await?;
             if inline_row_count < table_config.inline_row_count_limit as i64 {
                 return Ok(false);
             }
