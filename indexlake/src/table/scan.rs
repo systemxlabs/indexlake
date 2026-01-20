@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -645,6 +646,7 @@ pub struct TablePartitionScanner {
     partitioned_data_file_records: Vec<DataFileRecord>,
     scan: TableScan,
     state: ScanState,
+    query_window: Range<usize>,
     row_pointer: usize,
 }
 
@@ -660,6 +662,13 @@ impl TablePartitionScanner {
     ) -> Self {
         let state = ScanState::InlineRowStreaming(inline_row_stream);
         let row_pointer = inline_row_skip_count;
+        
+        // Create query range based on offset and limit
+        let query_window = if let Some(limit) = scan.limit {
+            scan.offset..scan.offset + limit
+        } else {
+            scan.offset..usize::MAX
+        };
 
         Self {
             table_schema,
@@ -667,64 +676,46 @@ impl TablePartitionScanner {
             partitioned_data_file_records,
             scan,
             state,
+            query_window,
             row_pointer,
         }
     }
 
     /// Check if the limit has been reached.
     fn is_limit_reached(&self) -> bool {
-        if let Some(limit) = self.scan.limit {
-            self.row_pointer >= self.scan.offset + limit
-        } else {
-            false
-        }
+        self.row_pointer >= self.query_window.end
     }
 
-    /// Apply offset and limit to a batch.
+    /// Apply offset and limit to a batch using Range operations.
     fn apply_limit_offset(&self, batch: RecordBatch) -> RecordBatch {
         let num_rows = batch.num_rows();
         if num_rows == 0 {
             return batch;
         }
 
-        let offset = self.scan.offset;
-        let limit = self.scan.limit;
-
-        // Calculate the range of rows to keep from this batch
-        let batch_start = self.row_pointer;
-        let batch_end = batch_start + num_rows;
-
-        if batch_end < offset {
-            // The batch is completely before offset, skip it
+        // Calculate the range of rows in this batch
+        let batch_range = self.row_pointer..self.row_pointer + num_rows;
+        
+        // Find intersection with query window
+        let intersection_start = batch_range.start.max(self.query_window.start);
+        let intersection_end = batch_range.end.min(self.query_window.end);
+        
+        // Check if there's any overlap
+        if intersection_start >= intersection_end {
+            // No overlap, return empty batch
             return RecordBatch::new_empty(batch.schema());
         }
-
-        if let Some(limit) = limit
-            && batch_start >= offset + limit
-        {
-            // If the batch is completely after limit, skip it
-            return RecordBatch::new_empty(batch.schema());
-        }
-
-        // Calculate the slice of this batch to return
-        let slice_start = offset.saturating_sub(batch_start);
-        let slice_end = if let Some(limit) = limit {
-            (offset + limit).saturating_sub(batch_start)
+        
+        // Calculate slice parameters relative to the batch
+        let slice_start = intersection_start - batch_range.start;
+        let slice_len = intersection_end - intersection_start;
+        
+        // Return slice if needed, otherwise return original batch
+        if slice_start == 0 && slice_len == num_rows {
+            // No slicing needed
+            batch
         } else {
-            num_rows
-        };
-
-        // Slice the batch if needed
-        if slice_start < num_rows {
-            let slice_len = (slice_end - slice_start).min(num_rows - slice_start);
-            if slice_len == num_rows && slice_start == 0 {
-                // No slicing needed
-                return batch;
-            }
-            // Slice the batch
             batch.slice(slice_start, slice_len)
-        } else {
-            RecordBatch::new_empty(batch.schema())
         }
     }
 
@@ -737,8 +728,7 @@ impl TablePartitionScanner {
             let filters = self.scan.filters.clone();
             let batch_size = self.scan.batch_size;
             let row_pointer = self.row_pointer;
-            let offset = self.scan.offset;
-            let limit = self.scan.limit;
+            let query_window = self.query_window.clone();
             let needs_count = self.scan.offset_limit_required();
 
             Box::pin(async move {
@@ -757,17 +747,13 @@ impl TablePartitionScanner {
                     None
                 };
 
-                // Check if we can skip the entire file based on offset
+                // Check if we can skip the entire file using range operations
                 if let Some(file_count) = count {
-                    let file_end = row_pointer + file_count;
-                    if file_end <= offset {
-                        // Skip entire file
-                        return Ok(GettingDataFileStreamResult::Skip(file_count));
-                    }
-                    // Check if file is after limit
-                    if let Some(limit) = limit
-                        && row_pointer >= offset + limit
-                    {
+                    let file_range = row_pointer..row_pointer + file_count;
+                    
+                    // Check if file range has no intersection with query window
+                    if file_range.end <= query_window.start || file_range.start >= query_window.end {
+                        // Skip entire file - no overlap with query window
                         return Ok(GettingDataFileStreamResult::Skip(file_count));
                     }
                 }
