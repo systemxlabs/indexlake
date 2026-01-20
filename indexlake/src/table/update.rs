@@ -161,7 +161,12 @@ pub(crate) async fn update_data_file_rows_by_matched_rows(
     .await?;
     let row_ids = fixed_size_binary_array_to_uuids(&row_id_array)?;
     tx_helper
-        .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)
+        .update_data_file_rows_as_invalid(
+            &data_file_record.data_file_id,
+            data_file_record.validity,
+            &row_ids,
+            &updated_row_ids,
+        )
         .await?;
     Ok(updated_row_ids.len())
 }
@@ -203,7 +208,12 @@ pub(crate) async fn update_data_file_rows_by_condition(
     let row_ids = fixed_size_binary_array_to_uuids(&row_id_array)?;
 
     tx_helper
-        .update_data_file_rows_as_invalid(data_file_record, &row_ids, &updated_row_ids)
+        .update_data_file_rows_as_invalid(
+            &data_file_record.data_file_id,
+            data_file_record.validity,
+            &row_ids,
+            &updated_row_ids,
+        )
         .await?;
     Ok(updated_row_ids.len())
 }

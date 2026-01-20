@@ -45,7 +45,12 @@ pub(crate) async fn process_delete_by_condition(
             matched_data_file_row_ids.get(&data_file_record.data_file_id)
         {
             tx_helper
-                .update_data_file_rows_as_invalid(data_file_record, &row_ids, matched_row_ids)
+                .update_data_file_rows_as_invalid(
+                    &data_file_record.data_file_id,
+                    data_file_record.validity,
+                    &row_ids,
+                    matched_row_ids,
+                )
                 .await?;
             matched_row_ids.len()
         } else {
@@ -120,7 +125,12 @@ pub(crate) async fn delete_data_file_rows_by_condition(
     .await?;
 
     tx_helper
-        .update_data_file_rows_as_invalid(data_file_record, row_ids, &deleted_row_ids)
+        .update_data_file_rows_as_invalid(
+            &data_file_record.data_file_id,
+            data_file_record.validity,
+            row_ids,
+            &deleted_row_ids,
+        )
         .await?;
     Ok(deleted_row_ids.len())
 }
@@ -155,6 +165,8 @@ pub(crate) async fn process_delete_by_row_id_condition(
         )?;
         let bool_array = row_id_condition.condition_eval(&batch)?;
 
+        let old_validity = data_file_record.validity.clone();
+
         let mut delete_count = 0;
         for (i, v) in bool_array.iter().enumerate() {
             if let Some(v) = v
@@ -167,7 +179,11 @@ pub(crate) async fn process_delete_by_row_id_condition(
         file_delete_count += delete_count;
 
         tx_helper
-            .update_data_file_validity(&data_file_record.data_file_id, &data_file_record.validity)
+            .update_data_file_validity(
+                &data_file_record.data_file_id,
+                &old_validity,
+                &data_file_record.validity,
+            )
             .await?;
     }
     Ok(inline_delete_count + file_delete_count)

@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
-use crate::ILResult;
-use crate::catalog::{DataFileRecord, RowValidity, TransactionHelper, inline_row_table_name};
+use crate::catalog::{RowValidity, TransactionHelper, inline_row_table_name};
 use crate::expr::Expr;
+use crate::{ILError, ILResult};
 
 impl TransactionHelper {
     pub(crate) async fn update_namespace_name(
@@ -77,20 +77,29 @@ impl TransactionHelper {
     pub(crate) async fn update_data_file_validity(
         &mut self,
         data_file_id: &Uuid,
-        validity: &RowValidity,
+        old_validity: &RowValidity,
+        new_validity: &RowValidity,
     ) -> ILResult<usize> {
-        self.transaction
+        let update_count = self.transaction
             .execute(&format!(
-                "UPDATE indexlake_data_file SET validity = {} WHERE data_file_id = {}",
-                self.catalog.sql_binary_literal(validity.bytes()),
-                self.catalog.sql_uuid_literal(data_file_id)
+                "UPDATE indexlake_data_file SET validity = {} WHERE data_file_id = {} AND validity = {}",
+                self.catalog.sql_binary_literal(new_validity.bytes()),
+                self.catalog.sql_uuid_literal(data_file_id),
+                self.catalog.sql_binary_literal(old_validity.bytes()),
             ))
-            .await
+            .await?;
+        if update_count != 1 {
+            return Err(ILError::internal(
+                "Failed to update data file validity due to concurrency conflict",
+            ));
+        }
+        Ok(update_count)
     }
 
     pub(crate) async fn update_data_file_rows_as_invalid(
         &mut self,
-        mut data_file_record: DataFileRecord,
+        data_file_id: &Uuid,
+        mut validity: RowValidity,
         sorted_row_ids: &[Uuid],
         invalid_row_ids: &HashSet<Uuid>,
     ) -> ILResult<usize> {
@@ -100,13 +109,15 @@ impl TransactionHelper {
             return Ok(1);
         }
 
+        let old_validity = validity.clone();
+
         for invalid_row_id in invalid_row_ids {
             if let Ok(idx) = sorted_row_ids.binary_search(invalid_row_id) {
-                data_file_record.validity.set(idx, false);
+                validity.set(idx, false);
             }
         }
 
-        self.update_data_file_validity(&data_file_record.data_file_id, &data_file_record.validity)
+        self.update_data_file_validity(data_file_id, &old_validity, &validity)
             .await
     }
 }
