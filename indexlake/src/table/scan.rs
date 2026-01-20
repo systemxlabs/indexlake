@@ -645,7 +645,7 @@ pub struct TablePartitionScanner {
     partitioned_data_file_records: Vec<DataFileRecord>,
     scan: TableScan,
     state: ScanState,
-    fetched_rows: usize,
+    row_pointer: usize,
 }
 
 impl TablePartitionScanner {
@@ -659,7 +659,7 @@ impl TablePartitionScanner {
         scan: TableScan,
     ) -> Self {
         let state = ScanState::InlineRowStreaming(inline_row_stream);
-        let fetched_rows = inline_row_skip_count;
+        let row_pointer = inline_row_skip_count;
 
         Self {
             table_schema,
@@ -667,14 +667,14 @@ impl TablePartitionScanner {
             partitioned_data_file_records,
             scan,
             state,
-            fetched_rows,
+            row_pointer,
         }
     }
 
     /// Check if the limit has been reached.
     fn is_limit_reached(&self) -> bool {
         if let Some(limit) = self.scan.limit {
-            self.fetched_rows >= self.scan.offset + limit
+            self.row_pointer >= self.scan.offset + limit
         } else {
             false
         }
@@ -691,7 +691,7 @@ impl TablePartitionScanner {
         let limit = self.scan.limit;
 
         // Calculate the range of rows to keep from this batch
-        let batch_start = self.fetched_rows;
+        let batch_start = self.row_pointer;
         let batch_end = batch_start + num_rows;
 
         if batch_end < offset {
@@ -736,7 +736,7 @@ impl TablePartitionScanner {
             let projection = self.scan.projection.clone();
             let filters = self.scan.filters.clone();
             let batch_size = self.scan.batch_size;
-            let fetched_rows = self.fetched_rows;
+            let row_pointer = self.row_pointer;
             let offset = self.scan.offset;
             let limit = self.scan.limit;
             let needs_count = self.scan.offset_limit_required();
@@ -759,14 +759,14 @@ impl TablePartitionScanner {
 
                 // Check if we can skip the entire file based on offset
                 if let Some(file_count) = count {
-                    let file_end = fetched_rows + file_count;
+                    let file_end = row_pointer + file_count;
                     if file_end <= offset {
                         // Skip entire file
                         return Ok(GettingDataFileStreamResult::Skip(file_count));
                     }
                     // Check if file is after limit
                     if let Some(limit) = limit
-                        && fetched_rows >= offset + limit
+                        && row_pointer >= offset + limit
                     {
                         return Ok(GettingDataFileStreamResult::Skip(file_count));
                     }
@@ -803,7 +803,7 @@ impl Stream for TablePartitionScanner {
                         Poll::Ready(Some(Ok(batch))) => {
                             let num_rows = batch.num_rows();
                             let batch = self.apply_limit_offset(batch);
-                            self.fetched_rows += num_rows;
+                            self.row_pointer += num_rows;
                             if batch.num_rows() > 0 {
                                 return Poll::Ready(Some(Ok(batch)));
                             } else if self.is_limit_reached() {
@@ -834,7 +834,7 @@ impl Stream for TablePartitionScanner {
                         Poll::Ready(Ok(result)) => {
                             match result {
                                 GettingDataFileStreamResult::Skip(count) => {
-                                    self.fetched_rows += count;
+                                    self.row_pointer += count;
 
                                     // Skip current file, move to next
                                     if self.is_limit_reached() || idx == data_file_records_count - 1
@@ -866,7 +866,7 @@ impl Stream for TablePartitionScanner {
                         Poll::Ready(Some(Ok(batch))) => {
                             let num_rows = batch.num_rows();
                             let batch = self.apply_limit_offset(batch);
-                            self.fetched_rows += num_rows;
+                            self.row_pointer += num_rows;
                             if batch.num_rows() > 0 {
                                 return Poll::Ready(Some(Ok(batch)));
                             } else if self.is_limit_reached() {
