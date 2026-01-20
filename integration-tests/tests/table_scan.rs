@@ -6,7 +6,7 @@ use indexlake::expr::{col, lit};
 use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};
 use indexlake_integration_tests::data::{
-    prepare_simple_testing_table, prepare_simple_vector_table,
+    prepare_simple_testing_table, prepare_simple_testing_table2, prepare_simple_vector_table,
 };
 use indexlake_integration_tests::utils::{
     assert_data_file_count, assert_inline_row_count, table_scan,
@@ -106,9 +106,21 @@ async fn scan_with_limit_offset(
     init_env_logger();
 
     let client = Client::new(catalog, storage);
-    let table = prepare_simple_testing_table(&client, format).await?;
+    let table = prepare_simple_testing_table2(&client, format).await?;
 
-    let scan = TableScan::default().with_limit(1).with_offset(2);
+    let scan = TableScan::default().with_offset(0).with_limit(1);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| Alice | 20  |
++-------+-----+"#
+    );
+
+    let scan = TableScan::default().with_offset(1).with_limit(1);
     let table_str = table_scan(&table, scan).await?;
     println!("{}", table_str);
     assert_eq!(
@@ -120,6 +132,41 @@ async fn scan_with_limit_offset(
 +------+-----+"#
     );
 
+    let scan = TableScan::default().with_offset(2).with_limit(1);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Charlie | 22  |
++---------+-----+"#
+    );
+
+    let scan = TableScan::default().with_offset(3).with_limit(1);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| David | 23  |
++-------+-----+"#
+    );
+
+    let scan = TableScan::default().with_offset(4).with_limit(1);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+------+-----+
+| name | age |
++------+-----+
+| Eve  | 24  |
++------+-----+"#
+    );
     Ok(())
 }
 

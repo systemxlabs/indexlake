@@ -71,6 +71,72 @@ pub async fn prepare_simple_testing_table(
     Ok(table)
 }
 
+pub async fn prepare_simple_testing_table2(
+    client: &Client,
+    format: DataFileFormat,
+) -> ILResult<Table> {
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![
+        Field::new("name", DataType::Utf8, false),
+        Field::new("age", DataType::Int32, false),
+    ]));
+    let table_config = TableConfig {
+        preferred_data_file_format: format,
+        ..Default::default()
+    };
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: table_schema.clone(),
+        config: table_config,
+        ..Default::default()
+    };
+    client.create_table(table_creation).await?;
+
+    let table = client.load_table(&namespace_name, &table_name).await?;
+
+    let record_batch = RecordBatch::try_new(
+        table_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie"])),
+            Arc::new(Int32Array::from(vec![20, 21, 22])),
+        ],
+    )?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
+
+    let record_batch = RecordBatch::try_new(
+        table_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["David", "Eve", "Frank"])),
+            Arc::new(Int32Array::from(vec![23, 24, 25])),
+        ],
+    )?;
+    table
+        .bypass_insert(Box::pin(futures::stream::iter(vec![Ok(record_batch)])))
+        .await?;
+
+    let record_batch = RecordBatch::try_new(
+        table_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["George", "Hannah", "Ivy"])),
+            Arc::new(Int32Array::from(vec![26, 27, 28])),
+        ],
+    )?;
+    table
+        .bypass_insert(Box::pin(futures::stream::iter(vec![Ok(record_batch)])))
+        .await?;
+
+    assert_inline_row_count(&table, |count| count == 3).await?;
+    assert_data_file_count(&table, |count| count == 2).await?;
+
+    Ok(table)
+}
+
 pub async fn prepare_simple_geom_table(client: &Client, format: DataFileFormat) -> ILResult<Table> {
     let namespace_name = uuid::Uuid::new_v4().to_string();
     client.create_namespace(&namespace_name, true).await?;

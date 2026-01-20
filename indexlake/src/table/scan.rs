@@ -268,7 +268,7 @@ async fn scan_inline_rows(
 
     let arrow_filter = merge_filters(arrow_filters);
 
-    let row_stream = catalog_helper
+    let mut row_stream = catalog_helper
         .scan_inline_rows(
             table_id,
             &catalog_schema,
@@ -281,19 +281,22 @@ async fn scan_inline_rows(
             },
         )
         .await?;
-    let inline_stream = Box::pin(row_stream.skip(offset).chunks(scan.batch_size).map(
-        move |rows| {
-            let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-            let batch = rows_to_record_batch(&projected_schema, &rows)?;
-            if let Some(arrow_filter) = &arrow_filter {
-                let bool_array = arrow_filter.condition_eval(&batch)?;
-                let filtered_batch = arrow::compute::filter_record_batch(&batch, &bool_array)?;
-                Ok(filtered_batch)
-            } else {
-                Ok(batch)
-            }
-        },
-    ));
+
+    if arrow_filter.is_some() {
+        row_stream = Box::pin(row_stream.skip(offset));
+    }
+
+    let inline_stream = Box::pin(row_stream.chunks(scan.batch_size).map(move |rows| {
+        let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
+        let batch = rows_to_record_batch(&projected_schema, &rows)?;
+        if let Some(arrow_filter) = &arrow_filter {
+            let bool_array = arrow_filter.condition_eval(&batch)?;
+            let filtered_batch = arrow::compute::filter_record_batch(&batch, &bool_array)?;
+            Ok(filtered_batch)
+        } else {
+            Ok(batch)
+        }
+    }));
     Ok(Box::pin(inline_stream))
 }
 
@@ -642,7 +645,7 @@ pub struct TablePartitionScanner {
     partitioned_data_file_records: Vec<DataFileRecord>,
     scan: TableScan,
     state: ScanState,
-    output_rows: usize,
+    fetched_rows: usize,
 }
 
 impl TablePartitionScanner {
@@ -656,7 +659,7 @@ impl TablePartitionScanner {
         scan: TableScan,
     ) -> Self {
         let state = ScanState::InlineRowStreaming(inline_row_stream);
-        let output_rows = inline_row_skip_count;
+        let fetched_rows = inline_row_skip_count;
 
         Self {
             table_schema,
@@ -664,7 +667,7 @@ impl TablePartitionScanner {
             partitioned_data_file_records,
             scan,
             state,
-            output_rows,
+            fetched_rows,
         }
     }
 
@@ -676,7 +679,7 @@ impl TablePartitionScanner {
             let projection = self.scan.projection.clone();
             let filters = self.scan.filters.clone();
             let batch_size = self.scan.batch_size;
-            let output_rows = self.output_rows;
+            let fetched_rows = self.fetched_rows;
             let offset = self.scan.offset;
             let limit = self.scan.limit;
             let needs_count = self.scan.offset_limit_required();
@@ -699,14 +702,14 @@ impl TablePartitionScanner {
 
                 // Check if we can skip the entire file based on offset
                 if let Some(file_count) = count {
-                    let file_end = output_rows + file_count;
+                    let file_end = fetched_rows + file_count;
                     if file_end <= offset {
                         // Skip entire file
                         return Ok(GettingDataFileStreamResult::Skip(file_count));
                     }
                     // Check if file is after limit
                     if let Some(limit) = limit
-                        && output_rows >= offset + limit
+                        && fetched_rows >= offset + limit
                     {
                         return Ok(GettingDataFileStreamResult::Skip(file_count));
                     }
@@ -741,7 +744,9 @@ impl Stream for TablePartitionScanner {
                     let stream = Pin::new(stream);
                     match stream.poll_next(cx) {
                         Poll::Ready(Some(Ok(batch))) => {
+                            let num_rows = batch.num_rows();
                             let batch = self.apply_limit_offset(batch);
+                            self.fetched_rows += num_rows;
                             if batch.num_rows() > 0 {
                                 return Poll::Ready(Some(Ok(batch)));
                             } else if self.is_limit_reached() {
@@ -772,7 +777,7 @@ impl Stream for TablePartitionScanner {
                         Poll::Ready(Ok(result)) => {
                             match result {
                                 GettingDataFileStreamResult::Skip(count) => {
-                                    self.output_rows += count;
+                                    self.fetched_rows += count;
 
                                     // Skip current file, move to next
                                     if self.is_limit_reached() || idx == data_file_records_count - 1
@@ -802,7 +807,9 @@ impl Stream for TablePartitionScanner {
                     let stream = Pin::new(stream);
                     match stream.poll_next(cx) {
                         Poll::Ready(Some(Ok(batch))) => {
+                            let num_rows = batch.num_rows();
                             let batch = self.apply_limit_offset(batch);
+                            self.fetched_rows += num_rows;
                             if batch.num_rows() > 0 {
                                 return Poll::Ready(Some(Ok(batch)));
                             } else if self.is_limit_reached() {
@@ -838,14 +845,14 @@ impl TablePartitionScanner {
     /// Check if the limit has been reached.
     fn is_limit_reached(&self) -> bool {
         if let Some(limit) = self.scan.limit {
-            self.output_rows >= self.scan.offset + limit
+            self.fetched_rows >= self.scan.offset + limit
         } else {
             false
         }
     }
 
     /// Apply offset and limit to a batch.
-    fn apply_limit_offset(&mut self, batch: RecordBatch) -> RecordBatch {
+    fn apply_limit_offset(&self, batch: RecordBatch) -> RecordBatch {
         let num_rows = batch.num_rows();
         if num_rows == 0 {
             return batch;
@@ -855,8 +862,20 @@ impl TablePartitionScanner {
         let limit = self.scan.limit;
 
         // Calculate the range of rows to keep from this batch
-        let batch_start = self.output_rows;
+        let batch_start = self.fetched_rows;
         let batch_end = batch_start + num_rows;
+
+        if batch_end < offset {
+            // The batch is completely before offset, skip it
+            return RecordBatch::new_empty(batch.schema());
+        }
+
+        if let Some(limit) = limit
+            && batch_start >= offset + limit
+        {
+            // If the batch is completely after limit, skip it
+            return RecordBatch::new_empty(batch.schema());
+        }
 
         // Calculate the slice of this batch to return
         let slice_start = offset.saturating_sub(batch_start);
@@ -865,21 +884,6 @@ impl TablePartitionScanner {
         } else {
             num_rows
         };
-
-        // Update output_rows count
-        self.output_rows = batch_end;
-
-        // If the batch is completely before offset, skip it
-        if batch_end <= offset {
-            return RecordBatch::new_empty(batch.schema());
-        }
-
-        // If the batch is completely after limit, skip it
-        if let Some(limit) = limit
-            && batch_start >= offset + limit
-        {
-            return RecordBatch::new_empty(batch.schema());
-        }
 
         // Slice the batch if needed
         if slice_start < num_rows {
