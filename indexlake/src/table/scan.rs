@@ -662,7 +662,7 @@ impl TablePartitionScanner {
     ) -> Self {
         let state = ScanState::InlineRowStreaming(inline_row_stream);
         let row_pointer = inline_row_skip_count;
-        
+
         // Create query range based on offset and limit
         let query_window = if let Some(limit) = scan.limit {
             scan.offset..scan.offset + limit
@@ -695,21 +695,21 @@ impl TablePartitionScanner {
 
         // Calculate the range of rows in this batch
         let batch_range = self.row_pointer..self.row_pointer + num_rows;
-        
+
         // Find intersection with query window
         let intersection_start = batch_range.start.max(self.query_window.start);
         let intersection_end = batch_range.end.min(self.query_window.end);
-        
+
         // Check if there's any overlap
         if intersection_start >= intersection_end {
             // No overlap, return empty batch
             return RecordBatch::new_empty(batch.schema());
         }
-        
+
         // Calculate slice parameters relative to the batch
         let slice_start = intersection_start - batch_range.start;
         let slice_len = intersection_end - intersection_start;
-        
+
         // Return slice if needed, otherwise return original batch
         if slice_start == 0 && slice_len == num_rows {
             // No slicing needed
@@ -750,9 +750,10 @@ impl TablePartitionScanner {
                 // Check if we can skip the entire file using range operations
                 if let Some(file_count) = count {
                     let file_range = row_pointer..row_pointer + file_count;
-                    
+
                     // Check if file range has no intersection with query window
-                    if file_range.end <= query_window.start || file_range.start >= query_window.end {
+                    if file_range.end <= query_window.start || file_range.start >= query_window.end
+                    {
                         // Skip entire file - no overlap with query window
                         return Ok(GettingDataFileStreamResult::Skip(file_count));
                     }
@@ -883,4 +884,3 @@ impl Stream for TablePartitionScanner {
         }
     }
 }
-
