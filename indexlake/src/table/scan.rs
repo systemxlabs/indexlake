@@ -671,6 +671,63 @@ impl TablePartitionScanner {
         }
     }
 
+    /// Check if the limit has been reached.
+    fn is_limit_reached(&self) -> bool {
+        if let Some(limit) = self.scan.limit {
+            self.fetched_rows >= self.scan.offset + limit
+        } else {
+            false
+        }
+    }
+
+    /// Apply offset and limit to a batch.
+    fn apply_limit_offset(&self, batch: RecordBatch) -> RecordBatch {
+        let num_rows = batch.num_rows();
+        if num_rows == 0 {
+            return batch;
+        }
+
+        let offset = self.scan.offset;
+        let limit = self.scan.limit;
+
+        // Calculate the range of rows to keep from this batch
+        let batch_start = self.fetched_rows;
+        let batch_end = batch_start + num_rows;
+
+        if batch_end < offset {
+            // The batch is completely before offset, skip it
+            return RecordBatch::new_empty(batch.schema());
+        }
+
+        if let Some(limit) = limit
+            && batch_start >= offset + limit
+        {
+            // If the batch is completely after limit, skip it
+            return RecordBatch::new_empty(batch.schema());
+        }
+
+        // Calculate the slice of this batch to return
+        let slice_start = offset.saturating_sub(batch_start);
+        let slice_end = if let Some(limit) = limit {
+            (offset + limit).saturating_sub(batch_start)
+        } else {
+            num_rows
+        };
+
+        // Slice the batch if needed
+        if slice_start < num_rows {
+            let slice_len = (slice_end - slice_start).min(num_rows - slice_start);
+            if slice_len == num_rows && slice_start == 0 {
+                // No slicing needed
+                return batch;
+            }
+            // Slice the batch
+            batch.slice(slice_start, slice_len)
+        } else {
+            RecordBatch::new_empty(batch.schema())
+        }
+    }
+
     #[allow(clippy::let_and_return)]
     fn get_stream_future(&self, record: DataFileRecord) -> GettingDataFileStreamFut {
         let fut = {
@@ -841,61 +898,3 @@ impl Stream for TablePartitionScanner {
     }
 }
 
-impl TablePartitionScanner {
-    /// Check if the limit has been reached.
-    fn is_limit_reached(&self) -> bool {
-        if let Some(limit) = self.scan.limit {
-            self.fetched_rows >= self.scan.offset + limit
-        } else {
-            false
-        }
-    }
-
-    /// Apply offset and limit to a batch.
-    fn apply_limit_offset(&self, batch: RecordBatch) -> RecordBatch {
-        let num_rows = batch.num_rows();
-        if num_rows == 0 {
-            return batch;
-        }
-
-        let offset = self.scan.offset;
-        let limit = self.scan.limit;
-
-        // Calculate the range of rows to keep from this batch
-        let batch_start = self.fetched_rows;
-        let batch_end = batch_start + num_rows;
-
-        if batch_end < offset {
-            // The batch is completely before offset, skip it
-            return RecordBatch::new_empty(batch.schema());
-        }
-
-        if let Some(limit) = limit
-            && batch_start >= offset + limit
-        {
-            // If the batch is completely after limit, skip it
-            return RecordBatch::new_empty(batch.schema());
-        }
-
-        // Calculate the slice of this batch to return
-        let slice_start = offset.saturating_sub(batch_start);
-        let slice_end = if let Some(limit) = limit {
-            (offset + limit).saturating_sub(batch_start)
-        } else {
-            num_rows
-        };
-
-        // Slice the batch if needed
-        if slice_start < num_rows {
-            let slice_len = (slice_end - slice_start).min(num_rows - slice_start);
-            if slice_len == num_rows && slice_start == 0 {
-                // No slicing needed
-                return batch;
-            }
-            // Slice the batch
-            batch.slice(slice_start, slice_len)
-        } else {
-            RecordBatch::new_empty(batch.schema())
-        }
-    }
-}
