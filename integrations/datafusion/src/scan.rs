@@ -5,8 +5,9 @@ use std::sync::Arc;
 use arrow::array::{RecordBatch, RecordBatchOptions};
 use arrow::datatypes::{Schema, SchemaRef};
 use datafusion_common::stats::Precision;
-use datafusion_common::{DFSchema, Statistics, project_schema, DataFusionError};
+use datafusion_common::{DFSchema, DataFusionError, Statistics, project_schema};
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
+use datafusion_expr::Expr;
 use datafusion_physical_expr::EquivalenceProperties;
 use datafusion_physical_plan::display::ProjectSchemaDisplay;
 use datafusion_physical_plan::execution_plan::{Boundedness, EmissionType};
@@ -14,7 +15,6 @@ use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
 };
-use datafusion_expr::Expr;
 use futures::{StreamExt, TryStreamExt};
 use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};

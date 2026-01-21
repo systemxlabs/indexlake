@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use datafusion_common::stats::Precision;
 use datafusion_common::DataFusionError;
+use datafusion_common::stats::Precision;
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_expr::dml::InsertOp;
 use datafusion_physical_expr::EquivalenceProperties;

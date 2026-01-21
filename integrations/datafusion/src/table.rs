@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
 use datafusion_catalog::{Session, TableProvider};
+use datafusion_common::DataFusionError;
 use datafusion_common::stats::Precision;
 use datafusion_common::{DFSchema, Statistics};
-use datafusion_expr::TableType;
-use datafusion_common::DataFusionError;
+use datafusion_expr::Expr;
 use datafusion_expr::TableProviderFilterPushDown;
+use datafusion_expr::TableType;
 use datafusion_expr::dml::InsertOp;
 use datafusion_physical_plan::ExecutionPlan;
-use datafusion_expr::Expr;
 use indexlake::Client;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
