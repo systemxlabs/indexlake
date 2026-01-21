@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::catalog::{Session, TableProvider};
-use datafusion::common::stats::Precision;
-use datafusion::common::{DFSchema, Statistics};
-use datafusion::datasource::TableType;
-use datafusion::error::DataFusionError;
-use datafusion::logical_expr::TableProviderFilterPushDown;
-use datafusion::logical_expr::dml::InsertOp;
-use datafusion::physical_plan::ExecutionPlan;
-use datafusion::prelude::Expr;
+use arrow::datatypes::SchemaRef;
+use datafusion_catalog::{Session, TableProvider};
+use datafusion_common::stats::Precision;
+use datafusion_common::{DFSchema, Statistics};
+use datafusion_expr::TableType;
+use datafusion_common::DataFusionError;
+use datafusion_expr::TableProviderFilterPushDown;
+use datafusion_expr::dml::InsertOp;
+use datafusion_physical_plan::ExecutionPlan;
+use datafusion_expr::Expr;
 use indexlake::Client;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
