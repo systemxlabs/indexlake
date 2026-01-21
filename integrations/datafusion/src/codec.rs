@@ -57,8 +57,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 let data_files = parse_data_files(node.data_files)?;
 
                 let projection = parse_projection(node.projection.as_ref());
-                let filters =
-                    parse_exprs(&node.filters, ctx, &DefaultLogicalExtensionCodec {})?;
+                let filters = parse_exprs(&node.filters, ctx, &DefaultLogicalExtensionCodec {})?;
 
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
