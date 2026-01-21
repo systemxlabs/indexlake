@@ -37,7 +37,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
         &self,
         buf: &[u8],
         inputs: &[Arc<dyn ExecutionPlan>],
-        registry: &TaskContext,
+        ctx: &TaskContext,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let indexlake_node = IndexLakePhysicalPlanNode::decode(buf).map_err(|e| {
             DataFusionError::Internal(format!(
@@ -58,7 +58,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
                 let projection = parse_projection(node.projection.as_ref());
                 let filters =
-                    parse_exprs(&node.filters, registry, &DefaultLogicalExtensionCodec {})?;
+                    parse_exprs(&node.filters, ctx, &DefaultLogicalExtensionCodec {})?;
 
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);

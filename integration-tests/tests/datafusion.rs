@@ -496,7 +496,7 @@ async fn datafusion_scan_serialization(
     let plan_proto = PhysicalPlanNode::try_from_physical_plan(plan, &codec)?;
     plan_proto.try_encode(&mut plan_buf)?;
     let new_plan: Arc<dyn ExecutionPlan> = PhysicalPlanNode::try_decode(&plan_buf)
-        .and_then(|proto| proto.try_into_physical_plan(&session, &session.runtime_env(), &codec))?;
+        .and_then(|proto| proto.try_into_physical_plan(&session.task_ctx(), &codec))?;
     println!(
         "deserialized plan: {}",
         DisplayableExecutionPlan::new(new_plan.as_ref()).indent(true)
@@ -558,7 +558,7 @@ async fn datafusion_insert_serialization(
     let plan_proto = PhysicalPlanNode::try_from_physical_plan(plan, &codec)?;
     plan_proto.try_encode(&mut plan_buf)?;
     let new_plan: Arc<dyn ExecutionPlan> = PhysicalPlanNode::try_decode(&plan_buf)
-        .and_then(|proto| proto.try_into_physical_plan(&session, &session.runtime_env(), &codec))?;
+        .and_then(|proto| proto.try_into_physical_plan(&session.task_ctx(), &codec))?;
     println!(
         "deserialized plan: {}",
         DisplayableExecutionPlan::new(new_plan.as_ref()).indent(true)
