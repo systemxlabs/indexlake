@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::error::DataFusionError;
-use datafusion::execution::FunctionRegistry;
+use datafusion::execution::TaskContext;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
@@ -37,7 +37,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
         &self,
         buf: &[u8],
         inputs: &[Arc<dyn ExecutionPlan>],
-        registry: &dyn FunctionRegistry,
+        registry: &TaskContext,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let indexlake_node = IndexLakePhysicalPlanNode::decode(buf).map_err(|e| {
             DataFusionError::Internal(format!(
