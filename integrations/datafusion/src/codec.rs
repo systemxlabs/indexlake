@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::error::DataFusionError;
-use datafusion::execution::FunctionRegistry;
-use datafusion::logical_expr::dml::InsertOp;
-use datafusion::physical_plan::ExecutionPlan;
+use arrow::datatypes::SchemaRef;
+use datafusion_common::DataFusionError;
+use datafusion_execution::TaskContext;
+use datafusion_expr::dml::InsertOp;
+use datafusion_physical_plan::ExecutionPlan;
 use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
 use datafusion_proto::logical_plan::from_proto::parse_exprs;
 use datafusion_proto::logical_plan::to_proto::serialize_exprs;
@@ -37,7 +37,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
         &self,
         buf: &[u8],
         inputs: &[Arc<dyn ExecutionPlan>],
-        registry: &dyn FunctionRegistry,
+        ctx: &TaskContext,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let indexlake_node = IndexLakePhysicalPlanNode::decode(buf).map_err(|e| {
             DataFusionError::Internal(format!(
@@ -57,8 +57,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 let data_files = parse_data_files(node.data_files)?;
 
                 let projection = parse_projection(node.projection.as_ref());
-                let filters =
-                    parse_exprs(&node.filters, registry, &DefaultLogicalExtensionCodec {})?;
+                let filters = parse_exprs(&node.filters, ctx, &DefaultLogicalExtensionCodec {})?;
 
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
@@ -176,7 +175,7 @@ fn serialize_schema(schema: &SchemaRef) -> Result<ProtoSchema, DataFusionError> 
 fn parse_schema(proto: Option<ProtoSchema>) -> Result<SchemaRef, DataFusionError> {
     let proto =
         proto.ok_or_else(|| DataFusionError::Internal("Missing schema in protobuf".to_string()))?;
-    let schema: datafusion::arrow::datatypes::Schema = (&proto)
+    let schema: arrow::datatypes::Schema = (&proto)
         .try_into()
         .map_err(|e| DataFusionError::Internal(format!("Failed to parse schema: {e:?}")))?;
     Ok(Arc::new(schema))

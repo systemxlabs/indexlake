@@ -372,11 +372,16 @@ macro_rules! list_builder_append {
                         );
                     }
                     DataType::Binary => {
-                        values_builder_append!(values_builder, BinaryBuilder, array, BinaryArray);
+                        generic_byte_values_builder_append!(
+                            values_builder,
+                            BinaryBuilder,
+                            array,
+                            BinaryArray
+                        );
                     }
                     // TODO FixedSizeBinaryBuilder supports append_array
                     DataType::LargeBinary => {
-                        values_builder_append!(
+                        generic_byte_values_builder_append!(
                             values_builder,
                             LargeBinaryBuilder,
                             array,
@@ -384,10 +389,15 @@ macro_rules! list_builder_append {
                         );
                     }
                     DataType::Utf8 => {
-                        values_builder_append!(values_builder, StringBuilder, array, StringArray);
+                        generic_byte_values_builder_append!(
+                            values_builder,
+                            StringBuilder,
+                            array,
+                            StringArray
+                        );
                     }
                     DataType::LargeUtf8 => {
-                        values_builder_append!(
+                        generic_byte_values_builder_append!(
                             values_builder,
                             LargeStringBuilder,
                             array,
@@ -443,6 +453,28 @@ macro_rules! values_builder_append {
             ))
         })?;
         values_builder.append_array(array);
+    }};
+}
+
+macro_rules! generic_byte_values_builder_append {
+    ($builder:expr, $builder_ty:ty, $array:expr, $array_ty:ty) => {{
+        let values_builder = $builder
+            .as_any_mut()
+            .downcast_mut::<$builder_ty>()
+            .unwrap_or_else(|| {
+                panic!(
+                    "Failed to downcast values builder to {}",
+                    stringify!($builder_ty),
+                )
+            });
+
+        let array = $array.as_any().downcast_ref::<$array_ty>().ok_or_else(|| {
+            ILError::internal(format!(
+                "Failed to downcast inner array to {}",
+                stringify!($array_ty),
+            ))
+        })?;
+        values_builder.append_array(array)?;
     }};
 }
 
@@ -837,6 +869,16 @@ pub fn rows_to_record_batch(schema: &SchemaRef, rows: &[Row]) -> ILResult<Record
                         i
                     );
                 }
+                DataType::LargeList(inner_field) => {
+                    list_builder_append!(
+                        array_builders[i],
+                        LargeListBuilder<Box<dyn ArrayBuilder>>,
+                        field,
+                        inner_field,
+                        row,
+                        i
+                    );
+                }
                 DataType::FixedSizeList(inner_field, len) => {
                     let builder = array_builders[i]
                         .as_any_mut()
@@ -950,16 +992,6 @@ pub fn rows_to_record_batch(schema: &SchemaRef, rows: &[Row]) -> ILResult<Record
                             )));
                         }
                     }
-                }
-                DataType::LargeList(inner_field) => {
-                    list_builder_append!(
-                        array_builders[i],
-                        LargeListBuilder<Box<dyn ArrayBuilder>>,
-                        field,
-                        inner_field,
-                        row,
-                        i
-                    );
                 }
                 DataType::Decimal128(..) => {
                     builder_append!(

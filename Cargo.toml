@@ -37,8 +37,8 @@ indexlake-integration-tests = { path = "integration-tests", version = "0.3.0" }
 indexlake-storage-fs = { path = "storages/fs", version = "0.3.0" }
 indexlake-storage-s3 = { path = "storages/s3", version = "0.3.0" }
 
-arrow = "56"
-arrow-schema = "56"
+arrow = "57"
+arrow-schema = "57"
 async-stream = "0.3.6"
 async-trait = "0.1"
 bb8 = "0.9"
@@ -47,8 +47,16 @@ bincode = "1.3"
 bm25 = "2.3"
 bytes = "1.10"
 comfy-table = "7.0"
-datafusion = "50"
-datafusion-proto = "50"
+datafusion = { version = "51", default-features = false, features = ["sql"] }
+datafusion-catalog = "51"
+datafusion-common = "51"
+datafusion-datasource = "51"
+datafusion-execution = "51"
+datafusion-expr = "51"
+datafusion-optimizer = "51"
+datafusion-physical-expr = "51"
+datafusion-physical-plan = "51"
+datafusion-proto = "51"
 derive-visitor = "0.4"
 derive-with = "0.7"
 env_logger = "0.11"
@@ -62,9 +70,9 @@ jieba-rs = "0.8"
 log = "0.4"
 num_cpus = "1.17"
 opendal = "0.54"
-parquet = "56"
-prost = "0.13"
-prost-build = "0.13"
+parquet = "57"
+prost = "0.14"
+prost-build = "0.14"
 rand = "0.9"
 rand_pcg = "0.9"
 rstar = "0.12"
@@ -77,12 +85,3 @@ tokio = "1"
 tokio-stream = "0.1"
 url = "2.5"
 uuid = { version = "1.18", features = ["serde"] }
-
-[patch.crates-io]
-arrow = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
-arrow-array = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
-arrow-buffer = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
-arrow-data = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
-arrow-ipc = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
-arrow-schema = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
-parquet = { git = "https://github.com/lewiszlw/arrow-rs.git", rev = "0bee8d3784eb9aa11512b9cfe8e722b52bfc01f1"}
