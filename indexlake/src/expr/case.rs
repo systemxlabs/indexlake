@@ -5,11 +5,12 @@ use arrow::compute::kernels::zip::zip;
 use arrow::compute::{and, and_not, prep_null_mask_filter};
 use arrow_schema::{DataType, Schema};
 use derive_visitor::{Drive, DriveMut};
+use serde::{Deserialize, Serialize};
 
 use crate::expr::{ColumnarValue, Expr, try_cast};
 use crate::{ILError, ILResult};
 
-#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
+#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Case {
     pub when_then: Vec<(Box<Expr>, Box<Expr>)>,
     pub else_expr: Option<Box<Expr>>,

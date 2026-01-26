@@ -3,6 +3,7 @@ mod builder;
 mod case;
 mod compute;
 mod like;
+mod text;
 mod utils;
 mod visitor;
 
@@ -11,7 +12,9 @@ pub use builder::*;
 pub use case::*;
 pub use compute::*;
 pub use like::*;
+pub use text::{deserialize_expr, serialize_expr};
 pub use utils::*;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 pub use visitor::*;
 
@@ -38,7 +41,7 @@ pub const DEFAULT_FORMAT_OPTIONS: FormatOptions<'static> =
     FormatOptions::new().with_duration_format(DurationFormat::Pretty);
 
 /// Represents logical expressions such as `A + 1`
-#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
+#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Expr {
     /// A named reference
     Column(String),
@@ -318,14 +321,14 @@ impl std::fmt::Display for Expr {
     }
 }
 
-#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
+#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Literal {
     #[drive(skip)]
     pub value: Scalar,
 }
 
 /// InList expression
-#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
+#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InList {
     /// The expression to compare
     pub expr: Box<Expr>,
@@ -335,7 +338,7 @@ pub struct InList {
     pub negated: bool,
 }
 
-#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
+#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Function {
     pub name: String,
     pub args: Vec<Expr>,
@@ -343,7 +346,7 @@ pub struct Function {
     pub return_type: DataType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Drive, DriveMut)]
+#[derive(Debug, Clone, PartialEq, Eq, Drive, DriveMut, Serialize, Deserialize)]
 pub struct Cast {
     /// The expression being cast
     pub expr: Box<Expr>,
@@ -352,7 +355,7 @@ pub struct Cast {
     pub cast_type: DataType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Drive, DriveMut)]
+#[derive(Debug, Clone, PartialEq, Eq, Drive, DriveMut, Serialize, Deserialize)]
 pub struct TryCast {
     pub expr: Box<Expr>,
     #[drive(skip)]

@@ -48,7 +48,7 @@ pub struct TableSchema {
     pub arrow_schema: SchemaRef,
     pub field_name_id_map: HashMap<String, Uuid>,
     pub field_id_name_map: HashMap<Uuid, String>,
-    pub field_id_default_value_map: HashMap<Uuid, Scalar>,
+    pub field_id_default_expr_map: HashMap<Uuid, Expr>,
 }
 
 impl TableSchema {
@@ -61,7 +61,7 @@ impl TableSchema {
             .iter()
             .map(|record| (record.field_id, record.field_name.clone()))
             .collect::<HashMap<Uuid, String>>();
-        let field_id_default_value_map = field_records
+        let field_id_default_expr_map = field_records
             .iter()
             .filter(|record| record.default_value.is_some())
             .map(|record| (record.field_id, record.default_value.clone().unwrap()))
@@ -83,7 +83,7 @@ impl TableSchema {
             arrow_schema: schema,
             field_name_id_map,
             field_id_name_map,
-            field_id_default_value_map,
+            field_id_default_expr_map,
         }
     }
 }
@@ -365,9 +365,16 @@ impl Table {
     pub async fn alter(self, alter: TableAlter) -> ILResult<()> {
         let mut tx_helper = self.transaction_helper().await?;
 
-        process_table_alter(&mut tx_helper, &self, alter).await?;
+        let cleanup = process_table_alter(&mut tx_helper, &self, alter).await?;
 
         tx_helper.commit().await?;
+
+        if !cleanup.data_files.is_empty() {
+            spawn_storage_data_files_clean_task(self.storage.clone(), cleanup.data_files);
+        }
+        if !cleanup.index_files.is_empty() {
+            spawn_storage_index_files_clean_task(self.storage.clone(), cleanup.index_files);
+        }
 
         Ok(())
     }
@@ -516,14 +523,15 @@ pub fn check_and_rewrite_insert_batches(
 
                     fields.push(batch_field);
                     arrays.push(batch.column(batch_field_idx).clone());
-                } else if let Some(default_value) =
-                    table_schema.field_id_default_value_map.get(&field_id)
+                } else if let Some(default_expr) =
+                    table_schema.field_id_default_expr_map.get(&field_id)
                 {
                     fields.push(table_field.clone());
-                    arrays.push(default_value.to_array_of_size(batch.num_rows())?);
+                    let array = eval_default_expr(default_expr, batch, table_field.as_ref())?;
+                    arrays.push(array);
                 } else {
                     return Err(ILError::invalid_input(format!(
-                        "Missing field {output_field_name} (no default value) in record batch",
+                        "Missing field {output_field_name} (no default expr) in record batch",
                     )));
                 }
             }
@@ -534,6 +542,29 @@ pub fn check_and_rewrite_insert_batches(
     }
 
     Ok(rewritten_batches)
+}
+
+pub(crate) fn eval_default_expr(
+    expr: &Expr,
+    batch: &RecordBatch,
+    field: &Field,
+) -> ILResult<ArrayRef> {
+    let value = expr.eval(batch)?;
+    let array = value.into_array(batch.num_rows())?;
+    if array.data_type() != field.data_type() {
+        return Err(ILError::invalid_input(format!(
+            "Default expr type {} does not match field {}",
+            array.data_type(),
+            field
+        )));
+    }
+    if !field.is_nullable() && array.null_count() > 0 {
+        return Err(ILError::invalid_input(format!(
+            "Default expr produced null for non-nullable field {}",
+            field
+        )));
+    }
+    Ok(array)
 }
 
 pub fn check_insert_batch_field(

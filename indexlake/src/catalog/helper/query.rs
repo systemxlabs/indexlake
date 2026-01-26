@@ -198,6 +198,27 @@ impl TransactionHelper {
         }
         Ok(index_files)
     }
+
+    pub(crate) async fn get_table_fields(&mut self, table_id: &Uuid) -> ILResult<Vec<FieldRecord>> {
+        let catalog_schema = Arc::new(FieldRecord::catalog_schema());
+        let rows = self
+            .query_rows(
+                &format!(
+                    "SELECT {} FROM indexlake_field WHERE table_id = {} order by field_id asc",
+                    catalog_schema
+                        .select_items(self.catalog.as_ref())
+                        .join(", "),
+                    self.catalog.sql_uuid_literal(table_id)
+                ),
+                catalog_schema,
+            )
+            .await?;
+        let mut field_records = Vec::with_capacity(rows.len());
+        for row in rows {
+            field_records.push(FieldRecord::from_row(row)?);
+        }
+        Ok(field_records)
+    }
 }
 
 impl CatalogHelper {

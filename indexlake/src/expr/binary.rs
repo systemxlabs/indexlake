@@ -6,12 +6,13 @@ use arrow::datatypes::{DataType, Schema};
 use arrow::error::ArrowError;
 use arrow_schema::SortOptions;
 use derive_visitor::{Drive, DriveMut};
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::Scalar;
 use crate::expr::{ColumnarValue, Expr};
 use crate::{ILError, ILResult};
 
-#[derive(Debug, Clone, Copy, Drive, DriveMut, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinaryOp {
     /// Expressions are equal
     Eq,
@@ -66,7 +67,7 @@ impl std::fmt::Display for BinaryOp {
 }
 
 /// Binary expression
-#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq)]
+#[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BinaryExpr {
     /// Left-hand side of the expression
     pub left: Box<Expr>,

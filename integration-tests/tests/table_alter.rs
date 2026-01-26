@@ -134,7 +134,7 @@ async fn alter_add_column(
 
     let alter = TableAlter::AddColumn {
         field: Arc::new(Field::new("new_col", DataType::Utf8, true)),
-        default_value: "default_value".into(),
+        default_value: lit("default_value"),
     };
     table.alter(alter).await?;
 
@@ -171,6 +171,35 @@ async fn alter_add_column(
 | David   | 23  | default_value |
 +---------+-----+---------------+"#
     );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn alter_add_column_with_invalid_default_expr(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let alter = TableAlter::AddColumn {
+        field: Arc::new(Field::new("bad_col", DataType::Int32, false)),
+        default_value: lit("not-an-int"),
+    };
+    let result = table.alter(alter).await;
+    assert!(result.is_err());
 
     Ok(())
 }

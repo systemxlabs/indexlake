@@ -6,10 +6,8 @@ use parquet::arrow::arrow_reader::RowSelection;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::catalog::{
-    Catalog, CatalogDataType, CatalogSchema, Column, Row, Scalar, deserialize_scalar,
-    serialize_scalar,
-};
+use crate::catalog::{Catalog, CatalogDataType, CatalogSchema, Column, Row};
+use crate::expr::{Expr, deserialize_expr, serialize_expr};
 use crate::storage::DataFileFormat;
 use crate::table::TableConfig;
 use crate::{ILError, ILResult};
@@ -81,7 +79,7 @@ pub struct FieldRecord {
     pub field_name: String,
     pub data_type: DataType,
     pub nullable: bool,
-    pub default_value: Option<Scalar>,
+    pub default_value: Option<Expr>,
     pub metadata: HashMap<String, String>,
 }
 
@@ -90,7 +88,7 @@ impl FieldRecord {
         field_id: Uuid,
         table_id: Uuid,
         field: &Field,
-        default_value: Option<Scalar>,
+        default_value: Option<Expr>,
     ) -> Self {
         Self {
             field_id,
@@ -108,8 +106,8 @@ impl FieldRecord {
             .map_err(|e| ILError::internal(format!("Failed to serialize data type: {e:?}")))?;
         let default_value_sql = match self.default_value.as_ref() {
             Some(value) => {
-                let bytes = serialize_scalar(value)?;
-                catalog.sql_binary_literal(&bytes)
+                let text = serialize_expr(value)?;
+                catalog.sql_string_literal(&text)
             }
             None => "null".to_string(),
         };
@@ -134,7 +132,7 @@ impl FieldRecord {
             Column::new("field_name", CatalogDataType::Utf8, false),
             Column::new("data_type", CatalogDataType::Utf8, false),
             Column::new("nullable", CatalogDataType::Boolean, false),
-            Column::new("default_value", CatalogDataType::Binary, true),
+            Column::new("default_value", CatalogDataType::Utf8, true),
             Column::new("metadata", CatalogDataType::Utf8, false),
         ])
     }
@@ -147,9 +145,9 @@ impl FieldRecord {
         let data_type: DataType = serde_json::from_str(data_type_str)
             .map_err(|e| ILError::internal(format!("Failed to deserialize data type: {e:?}")))?;
         let nullable = row.boolean(4)?.expect("nullable is not null");
-        let default_value_bytes = row.binary(5)?;
-        let default_value = match default_value_bytes {
-            Some(bytes) => Some(deserialize_scalar(bytes)?),
+        let default_value_text = row.utf8(5)?;
+        let default_value = match default_value_text {
+            Some(text) => Some(deserialize_expr(text)?),
             None => None,
         };
 
@@ -425,6 +423,7 @@ impl IndexRecord {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct IndexFileRecord {
     pub(crate) index_file_id: Uuid,
     pub(crate) table_id: Uuid,

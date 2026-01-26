@@ -10,6 +10,7 @@ use crate::catalog::{
     CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, Scalar,
     TableRecord, TransactionHelper, rows_to_record_batch,
 };
+use crate::expr::Expr;
 use crate::index::{IndexDefinition, IndexParams};
 use crate::storage::read_data_file_by_record;
 use crate::table::{Table, TableConfig};
@@ -116,7 +117,11 @@ pub(crate) async fn process_create_table(
     // insert field records
     let mut field_records = Vec::new();
     for field in creation.schema.fields() {
-        let default_value = creation.default_values.get(field.name()).cloned();
+        let default_value = creation
+            .default_values
+            .get(field.name())
+            .cloned()
+            .map(Expr::from);
         field_records.push(FieldRecord::new(
             Uuid::now_v7(),
             table_id,
