@@ -32,6 +32,18 @@ impl InputFile for S3InputFile {
             .map_err(|e| ILError::storage(format!("Failed to read range: {e}")))?;
         Ok(buffer.to_bytes())
     }
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> ILResult<Vec<Bytes>> {
+        let reader = self
+            .op
+            .reader(&self.relative_path)
+            .await
+            .map_err(|e| ILError::storage(format!("Failed to create opendal reader: {e}")))?;
+        let buffers = reader
+            .fetch(ranges)
+            .await
+            .map_err(|e| ILError::storage(format!("Failed to read ranges: {e}")))?;
+        Ok(buffers.into_iter().map(|b| b.to_bytes()).collect())
+    }
 }
 
 pub struct S3OutputFile {

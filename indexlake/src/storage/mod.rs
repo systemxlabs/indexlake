@@ -30,6 +30,14 @@ pub trait Storage: Debug + Send + Sync + 'static {
 pub trait InputFile: Debug + Send + Sync + 'static {
     async fn metadata(&self) -> ILResult<FileMetadata>;
     async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes>;
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> ILResult<Vec<Bytes>> {
+        let mut results = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            let bs = self.read(range).await?;
+            results.push(bs);
+        }
+        Ok(results)
+    }
 }
 
 #[async_trait::async_trait]
@@ -39,6 +47,9 @@ impl InputFile for Box<dyn InputFile> {
     }
     async fn read(&mut self, range: Range<u64>) -> ILResult<Bytes> {
         self.as_mut().read(range).await
+    }
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> ILResult<Vec<Bytes>> {
+        self.as_mut().read_ranges(ranges).await
     }
 }
 

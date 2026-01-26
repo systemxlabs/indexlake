@@ -106,6 +106,17 @@ impl AsyncFileReader for Box<dyn InputFile> {
         })
     }
 
+    fn get_byte_ranges(
+        &mut self,
+        ranges: Vec<Range<u64>>,
+    ) -> BoxFuture<'_, parquet::errors::Result<Vec<bytes::Bytes>>> {
+        Box::pin(async move {
+            self.read_ranges(ranges)
+                .await
+                .map_err(|err| parquet::errors::ParquetError::External(Box::new(err)))
+        })
+    }
+
     // TODO respect options
     fn get_metadata(
         &mut self,
