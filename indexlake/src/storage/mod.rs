@@ -58,7 +58,7 @@ impl OutputFile for Box<dyn OutputFile> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileMetadata {
     pub size: u64,
     pub mode: EntryMode,
@@ -74,7 +74,7 @@ pub struct DirEntry {
     pub metadata: FileMetadata,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum EntryMode {
     File,
     Directory,

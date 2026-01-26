@@ -50,9 +50,17 @@ impl Storage for S3Storage {
 
     async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>> {
         let op = self.new_operator()?;
+        let metadata = op.stat(relative_path).await.map_err(|e| {
+            ILError::storage(format!(
+                "Failed to read stat of file {}, e: {e}",
+                relative_path
+            ))
+        })?;
+        let metadata = parse_opendal_metadata(&metadata)?;
         let s3_file = S3InputFile {
             op,
             relative_path: relative_path.to_string(),
+            metadata,
         };
         Ok(Box::new(s3_file))
     }
