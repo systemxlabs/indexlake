@@ -10,9 +10,12 @@ use crate::{
     ILError, ILResult,
     catalog::{DataFileRecord, FieldRecord, IndexFileRecord, RowValidity, TransactionHelper},
     check_schema_contains_system_column,
-    expr::{lit, Expr},
+    expr::{Expr, lit},
     storage::{build_parquet_writer, read_data_file_by_record},
-    table::{Table, TableSchema, TableSchemaRef, eval_default_expr, spawn_storage_data_files_clean_task, spawn_storage_index_files_clean_task},
+    table::{
+        Table, TableSchema, TableSchemaRef, eval_default_expr, spawn_storage_data_files_clean_task,
+        spawn_storage_index_files_clean_task,
+    },
 };
 
 #[derive(Debug)]
@@ -106,7 +109,11 @@ pub(crate) async fn alter_add_column(
     }
 
     let default_value = default_value.rewrite_columns(&table.table_schema.field_name_id_map)?;
-    super::check_default_expr(field.as_ref(), &default_value, &table.table_schema.arrow_schema)?;
+    super::check_default_expr(
+        field.as_ref(),
+        &default_value,
+        &table.table_schema.arrow_schema,
+    )?;
 
     let field_id = Uuid::now_v7();
     let field_record = FieldRecord::new(

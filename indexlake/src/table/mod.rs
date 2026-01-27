@@ -594,16 +594,12 @@ fn contains_unsupported_default_expr(expr: &Expr) -> bool {
             contains_unsupported_default_expr(&binary_expr.left)
                 || contains_unsupported_default_expr(&binary_expr.right)
         }
-        Expr::Not(inner)
-        | Expr::IsNull(inner)
-        | Expr::IsNotNull(inner)
-        | Expr::Negative(inner) => contains_unsupported_default_expr(inner),
+        Expr::Not(inner) | Expr::IsNull(inner) | Expr::IsNotNull(inner) | Expr::Negative(inner) => {
+            contains_unsupported_default_expr(inner)
+        }
         Expr::InList(in_list) => {
             contains_unsupported_default_expr(&in_list.expr)
-                || in_list
-                    .list
-                    .iter()
-                    .any(contains_unsupported_default_expr)
+                || in_list.list.iter().any(contains_unsupported_default_expr)
         }
         Expr::Like(like) => {
             contains_unsupported_default_expr(&like.expr)
@@ -612,8 +608,7 @@ fn contains_unsupported_default_expr(expr: &Expr) -> bool {
         Expr::Cast(cast) => contains_unsupported_default_expr(&cast.expr),
         Expr::Case(case) => {
             case.when_then.iter().any(|(when, then)| {
-                contains_unsupported_default_expr(when)
-                    || contains_unsupported_default_expr(then)
+                contains_unsupported_default_expr(when) || contains_unsupported_default_expr(then)
             }) || case
                 .else_expr
                 .as_ref()

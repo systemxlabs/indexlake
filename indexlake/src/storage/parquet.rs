@@ -31,15 +31,9 @@ pub(crate) struct ExprPredicate {
 }
 
 impl ExprPredicate {
-    pub(crate) fn try_new(
-        filters: Vec<Expr>,
-        projection: ProjectionMask,
-    ) -> ILResult<Self> {
+    pub(crate) fn try_new(filters: Vec<Expr>, projection: ProjectionMask) -> ILResult<Self> {
         let filter = merge_filters(filters).expect("filters should not be empty");
-        Ok(Self {
-            filter,
-            projection,
-        })
+        Ok(Self { filter, projection })
     }
 }
 
@@ -201,10 +195,7 @@ pub(crate) async fn read_parquet_file_by_record(
             }
         }
         let predicate_projection_mask = ProjectionMask::roots(parquet_schema, predicate_projection);
-        Some(ExprPredicate::try_new(
-            filters,
-            predicate_projection_mask,
-        )?)
+        Some(ExprPredicate::try_new(filters, predicate_projection_mask)?)
     };
 
     if let Some(arrow_predicate) = arrow_predicate_opt {

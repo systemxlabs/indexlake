@@ -11,8 +11,8 @@ pub use builder::*;
 pub use case::*;
 pub use compute::*;
 pub use like::*;
-pub use utils::*;
 use serde::{Deserialize, Serialize};
+pub use utils::*;
 use uuid::Uuid;
 pub use visitor::*;
 

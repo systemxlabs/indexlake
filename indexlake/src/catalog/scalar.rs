@@ -74,8 +74,7 @@ impl Serialize for Scalar {
     where
         S: Serializer,
     {
-        let bytes = serialize_scalar(self)
-            .map_err(<S::Error as serde::ser::Error>::custom)?;
+        let bytes = serialize_scalar(self).map_err(<S::Error as serde::ser::Error>::custom)?;
         serializer.serialize_bytes(&bytes)
     }
 }
@@ -86,8 +85,7 @@ impl<'de> Deserialize<'de> for Scalar {
         D: Deserializer<'de>,
     {
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        deserialize_scalar(&bytes)
-            .map_err(<D::Error as serde::de::Error>::custom)
+        deserialize_scalar(&bytes).map_err(<D::Error as serde::de::Error>::custom)
     }
 }
 
