@@ -12,23 +12,8 @@ use crate::{
     check_schema_contains_system_column,
     expr::{lit, Expr},
     storage::{build_parquet_writer, read_data_file_by_record},
-    table::{Table, TableSchema, TableSchemaRef, eval_default_expr},
+    table::{Table, TableSchema, TableSchemaRef, eval_default_expr, spawn_storage_data_files_clean_task, spawn_storage_index_files_clean_task},
 };
-
-#[derive(Debug, Clone)]
-pub(crate) struct AlterCleanup {
-    pub data_files: Vec<DataFileRecord>,
-    pub index_files: Vec<IndexFileRecord>,
-}
-
-impl AlterCleanup {
-    fn empty() -> Self {
-        Self {
-            data_files: Vec::new(),
-            index_files: Vec::new(),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum TableAlter {
@@ -52,13 +37,13 @@ pub(crate) async fn process_table_alter(
     tx_helper: &mut TransactionHelper,
     table: &Table,
     alter: TableAlter,
-) -> ILResult<AlterCleanup> {
+) -> ILResult<()> {
     match alter {
         TableAlter::RenameTable { new_name } => {
             tx_helper
                 .update_table_name(&table.table_id, &new_name)
                 .await?;
-            Ok(AlterCleanup::empty())
+            Ok(())
         }
         TableAlter::RenameColumn { old_name, new_name } => {
             let Some(field_record) = tx_helper
@@ -73,7 +58,7 @@ pub(crate) async fn process_table_alter(
             tx_helper
                 .update_field_name(&field_record.field_id, &new_name)
                 .await?;
-            Ok(AlterCleanup::empty())
+            Ok(())
         }
         TableAlter::AddColumn {
             field,
@@ -81,7 +66,7 @@ pub(crate) async fn process_table_alter(
         } => alter_add_column(tx_helper, table, field, default_value).await,
         TableAlter::DropColumn { name } => {
             let Some(field_id) = table.table_schema.field_name_id_map.get(&name) else {
-                return Ok(AlterCleanup::empty());
+                return Ok(());
             };
             if table.index_manager.any_index_contains_field(field_id) {
                 return Err(ILError::invalid_input(format!(
@@ -94,7 +79,7 @@ pub(crate) async fn process_table_alter(
             tx_helper
                 .alter_drop_column(&table.table_id, field_id)
                 .await?;
-            Ok(AlterCleanup::empty())
+            Ok(())
         }
     }
 }
@@ -104,7 +89,7 @@ pub(crate) async fn alter_add_column(
     table: &Table,
     field: FieldRef,
     default_value: Expr,
-) -> ILResult<AlterCleanup> {
+) -> ILResult<()> {
     let schema = Schema::new(vec![field.clone()]);
     check_schema_contains_system_column(&schema)?;
 
@@ -150,7 +135,7 @@ pub(crate) async fn alter_add_column(
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
     if data_file_records.is_empty() {
-        return Ok(AlterCleanup::empty());
+        return Ok(());
     }
 
     let (new_data_files, new_index_files) = rewrite_data_files_add_column(
@@ -181,10 +166,14 @@ pub(crate) async fn alter_add_column(
     tx_helper.insert_data_files(&new_data_files).await?;
     tx_helper.insert_index_files(&new_index_files).await?;
 
-    Ok(AlterCleanup {
-        data_files: data_file_records,
-        index_files: old_index_files,
-    })
+    if !data_file_records.is_empty() {
+        spawn_storage_data_files_clean_task(table.storage.clone(), data_file_records);
+    }
+    if !old_index_files.is_empty() {
+        spawn_storage_index_files_clean_task(table.storage.clone(), old_index_files);
+    }
+
+    Ok(())
 }
 
 async fn rewrite_data_files_add_column(

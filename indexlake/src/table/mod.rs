@@ -365,16 +365,9 @@ impl Table {
     pub async fn alter(self, alter: TableAlter) -> ILResult<()> {
         let mut tx_helper = self.transaction_helper().await?;
 
-        let cleanup = process_table_alter(&mut tx_helper, &self, alter).await?;
+        process_table_alter(&mut tx_helper, &self, alter).await?;
 
         tx_helper.commit().await?;
-
-        if !cleanup.data_files.is_empty() {
-            spawn_storage_data_files_clean_task(self.storage.clone(), cleanup.data_files);
-        }
-        if !cleanup.index_files.is_empty() {
-            spawn_storage_index_files_clean_task(self.storage.clone(), cleanup.index_files);
-        }
 
         Ok(())
     }
