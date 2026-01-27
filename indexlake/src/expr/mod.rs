@@ -3,7 +3,6 @@ mod builder;
 mod case;
 mod compute;
 mod like;
-mod text;
 mod utils;
 mod visitor;
 
@@ -12,7 +11,6 @@ pub use builder::*;
 pub use case::*;
 pub use compute::*;
 pub use like::*;
-pub use text::{deserialize_expr, serialize_expr};
 pub use utils::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -321,6 +319,16 @@ impl std::fmt::Display for Expr {
     }
 }
 
+pub fn serialize_expr(expr: &Expr) -> ILResult<String> {
+    serde_json::to_string(expr)
+        .map_err(|e| ILError::internal(format!("Failed to serialize expr: {e:?}")))
+}
+
+pub fn deserialize_expr(text: &str) -> ILResult<Expr> {
+    serde_json::from_str(text)
+        .map_err(|e| ILError::invalid_input(format!("Failed to deserialize expr: {e:?}")))
+}
+
 #[derive(Debug, Clone, Drive, DriveMut, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Literal {
     #[drive(skip)]
@@ -398,5 +406,18 @@ impl ColumnarValue {
                 scalar.cast_to(cast_type, cast_options)?,
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expr_json_roundtrip() {
+        let expr = col("a").plus(lit(1i32)).eq(lit(2i32));
+        let text = serialize_expr(&expr).unwrap();
+        let parsed = deserialize_expr(&text).unwrap();
+        assert_eq!(expr, parsed);
     }
 }
