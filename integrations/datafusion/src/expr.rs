@@ -317,9 +317,9 @@ pub fn indexlake_expr_to_datafusion_expr(expr: &ILExpr) -> Result<Expr, DataFusi
         ILExpr::Not(expr) => Ok(Expr::Not(Box::new(indexlake_expr_to_datafusion_expr(
             expr,
         )?))),
-        ILExpr::IsNull(expr) => Ok(Expr::IsNull(Box::new(
-            indexlake_expr_to_datafusion_expr(expr)?,
-        ))),
+        ILExpr::IsNull(expr) => Ok(Expr::IsNull(Box::new(indexlake_expr_to_datafusion_expr(
+            expr,
+        )?))),
         ILExpr::IsNotNull(expr) => Ok(Expr::IsNotNull(Box::new(
             indexlake_expr_to_datafusion_expr(expr)?,
         ))),
@@ -351,9 +351,9 @@ pub fn indexlake_expr_to_datafusion_expr(expr: &ILExpr) -> Result<Expr, DataFusi
             expr: Box::new(indexlake_expr_to_datafusion_expr(&try_cast.expr)?),
             data_type: try_cast.cast_type.clone(),
         })),
-        ILExpr::Negative(expr) => Ok(Expr::Negative(Box::new(
-            indexlake_expr_to_datafusion_expr(expr)?,
-        ))),
+        ILExpr::Negative(expr) => Ok(Expr::Negative(Box::new(indexlake_expr_to_datafusion_expr(
+            expr,
+        )?))),
         ILExpr::Case(case) => {
             let when_then_expr = case
                 .when_then
