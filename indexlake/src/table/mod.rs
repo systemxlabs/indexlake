@@ -48,7 +48,7 @@ pub struct TableSchema {
     pub arrow_schema: SchemaRef,
     pub field_name_id_map: HashMap<String, Uuid>,
     pub field_id_name_map: HashMap<Uuid, String>,
-    pub field_id_default_value_map: HashMap<Uuid, Scalar>,
+    pub field_id_default_expr_map: HashMap<Uuid, Expr>,
 }
 
 impl TableSchema {
@@ -61,7 +61,7 @@ impl TableSchema {
             .iter()
             .map(|record| (record.field_id, record.field_name.clone()))
             .collect::<HashMap<Uuid, String>>();
-        let field_id_default_value_map = field_records
+        let field_id_default_expr_map = field_records
             .iter()
             .filter(|record| record.default_value.is_some())
             .map(|record| (record.field_id, record.default_value.clone().unwrap()))
@@ -83,7 +83,7 @@ impl TableSchema {
             arrow_schema: schema,
             field_name_id_map,
             field_id_name_map,
-            field_id_default_value_map,
+            field_id_default_expr_map,
         }
     }
 }
@@ -516,14 +516,15 @@ pub fn check_and_rewrite_insert_batches(
 
                     fields.push(batch_field);
                     arrays.push(batch.column(batch_field_idx).clone());
-                } else if let Some(default_value) =
-                    table_schema.field_id_default_value_map.get(&field_id)
+                } else if let Some(default_expr) =
+                    table_schema.field_id_default_expr_map.get(&field_id)
                 {
                     fields.push(table_field.clone());
-                    arrays.push(default_value.to_array_of_size(batch.num_rows())?);
+                    let array = eval_default_expr(default_expr, batch, table_field.as_ref())?;
+                    arrays.push(array);
                 } else {
                     return Err(ILError::invalid_input(format!(
-                        "Missing field {output_field_name} (no default value) in record batch",
+                        "Missing field {output_field_name} (no default expr) in record batch",
                     )));
                 }
             }
@@ -534,6 +535,87 @@ pub fn check_and_rewrite_insert_batches(
     }
 
     Ok(rewritten_batches)
+}
+
+pub(crate) fn eval_default_expr(
+    expr: &Expr,
+    batch: &RecordBatch,
+    field: &Field,
+) -> ILResult<ArrayRef> {
+    let value = expr.eval(batch)?;
+    let array = value.into_array(batch.num_rows())?;
+    if array.data_type() != field.data_type() {
+        return Err(ILError::invalid_input(format!(
+            "Default expr type {} does not match field {}",
+            array.data_type(),
+            field
+        )));
+    }
+    if !field.is_nullable() && array.null_count() > 0 {
+        return Err(ILError::invalid_input(format!(
+            "Default expr produced null for non-nullable field {}",
+            field
+        )));
+    }
+    Ok(array)
+}
+
+pub(crate) fn check_default_expr(field: &Field, expr: &Expr, schema: &Schema) -> ILResult<()> {
+    if contains_unsupported_default_expr(expr) {
+        return Err(ILError::invalid_input(
+            "Default expr contains unsupported operator".to_string(),
+        ));
+    }
+
+    let expr_type = expr.data_type(schema)?;
+    if &expr_type != field.data_type() {
+        return Err(ILError::invalid_input(format!(
+            "Default expr data type {expr_type} does not match field {field}",
+        )));
+    }
+
+    if let Ok(constant) = expr.constant_eval()
+        && constant.is_null()
+        && !field.is_nullable()
+    {
+        return Err(ILError::invalid_input(format!(
+            "Default expr is null for non-nullable field {field}",
+        )));
+    }
+
+    Ok(())
+}
+
+fn contains_unsupported_default_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Function(_) | Expr::TryCast(_) => true,
+        Expr::Column(_) | Expr::Literal(_) => false,
+        Expr::BinaryExpr(binary_expr) => {
+            contains_unsupported_default_expr(&binary_expr.left)
+                || contains_unsupported_default_expr(&binary_expr.right)
+        }
+        Expr::Not(inner) | Expr::IsNull(inner) | Expr::IsNotNull(inner) | Expr::Negative(inner) => {
+            contains_unsupported_default_expr(inner)
+        }
+        Expr::InList(in_list) => {
+            contains_unsupported_default_expr(&in_list.expr)
+                || in_list.list.iter().any(contains_unsupported_default_expr)
+        }
+        Expr::Like(like) => {
+            contains_unsupported_default_expr(&like.expr)
+                || contains_unsupported_default_expr(&like.pattern)
+        }
+        Expr::Cast(cast) => contains_unsupported_default_expr(&cast.expr),
+        Expr::Case(case) => {
+            case.when_then.iter().any(|(when, then)| {
+                contains_unsupported_default_expr(when) || contains_unsupported_default_expr(then)
+            }) || case
+                .else_expr
+                .as_ref()
+                .map(|expr| contains_unsupported_default_expr(expr))
+                .unwrap_or(false)
+        }
+    }
 }
 
 pub fn check_insert_batch_field(

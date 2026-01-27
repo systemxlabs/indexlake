@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 
 use arrow::array::{AsArray, BooleanArray, FixedSizeBinaryArray, RecordBatch};
 use arrow::datatypes::SchemaRef;
-use arrow_schema::{ArrowError, FieldRef, Schema};
+use arrow_schema::ArrowError;
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
 use parquet::arrow::arrow_reader::{ArrowPredicate, ArrowReaderOptions, RowFilter};
@@ -17,35 +17,23 @@ use parquet::file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataR
 use parquet::file::properties::{WriterProperties, WriterVersion};
 use uuid::Uuid;
 
-use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
+use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME};
 use crate::expr::{Expr, merge_filters, visited_columns};
 use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
 use crate::table::TableSchemaRef;
-use crate::utils::{
-    build_projection_from_condition, complete_batch_missing_fields,
-    extract_row_ids_from_record_batch, project_schema,
-};
+use crate::utils::{build_projection_from_condition, extract_row_ids_from_record_batch};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ExprPredicate {
     filter: Expr,
     projection: ProjectionMask,
-    missing_field_values: Vec<(FieldRef, Scalar)>,
 }
 
 impl ExprPredicate {
-    pub(crate) fn try_new(
-        filters: Vec<Expr>,
-        projection: ProjectionMask,
-        missing_field_values: Vec<(FieldRef, Scalar)>,
-    ) -> ILResult<Self> {
+    pub(crate) fn try_new(filters: Vec<Expr>, projection: ProjectionMask) -> ILResult<Self> {
         let filter = merge_filters(filters).expect("filters should not be empty");
-        Ok(Self {
-            filter,
-            projection,
-            missing_field_values,
-        })
+        Ok(Self { filter, projection })
     }
 }
 
@@ -55,28 +43,6 @@ impl ArrowPredicate for ExprPredicate {
     }
 
     fn evaluate(&mut self, batch: RecordBatch) -> Result<BooleanArray, ArrowError> {
-        let batch = if self.missing_field_values.is_empty() {
-            batch
-        } else {
-            let mut new_fields = batch
-                .schema_ref()
-                .fields
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>();
-            let mut new_columns = batch.columns().to_vec();
-            for (missing_field, value) in self.missing_field_values.iter() {
-                new_fields.push(missing_field.clone());
-                // TODO this can be improved if some filters only access missing fields
-                let array = value
-                    .to_array_of_size(batch.num_rows())
-                    .map_err(|e| ArrowError::ExternalError(Box::new(e)))?;
-                new_columns.push(array);
-            }
-            let new_schema = Arc::new(Schema::new(new_fields));
-            RecordBatch::try_new(new_schema, new_columns)?
-        };
-
         let array = self
             .filter
             .eval(&batch)
@@ -191,7 +157,6 @@ pub(crate) async fn read_parquet_file_by_record(
     let parquet_schema = arrow_reader_builder.parquet_schema();
     let arrow_schema = parquet_to_arrow_schema(parquet_schema, None)?;
 
-    let mut missing_field_id_default_value_map = HashMap::new();
     let mut parquet_projection = Vec::new();
     for index in projection
         .clone()
@@ -204,19 +169,10 @@ pub(crate) async fn read_parquet_file_by_record(
         {
             parquet_projection.push(index);
         } else {
-            let Ok(field_id) = Uuid::parse_str(internal_field_name) else {
-                return Err(ILError::internal(format!(
-                    "Fail to parse internal field name {internal_field_name} to uuid"
-                )));
-            };
-            if let Some(default_value) = table_schema.field_id_default_value_map.get(&field_id) {
-                missing_field_id_default_value_map.insert(field_id, default_value.clone());
-            } else {
-                return Err(ILError::internal(format!(
-                    "Data file {} doesn't contain internal field name {internal_field_name} and this field has no default value",
-                    data_file_record.data_file_id
-                )));
-            }
+            return Err(ILError::internal(format!(
+                "Data file {} doesn't contain internal field name {internal_field_name}",
+                data_file_record.data_file_id
+            )));
         }
     }
     let projection_mask = ProjectionMask::roots(parquet_schema, parquet_projection);
@@ -229,35 +185,17 @@ pub(crate) async fn read_parquet_file_by_record(
             .flat_map(visited_columns)
             .collect::<HashSet<_>>();
         let mut predicate_projection = Vec::new();
-        let mut missing_field_values = Vec::new();
         for visited_column in visited_columns {
             if let Ok(index) = arrow_schema.index_of(&visited_column) {
                 predicate_projection.push(index);
             } else {
-                let Ok(field_id) = Uuid::parse_str(&visited_column) else {
-                    return Err(ILError::internal(format!(
-                        "Cannot parse column name {visited_column} in filter to uuid"
-                    )));
-                };
-                if let Some(default_value) = table_schema.field_id_default_value_map.get(&field_id)
-                {
-                    let field = table_schema.arrow_schema.fields
-                        [table_schema.arrow_schema.index_of(&visited_column)?]
-                    .clone();
-                    missing_field_values.push((field, default_value.clone()));
-                } else {
-                    return Err(ILError::internal(format!(
-                        "Parquet file doesn't contain column {visited_column} and this column has no default value"
-                    )));
-                }
+                return Err(ILError::internal(format!(
+                    "Parquet file doesn't contain column {visited_column}"
+                )));
             }
         }
         let predicate_projection_mask = ProjectionMask::roots(parquet_schema, predicate_projection);
-        Some(ExprPredicate::try_new(
-            filters,
-            predicate_projection_mask,
-            missing_field_values,
-        )?)
+        Some(ExprPredicate::try_new(filters, predicate_projection_mask)?)
     };
 
     if let Some(arrow_predicate) = arrow_predicate_opt {
@@ -265,24 +203,12 @@ pub(crate) async fn read_parquet_file_by_record(
             arrow_reader_builder.with_row_filter(RowFilter::new(vec![Box::new(arrow_predicate)]));
     }
 
-    let target_schema = Arc::new(project_schema(
-        &table_schema.arrow_schema,
-        projection.as_ref(),
-    )?);
     let stream = arrow_reader_builder
         .with_row_selection(data_file_record.row_selection())
         .with_projection(projection_mask.clone())
         .with_batch_size(batch_size)
         .build()?
-        .map(move |batch| {
-            let batch = batch?;
-            let completed_batch = complete_batch_missing_fields(
-                batch,
-                target_schema.clone(),
-                &missing_field_id_default_value_map,
-            )?;
-            Ok::<_, ILError>(completed_batch)
-        });
+        .map(|batch| Ok::<_, ILError>(batch?));
 
     Ok(Box::pin(stream))
 }

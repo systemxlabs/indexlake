@@ -26,6 +26,7 @@ use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
 use arrow::util::display::{ArrayFormatter, FormatOptions};
 use arrow_schema::{Field, Schema, TimeUnit};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::catalog::Catalog;
 use crate::table::array_to_sql_literals;
@@ -66,6 +67,26 @@ pub enum Scalar {
     LargeList(Arc<LargeListArray>),
     Decimal128(Option<i128>, u8, i8),
     Decimal256(Option<i256>, u8, i8),
+}
+
+impl Serialize for Scalar {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bytes = serialize_scalar(self).map_err(<S::Error as serde::ser::Error>::custom)?;
+        serializer.serialize_bytes(&bytes)
+    }
+}
+
+impl<'de> Deserialize<'de> for Scalar {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        deserialize_scalar(&bytes).map_err(<D::Error as serde::de::Error>::custom)
+    }
 }
 
 impl Scalar {

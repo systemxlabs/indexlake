@@ -2,7 +2,7 @@ use arrow::datatypes::SchemaRef;
 use datafusion::prelude::SessionContext;
 use datafusion_common::DataFusionError;
 use datafusion_common::tree_node::TreeNode;
-use datafusion_common::{DFSchema, ScalarValue};
+use datafusion_common::{Column, DFSchema, ScalarValue};
 use datafusion_expr::Expr;
 use datafusion_expr::{ExprSchemable, Operator};
 use datafusion_optimizer::analyzer::type_coercion::TypeCoercionRewriter;
@@ -294,6 +294,112 @@ pub fn indexlake_scalar_to_datafusion_scalar(
         ILScalar::LargeList(v) => Ok(ScalarValue::LargeList(v.clone())),
         ILScalar::Decimal128(v, p, s) => Ok(ScalarValue::Decimal128(*v, *p, *s)),
         ILScalar::Decimal256(v, p, s) => Ok(ScalarValue::Decimal256(*v, *p, *s)),
+    }
+}
+
+pub fn indexlake_expr_to_datafusion_expr(expr: &ILExpr) -> Result<Expr, DataFusionError> {
+    match expr {
+        ILExpr::Column(name) => Ok(Expr::Column(Column::from_name(name))),
+        ILExpr::Literal(literal) => {
+            let scalar_value = indexlake_scalar_to_datafusion_scalar(&literal.value)?;
+            Ok(Expr::Literal(scalar_value, None))
+        }
+        ILExpr::BinaryExpr(binary) => {
+            let left = Box::new(indexlake_expr_to_datafusion_expr(&binary.left)?);
+            let right = Box::new(indexlake_expr_to_datafusion_expr(&binary.right)?);
+            let op = indexlake_operator_to_datafusion_operator(&binary.op)?;
+            Ok(Expr::BinaryExpr(datafusion_expr::expr::BinaryExpr {
+                left,
+                op,
+                right,
+            }))
+        }
+        ILExpr::Not(expr) => Ok(Expr::Not(Box::new(indexlake_expr_to_datafusion_expr(
+            expr,
+        )?))),
+        ILExpr::IsNull(expr) => Ok(Expr::IsNull(Box::new(indexlake_expr_to_datafusion_expr(
+            expr,
+        )?))),
+        ILExpr::IsNotNull(expr) => Ok(Expr::IsNotNull(Box::new(
+            indexlake_expr_to_datafusion_expr(expr)?,
+        ))),
+        ILExpr::InList(in_list) => {
+            let expr = Box::new(indexlake_expr_to_datafusion_expr(&in_list.expr)?);
+            let list = in_list
+                .list
+                .iter()
+                .map(indexlake_expr_to_datafusion_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expr::InList(datafusion_expr::expr::InList {
+                expr,
+                list,
+                negated: in_list.negated,
+            }))
+        }
+        ILExpr::Like(like) => Ok(Expr::Like(datafusion_expr::expr::Like {
+            negated: like.negated,
+            expr: Box::new(indexlake_expr_to_datafusion_expr(&like.expr)?),
+            pattern: Box::new(indexlake_expr_to_datafusion_expr(&like.pattern)?),
+            escape_char: None,
+            case_insensitive: like.case_insensitive,
+        })),
+        ILExpr::Cast(cast) => Ok(Expr::Cast(datafusion_expr::expr::Cast {
+            expr: Box::new(indexlake_expr_to_datafusion_expr(&cast.expr)?),
+            data_type: cast.cast_type.clone(),
+        })),
+        ILExpr::TryCast(try_cast) => Ok(Expr::TryCast(datafusion_expr::expr::TryCast {
+            expr: Box::new(indexlake_expr_to_datafusion_expr(&try_cast.expr)?),
+            data_type: try_cast.cast_type.clone(),
+        })),
+        ILExpr::Negative(expr) => Ok(Expr::Negative(Box::new(indexlake_expr_to_datafusion_expr(
+            expr,
+        )?))),
+        ILExpr::Case(case) => {
+            let when_then_expr = case
+                .when_then
+                .iter()
+                .map(|(when, then)| {
+                    Ok::<_, DataFusionError>((
+                        Box::new(indexlake_expr_to_datafusion_expr(when)?),
+                        Box::new(indexlake_expr_to_datafusion_expr(then)?),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let else_expr = match &case.else_expr {
+                Some(expr) => Some(Box::new(indexlake_expr_to_datafusion_expr(expr)?)),
+                None => None,
+            };
+            Ok(Expr::Case(datafusion_expr::expr::Case {
+                expr: None,
+                when_then_expr,
+                else_expr,
+            }))
+        }
+        ILExpr::Function(_) => Err(DataFusionError::NotImplemented(
+            "Unsupported expr: function".to_string(),
+        )),
+    }
+}
+
+pub fn indexlake_operator_to_datafusion_operator(
+    operator: &ILOperator,
+) -> Result<Operator, DataFusionError> {
+    match operator {
+        ILOperator::Eq => Ok(Operator::Eq),
+        ILOperator::NotEq => Ok(Operator::NotEq),
+        ILOperator::Lt => Ok(Operator::Lt),
+        ILOperator::LtEq => Ok(Operator::LtEq),
+        ILOperator::Gt => Ok(Operator::Gt),
+        ILOperator::GtEq => Ok(Operator::GtEq),
+        ILOperator::Plus => Ok(Operator::Plus),
+        ILOperator::Minus => Ok(Operator::Minus),
+        ILOperator::Multiply => Ok(Operator::Multiply),
+        ILOperator::Divide => Ok(Operator::Divide),
+        ILOperator::Modulo => Ok(Operator::Modulo),
+        ILOperator::And => Ok(Operator::And),
+        ILOperator::Or => Ok(Operator::Or),
+        ILOperator::IsDistinctFrom => Ok(Operator::IsDistinctFrom),
+        ILOperator::IsNotDistinctFrom => Ok(Operator::IsNotDistinctFrom),
     }
 }
 

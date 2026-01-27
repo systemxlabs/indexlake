@@ -20,7 +20,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     IndexLakeInsertExec, IndexLakeScanExec, datafusion_expr_to_indexlake_expr,
-    indexlake_scalar_to_datafusion_scalar,
+    indexlake_expr_to_datafusion_expr,
 };
 
 #[derive(Debug)]
@@ -39,11 +39,8 @@ impl IndexLakeTable {
         let mut column_defaults = HashMap::new();
         for field_record in table.field_records.iter() {
             if let Some(default_value) = &field_record.default_value {
-                let scalar_value = indexlake_scalar_to_datafusion_scalar(default_value)?;
-                column_defaults.insert(
-                    field_record.field_name.clone(),
-                    Expr::Literal(scalar_value, None),
-                );
+                let expr = indexlake_expr_to_datafusion_expr(default_value)?;
+                column_defaults.insert(field_record.field_name.clone(), expr);
             }
         }
         Ok(Self {

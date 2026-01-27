@@ -413,7 +413,7 @@ async fn datafusion_partial_insert(
         Field::new("name", DataType::Utf8, false),
         Field::new("age", DataType::Int32, false),
     ]));
-    let default_values = HashMap::from([("age".to_string(), Scalar::from(24i32))]);
+    let default_values = HashMap::from([("age".to_string(), Scalar::from(24i32).into())]);
     let table_config = TableConfig {
         preferred_data_file_format: format,
         ..Default::default()
