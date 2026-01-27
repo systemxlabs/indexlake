@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::RecordBatch;
-use arrow_schema::{Field, FieldRef, Schema};
+use arrow_schema::{FieldRef, Schema};
 use futures::StreamExt;
 use uuid::Uuid;
 
@@ -121,7 +121,7 @@ pub(crate) async fn alter_add_column(
     }
 
     let default_value = default_value.rewrite_columns(&table.table_schema.field_name_id_map)?;
-    check_default_expr(field.as_ref(), &default_value, &table.table_schema.arrow_schema)?;
+    super::check_default_expr(field.as_ref(), &default_value, &table.table_schema.arrow_schema)?;
 
     let field_id = Uuid::now_v7();
     let field_record = FieldRecord::new(
@@ -185,69 +185,6 @@ pub(crate) async fn alter_add_column(
         data_files: data_file_records,
         index_files: old_index_files,
     })
-}
-
-fn check_default_expr(field: &Field, expr: &Expr, schema: &Schema) -> ILResult<()> {
-    if contains_unsupported_default_expr(expr) {
-        return Err(ILError::invalid_input(
-            "Default expr contains unsupported operator".to_string(),
-        ));
-    }
-
-    let expr_type = expr.data_type(schema)?;
-    if &expr_type != field.data_type() {
-        return Err(ILError::invalid_input(format!(
-            "Default expr data type {expr_type} does not match field {field}",
-        )));
-    }
-
-    if let Ok(constant) = expr.constant_eval()
-        && constant.is_null()
-        && !field.is_nullable()
-    {
-        return Err(ILError::invalid_input(format!(
-            "Default expr is null for non-nullable field {field}",
-        )));
-    }
-
-    Ok(())
-}
-
-fn contains_unsupported_default_expr(expr: &Expr) -> bool {
-    match expr {
-        Expr::Function(_) | Expr::TryCast(_) => true,
-        Expr::Column(_) | Expr::Literal(_) => false,
-        Expr::BinaryExpr(binary_expr) => {
-            contains_unsupported_default_expr(&binary_expr.left)
-                || contains_unsupported_default_expr(&binary_expr.right)
-        }
-        Expr::Not(inner)
-        | Expr::IsNull(inner)
-        | Expr::IsNotNull(inner)
-        | Expr::Negative(inner) => contains_unsupported_default_expr(inner),
-        Expr::InList(in_list) => {
-            contains_unsupported_default_expr(&in_list.expr)
-                || in_list
-                    .list
-                    .iter()
-                    .any(contains_unsupported_default_expr)
-        }
-        Expr::Like(like) => {
-            contains_unsupported_default_expr(&like.expr)
-                || contains_unsupported_default_expr(&like.pattern)
-        }
-        Expr::Cast(cast) => contains_unsupported_default_expr(&cast.expr),
-        Expr::Case(case) => {
-            case.when_then.iter().any(|(when, then)| {
-                contains_unsupported_default_expr(when)
-                    || contains_unsupported_default_expr(then)
-            }) || case
-                .else_expr
-                .as_ref()
-                .map(|expr| contains_unsupported_default_expr(expr))
-                .unwrap_or(false)
-        }
-    }
 }
 
 async fn rewrite_data_files_add_column(

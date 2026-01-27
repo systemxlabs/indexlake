@@ -471,7 +471,10 @@ async fn create_table_with_invalid_column_default_value(
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: expected_schema.clone(),
-        default_values: HashMap::from([("id".to_string(), indexlake::catalog::Scalar::from(1i32))]),
+        default_values: HashMap::from([(
+            "id".to_string(),
+            indexlake::catalog::Scalar::from(1i32).into(),
+        )]),
         ..Default::default()
     };
 
@@ -480,7 +483,7 @@ async fn create_table_with_invalid_column_default_value(
 
     table_creation.default_values = HashMap::from([(
         "id".to_string(),
-        indexlake::catalog::Scalar::try_new_null(&DataType::Int64)?,
+        indexlake::catalog::Scalar::try_new_null(&DataType::Int64)?.into(),
     )]);
     let result = client.create_table(table_creation).await;
     assert!(result.is_err());

@@ -2,18 +2,18 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
-use arrow_schema::{Field, Schema};
+use arrow_schema::Schema;
 use futures::StreamExt;
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, Scalar,
-    TableRecord, TransactionHelper, rows_to_record_batch,
+    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
+    TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::Expr;
 use crate::index::{IndexDefinition, IndexParams};
 use crate::storage::read_data_file_by_record;
-use crate::table::{Table, TableConfig};
+use crate::table::{Table, TableConfig, check_default_expr};
 use crate::{ILError, ILResult, check_schema_contains_system_column};
 
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ pub struct TableCreation {
     pub namespace_name: String,
     pub table_name: String,
     pub schema: SchemaRef,
-    pub default_values: HashMap<String, Scalar>,
+    pub default_values: HashMap<String, Expr>,
     pub config: TableConfig,
     pub if_not_exists: bool,
 }
@@ -99,7 +99,7 @@ pub(crate) async fn process_create_table(
     // check default values
     for (field_name, default_value) in &creation.default_values {
         let field = creation.schema.field_with_name(field_name)?;
-        check_default_value(field, default_value)?;
+        check_default_expr(field, default_value, creation.schema.as_ref())?;
     }
 
     // insert table record
@@ -117,11 +117,7 @@ pub(crate) async fn process_create_table(
     // insert field records
     let mut field_records = Vec::new();
     for field in creation.schema.fields() {
-        let default_value = creation
-            .default_values
-            .get(field.name())
-            .cloned()
-            .map(Expr::from);
+        let default_value = creation.default_values.get(field.name()).cloned();
         field_records.push(FieldRecord::new(
             Uuid::now_v7(),
             table_id,
@@ -305,19 +301,4 @@ pub(crate) async fn process_create_index(
         .await?;
 
     Ok(index_id)
-}
-
-pub(crate) fn check_default_value(field: &Field, default_value: &Scalar) -> ILResult<()> {
-    let default_value_type = default_value.data_type();
-    if &default_value_type != field.data_type() {
-        return Err(ILError::invalid_input(format!(
-            "Default value data type {default_value_type} does not match field {field}",
-        )));
-    }
-    if default_value.is_null() && !field.is_nullable() {
-        return Err(ILError::invalid_input(format!(
-            "Default value is null for non-nullable field {field}",
-        )));
-    }
-    Ok(())
 }
