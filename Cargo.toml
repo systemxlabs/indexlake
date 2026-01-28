@@ -3,6 +3,7 @@ members = [
   "benchmarks",
   "catalogs/postgres",
   "catalogs/sqlite",
+  "examples",
   "indexes/bm25",
   "indexes/btree",
   "indexes/hnsw",
