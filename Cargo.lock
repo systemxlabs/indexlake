@@ -2509,12 +2509,9 @@ dependencies = [
  "derive-with",
  "futures",
  "hex",
- "indexlake-catalog-postgres",
- "indexlake-storage-s3",
  "itertools 0.14.0",
  "log",
  "num_cpus",
- "opendal",
  "parquet",
  "serde",
  "serde_json",
@@ -2598,6 +2595,18 @@ name = "indexlake-datafusion-gen"
 version = "0.4.0"
 dependencies = [
  "prost-build",
+]
+
+[[package]]
+name = "indexlake-examples"
+version = "0.4.0"
+dependencies = [
+ "arrow",
+ "indexlake",
+ "indexlake-catalog-postgres",
+ "indexlake-storage-s3",
+ "opendal",
+ "tokio",
 ]
 
 [[package]]
