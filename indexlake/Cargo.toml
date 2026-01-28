@@ -29,6 +29,6 @@ tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
-indexlake-catalog-sqlite = { workspace = true }
-indexlake-storage-fs = { workspace = true }
-rusqlite = { workspace = true }
+indexlake-catalog-postgres = { workspace = true }
+indexlake-storage-s3 = { workspace = true }
+opendal = { workspace = true }
