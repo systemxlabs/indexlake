@@ -15,7 +15,7 @@
 
 ## Example
 
-`examples/basic_crud.rs`
+`indexlake/examples/basic_crud.rs`
 
 ## Project Structure
 
