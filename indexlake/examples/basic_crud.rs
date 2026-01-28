@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arrow::array::{Array, Int32Array, RecordBatch, StringArray};
+use arrow::array::{Int32Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use futures::StreamExt;
 use indexlake::Client;
@@ -61,13 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     table.insert(TableInsertion::new(vec![batch])).await?;
 
-    let batches = collect_scan(
+    let _batches = collect_scan(
         &table,
         TableScan::default().with_projection(Some(vec![1, 2])),
     )
     .await?;
-    println!("after insert:");
-    print_users(&batches)?;
 
     let update = TableUpdate {
         set_map: HashMap::from([("age".to_string(), lit(30i32))]),
@@ -79,13 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let deleted = table.delete(col("age").gt(lit(25i32))).await?;
     println!("deleted rows: {deleted}");
 
-    let batches = collect_scan(
+    let _batches = collect_scan(
         &table,
         TableScan::default().with_projection(Some(vec![1, 2])),
     )
     .await?;
-    println!("after update/delete:");
-    print_users(&batches)?;
 
     Ok(())
 }
@@ -100,33 +96,4 @@ async fn collect_scan(
         batches.push(batch?);
     }
     Ok(batches)
-}
-
-fn print_users(batches: &[RecordBatch]) -> Result<(), Box<dyn std::error::Error>> {
-    for batch in batches {
-        let names = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .ok_or("expected StringArray in column 0")?;
-        let ages = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .ok_or("expected Int32Array in column 1")?;
-        for row in 0..batch.num_rows() {
-            let name = if names.is_null(row) {
-                "NULL".to_string()
-            } else {
-                names.value(row).to_string()
-            };
-            let age = if ages.is_null(row) {
-                "NULL".to_string()
-            } else {
-                ages.value(row).to_string()
-            };
-            println!("{name} | {age}");
-        }
-    }
-    Ok(())
 }
