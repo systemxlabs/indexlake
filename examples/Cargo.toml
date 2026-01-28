@@ -1,0 +1,17 @@
+[package]
+name = "indexlake-examples"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+arrow = { workspace = true }
+indexlake = { workspace = true }
+indexlake-catalog-postgres = { workspace = true }
+indexlake-storage-s3 = { workspace = true }
+opendal = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
