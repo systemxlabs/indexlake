@@ -13,10 +13,6 @@
 - **Flexible Storage**: Local filesystem and S3-compatible storage backends
 - **DataFusion Integration**: Native Apache DataFusion support for SQL query workloads
 
-## Example
-
-`indexlake/examples/basic_crud.rs`
-
 ## Project Structure
 
 ```
