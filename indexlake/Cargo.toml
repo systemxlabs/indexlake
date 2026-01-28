@@ -27,8 +27,3 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4", "v7"] }
-
-[dev-dependencies]
-indexlake-catalog-postgres = { workspace = true }
-indexlake-storage-s3 = { workspace = true }
-opendal = { workspace = true }
