@@ -225,6 +225,7 @@ fn serialize_data_files(
                     size: record.size,
                     record_count: record.record_count,
                     validity: record.validity.bytes().to_vec(),
+                    valid_record_count: record.valid_record_count,
                 });
             }
             Ok(Some(DataFiles {
@@ -253,6 +254,7 @@ fn parse_data_files(
                     relative_path: proto_data_file.relative_path,
                     size: proto_data_file.size,
                     record_count: proto_data_file.record_count,
+                    valid_record_count: proto_data_file.valid_record_count,
                     validity: RowValidity::from(
                         proto_data_file.validity,
                         proto_data_file.record_count as usize,
