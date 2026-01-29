@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, Row, rows_to_record_batch,
 };
+use crate::expr::row_ids_in_list_expr;
 use crate::index::{IndexDefinitionRef, IndexKind, RowIdScore, SearchIndexEntries, SearchQuery};
 use crate::storage::{Storage, read_data_file_by_record};
 use crate::table::Table;
@@ -281,8 +282,7 @@ async fn read_data_file_rows(
             &table.table_schema,
             data_file_record,
             projection.clone(),
-            vec![],
-            Some(row_ids),
+            vec![row_ids_in_list_expr(row_ids)],
             1024,
         )
         .await?;

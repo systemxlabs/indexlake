@@ -184,7 +184,6 @@ pub(crate) async fn update_data_file_rows_by_condition(
         &data_file_record,
         None,
         vec![condition.clone()],
-        None,
         1024,
     )
     .await?;
@@ -236,7 +235,6 @@ pub(crate) async fn parallel_find_matched_data_file_rows(
                 &data_file_record,
                 None,
                 vec![condition],
-                None,
                 1024,
             )
             .await?;

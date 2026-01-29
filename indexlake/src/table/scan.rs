@@ -15,7 +15,7 @@ use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
     rows_to_record_batch,
 };
-use crate::expr::{Expr, merge_filters, split_conjunction_filters};
+use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
 use crate::index::{FilterSupport, IndexManager};
 use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
@@ -513,7 +513,7 @@ async fn index_scan_data_file(
     )
     .await?;
 
-    let left_filters = scan_filters
+    let mut left_filters = scan_filters
         .iter()
         .enumerate()
         .filter(|(idx, _)| {
@@ -524,13 +524,15 @@ async fn index_scan_data_file(
         .map(|(_, filter)| filter.clone())
         .collect::<Vec<_>>();
 
+    let row_id_filter = row_ids_in_list_expr(row_ids.into_iter().collect());
+    left_filters.push(row_id_filter);
+
     read_data_file_by_record(
         table.storage.as_ref(),
         &table.table_schema,
         data_file_record,
         scan_projection,
         left_filters,
-        Some(row_ids.into_iter().collect()),
         scan_batch_size,
     )
     .await
@@ -739,7 +741,6 @@ impl TablePartitionScanner {
                             &table_schema,
                             &record,
                             filters.clone(),
-                            None,
                         )
                         .await?,
                     )
@@ -765,7 +766,6 @@ impl TablePartitionScanner {
                     &record,
                     projection,
                     filters,
-                    None,
                     batch_size,
                 )
                 .await?;

@@ -243,7 +243,6 @@ async fn stream_merge_group_files(
             file,
             None,
             vec![],
-            None,
             1,
         )
         .await?;

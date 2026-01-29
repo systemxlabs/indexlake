@@ -7,7 +7,7 @@ pub(crate) use parquet::*;
 use uuid::Uuid;
 
 use crate::catalog::DataFileRecord;
-use crate::expr::{Expr, row_ids_in_list_expr};
+use crate::expr::Expr;
 use crate::table::TableSchemaRef;
 use crate::{ILError, ILResult, RecordBatchStream};
 use serde::{Deserialize, Serialize};
@@ -126,14 +126,9 @@ pub(crate) async fn read_data_file_by_record(
     table_schema: &TableSchemaRef,
     data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
-    mut filters: Vec<Expr>,
-    row_ids: Option<Vec<Uuid>>,
+    filters: Vec<Expr>,
     batch_size: usize,
 ) -> ILResult<RecordBatchStream> {
-    if let Some(row_ids) = row_ids {
-        let row_id_filter = row_ids_in_list_expr(row_ids);
-        filters.push(row_id_filter);
-    }
     match data_file_record.format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
             read_parquet_file_by_record(
@@ -153,26 +148,14 @@ pub(crate) async fn count_data_file_by_record(
     storage: &dyn Storage,
     table_schema: &TableSchemaRef,
     data_file_record: &DataFileRecord,
-    mut filters: Vec<Expr>,
-    row_ids: Option<Vec<Uuid>>,
+    filters: Vec<Expr>,
 ) -> ILResult<usize> {
-    if let Some(row_ids) = row_ids {
-        let row_id_filter = row_ids_in_list_expr(row_ids);
-        filters.push(row_id_filter);
-    }
     if filters.is_empty() {
         Ok(data_file_record.valid_row_count())
     } else {
-        let stream = read_data_file_by_record(
-            storage,
-            table_schema,
-            data_file_record,
-            None,
-            filters,
-            None,
-            8096,
-        )
-        .await?;
+        let stream =
+            read_data_file_by_record(storage, table_schema, data_file_record, None, filters, 8096)
+                .await?;
         let count: usize = stream
             .map(|batch| {
                 let batch = batch?;

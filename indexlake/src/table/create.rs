@@ -247,7 +247,6 @@ pub(crate) async fn process_create_index(
             &data_file_record,
             Some(projection.clone()),
             vec![],
-            None,
             1024,
         )
         .await?;

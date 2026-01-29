@@ -222,7 +222,6 @@ async fn rewrite_data_files_add_column(
                 data_file_record,
                 None,
                 vec![],
-                None,
                 1024,
             )
             .await?;
