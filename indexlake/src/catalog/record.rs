@@ -202,6 +202,7 @@ pub struct DataFileRecord {
     pub relative_path: String,
     pub size: i64,
     pub record_count: i64,
+    pub valid_record_count: i64,
     pub validity: RowValidity,
 }
 
@@ -209,13 +210,14 @@ impl DataFileRecord {
     pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
         let validity_bytes = self.validity.bytes();
         format!(
-            "({}, {}, '{}', '{}', {}, {}, {})",
+            "({}, {}, '{}', '{}', {}, {}, {}, {})",
             catalog.sql_uuid_literal(&self.data_file_id),
             catalog.sql_uuid_literal(&self.table_id),
             self.format,
             self.relative_path,
             self.size,
             self.record_count,
+            self.valid_record_count,
             catalog.sql_binary_literal(validity_bytes),
         )
     }
@@ -228,6 +230,7 @@ impl DataFileRecord {
             Column::new("relative_path", CatalogDataType::Utf8, false),
             Column::new("size", CatalogDataType::Int64, false),
             Column::new("record_count", CatalogDataType::Int64, false),
+            Column::new("valid_record_count", CatalogDataType::Int64, false),
             Column::new("validity", CatalogDataType::Binary, false),
         ])
     }
@@ -257,8 +260,9 @@ impl DataFileRecord {
         let relative_path = row.utf8_owned(3)?.expect("relative_path is not null");
         let size = row.int64(4)?.expect("size is not null");
         let record_count = row.int64(5)?.expect("record_count is not null");
+        let valid_record_count = row.int64(6)?.expect("valid_record_count is not null");
 
-        let validity_bytes = row.binary_owned(6)?.expect("validity is not null");
+        let validity_bytes = row.binary_owned(7)?.expect("validity is not null");
         let validity = RowValidity::from(validity_bytes, record_count as usize);
 
         Ok(DataFileRecord {
@@ -268,12 +272,13 @@ impl DataFileRecord {
             relative_path,
             size,
             record_count,
+            valid_record_count,
             validity,
         })
     }
 
     pub(crate) fn valid_row_count(&self) -> usize {
-        self.validity.iter().filter(|valid| *valid).count()
+        self.valid_record_count as usize
     }
 
     pub(crate) fn row_ranges(&self) -> Vec<Range<usize>> {
@@ -353,6 +358,10 @@ impl RowValidity {
                 };
                 (0..bit_len).map(move |bit| (byte & (1 << bit)) != 0)
             })
+    }
+
+    pub fn count_valid(&self) -> usize {
+        self.iter().filter(|valid| *valid).count()
     }
 
     pub fn bytes(&self) -> &[u8] {

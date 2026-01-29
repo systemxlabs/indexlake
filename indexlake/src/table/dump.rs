@@ -184,6 +184,7 @@ impl DumpTask {
                 relative_path: relative_path.clone(),
                 size: size as i64,
                 record_count: row_ids.len() as i64,
+                valid_record_count: row_ids.len() as i64,
                 validity: RowValidity::new(row_ids.len()),
             }])
             .await?;

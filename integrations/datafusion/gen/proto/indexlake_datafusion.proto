@@ -47,6 +47,7 @@ message DataFile {
   int64 size = 5;
   int64 record_count = 6;
   bytes validity = 7;
+  int64 valid_record_count = 8;
 }
 
 enum DataFileFormat {

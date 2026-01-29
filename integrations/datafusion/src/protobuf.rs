@@ -76,6 +76,8 @@ pub struct DataFile {
     pub record_count: i64,
     #[prost(bytes = "vec", tag = "7")]
     pub validity: ::prost::alloc::vec::Vec<u8>,
+    #[prost(int64, tag = "8")]
+    pub valid_record_count: i64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

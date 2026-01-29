@@ -258,6 +258,7 @@ async fn rewrite_data_files_add_column(
                 relative_path,
                 size: size as i64,
                 record_count: record_count as i64,
+                valid_record_count: record_count as i64,
                 validity: RowValidity::new(record_count),
             });
 
