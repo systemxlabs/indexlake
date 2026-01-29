@@ -80,10 +80,12 @@ impl TransactionHelper {
         old_validity: &RowValidity,
         new_validity: &RowValidity,
     ) -> ILResult<usize> {
+        let valid_record_count = new_validity.count_valid() as i64;
         let update_count = self.transaction
             .execute(&format!(
-                "UPDATE indexlake_data_file SET validity = {} WHERE data_file_id = {} AND validity = {}",
+                "UPDATE indexlake_data_file SET validity = {}, valid_record_count = {} WHERE data_file_id = {} AND validity = {}",
                 self.catalog.sql_binary_literal(new_validity.bytes()),
+                valid_record_count,
                 self.catalog.sql_uuid_literal(data_file_id),
                 self.catalog.sql_binary_literal(old_validity.bytes()),
             ))

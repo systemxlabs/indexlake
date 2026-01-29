@@ -295,6 +295,7 @@ async fn finish_parquet_file(
         relative_path,
         size: size as i64,
         record_count: record_count as i64,
+        valid_record_count: record_count as i64,
         validity: RowValidity::new(record_count),
     };
 

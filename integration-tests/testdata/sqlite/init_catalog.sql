@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS indexlake_data_file (
     relative_path VARCHAR NOT NULL,
     size BIGINT NOT NULL,
     record_count BIGINT NOT NULL,
+    valid_record_count BIGINT NOT NULL,
     validity BLOB NOT NULL
 );
 

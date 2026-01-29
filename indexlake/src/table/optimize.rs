@@ -157,6 +157,7 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
             relative_path,
             size: size as i64,
             record_count: record_count as i64,
+            valid_record_count: record_count as i64,
             validity: RowValidity::new(record_count),
         });
 
