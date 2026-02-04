@@ -15,7 +15,6 @@ use indexlake::Client;
 use indexlake::index::FilterSupport;
 use indexlake::table::{Table, TableScanPartition};
 use indexlake::utils::schema_without_row_id;
-use log::warn;
 use tokio::sync::Mutex;
 
 use crate::scan::build_scan_partitions;
@@ -33,6 +32,7 @@ pub struct IndexLakeTable {
     column_defaults: HashMap<String, Expr>,
     hide_row_id: bool,
     bypass_insert_threshold: usize,
+    table_row_count: Option<usize>,
 }
 
 impl IndexLakeTable {
@@ -52,7 +52,18 @@ impl IndexLakeTable {
             column_defaults,
             hide_row_id: false,
             bypass_insert_threshold: 1000,
+            table_row_count: None,
         })
+    }
+
+    pub async fn with_table_statistics(mut self) -> Result<Self, DataFusionError> {
+        let counts = self
+            .table
+            .count(&[TableScanPartition::single_partition()])
+            .await
+            .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+        self.table_row_count = Some(counts[0]);
+        Ok(self)
     }
 
     pub fn with_batch_size(mut self, batch_size: usize) -> Self {
@@ -176,29 +187,12 @@ impl TableProvider for IndexLakeTable {
     }
 
     fn statistics(&self) -> Option<Statistics> {
-        let row_count_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let counts = self
-                    .table
-                    .count(&[TableScanPartition::single_partition()])
-                    .await?;
-                Ok::<_, indexlake::ILError>(counts[0])
-            })
-        });
-        match row_count_result {
-            Ok(row_count) => Some(Statistics {
-                num_rows: Precision::Exact(row_count),
-                total_byte_size: Precision::Absent,
-                column_statistics: Statistics::unknown_column(&self.table.output_schema),
-            }),
-            Err(e) => {
-                warn!(
-                    "[indexlake] Error getting indexlake table {}.{} row count: {:?}",
-                    self.table.namespace_name, self.table.table_name, e
-                );
-                None
-            }
-        }
+        let row_count = self.table_row_count?;
+        Some(Statistics {
+            num_rows: Precision::Exact(row_count),
+            total_byte_size: Precision::Absent,
+            column_statistics: Statistics::unknown_column(&self.table.output_schema),
+        })
     }
 
     async fn insert_into(
