@@ -56,14 +56,7 @@ impl IndexLakeTable {
         })
     }
 
-    pub async fn with_table_statistics(
-        mut self,
-        enable_table_statistics: bool,
-    ) -> Result<Self, DataFusionError> {
-        if !enable_table_statistics {
-            return Ok(self);
-        }
-
+    pub async fn with_table_statistics(mut self) -> Result<Self, DataFusionError> {
         let counts = self
             .table
             .count(&[TableScanPartition::single_partition()])
