@@ -168,12 +168,20 @@ impl Table {
         Ok(correct_batch_stream)
     }
 
-    pub async fn count(&self, partition: TableScanPartition) -> ILResult<usize> {
-        partition.validate()?;
+    pub async fn count(&self, partitions: &[TableScanPartition]) -> ILResult<Vec<usize>> {
+        for partition in partitions {
+            partition.validate()?;
+        }
+        if partitions.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let catalog_helper = CatalogHelper::new(self.catalog.clone());
 
-        let inline_row_count = if partition.contains_inline_rows() {
+        let inline_row_count = if partitions
+            .iter()
+            .any(|partition| partition.contains_inline_rows())
+        {
             catalog_helper
                 .count_inline_rows(&self.table_id, &[])
                 .await? as usize
@@ -181,14 +189,64 @@ impl Table {
             0
         };
 
-        let data_file_records =
-            get_partitioned_data_file_records(&catalog_helper, &self.table_id, partition).await?;
-        let data_file_row_count: usize = data_file_records
+        let needs_auto_partition = partitions
             .iter()
-            .map(|record| record.valid_row_count())
-            .sum();
+            .any(|partition| matches!(partition, TableScanPartition::Auto { .. }));
+        let ordered_data_files = if needs_auto_partition {
+            let mut data_files = catalog_helper.get_data_files(&self.table_id).await?;
+            data_files.sort_by(|left, right| {
+                left.data_file_id
+                    .as_bytes()
+                    .cmp(right.data_file_id.as_bytes())
+            });
+            Some(data_files)
+        } else {
+            None
+        };
+        let data_file_count = ordered_data_files
+            .as_ref()
+            .map(|files| files.len())
+            .unwrap_or(0);
 
-        Ok(inline_row_count + data_file_row_count)
+        let mut counts = Vec::with_capacity(partitions.len());
+        for partition in partitions {
+            let data_file_row_count: usize = match partition {
+                TableScanPartition::Provided {
+                    data_file_records, ..
+                } => data_file_records
+                    .iter()
+                    .map(|record| record.valid_row_count())
+                    .sum(),
+                TableScanPartition::Auto {
+                    partition_idx,
+                    partition_count,
+                } => {
+                    let (offset, limit) = TableScanPartition::data_file_offset_limit(
+                        data_file_count,
+                        *partition_count,
+                        *partition_idx,
+                    );
+                    if limit == 0 || offset >= data_file_count {
+                        0
+                    } else {
+                        let end = std::cmp::min(offset + limit, data_file_count);
+                        let records = ordered_data_files.as_ref().expect("data files loaded");
+                        records[offset..end]
+                            .iter()
+                            .map(|record| record.valid_row_count())
+                            .sum()
+                    }
+                }
+            };
+            let inline_count = if partition.contains_inline_rows() {
+                inline_row_count
+            } else {
+                0
+            };
+            counts.push(inline_count + data_file_row_count);
+        }
+
+        Ok(counts)
     }
 
     pub async fn inline_row_count(&self) -> ILResult<usize> {

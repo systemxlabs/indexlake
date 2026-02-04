@@ -158,7 +158,8 @@ impl ExecutionPlan for IndexLakeScanExec {
         let row_count_result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let table = lazy_table.get_or_load().await?;
-                table.count(scan_partition).await
+                let counts = table.count(&[scan_partition]).await?;
+                Ok::<_, indexlake::ILError>(counts[0])
             })
         });
         match row_count_result {
