@@ -22,6 +22,7 @@ message IndexLakeScanExecNode {
   uint32 batch_size = 7;
   optional uint32 limit = 8;
   datafusion_common.Schema schema = 9;
+  repeated uint64 partition_row_counts = 10;
 }
 
 message TableScanPartition {

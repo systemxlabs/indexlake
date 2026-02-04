@@ -28,6 +28,7 @@ pub struct IndexLakeScanExec {
     pub output_schema: SchemaRef,
     pub partition_count: usize,
     scan_partitions: Arc<Vec<TableScanPartition>>,
+    partition_row_counts: Arc<Vec<usize>>,
     pub projection: Option<Vec<usize>>,
     pub filters: Vec<Expr>,
     pub batch_size: usize,
@@ -41,12 +42,19 @@ impl IndexLakeScanExec {
         lazy_table: LazyTable,
         output_schema: SchemaRef,
         scan_partitions: Arc<Vec<TableScanPartition>>,
+        partition_row_counts: Arc<Vec<usize>>,
         projection: Option<Vec<usize>>,
         filters: Vec<Expr>,
         batch_size: usize,
         limit: Option<usize>,
     ) -> Result<Self, DataFusionError> {
         let partition_count = scan_partitions.len();
+        if partition_row_counts.len() != partition_count {
+            return Err(DataFusionError::Plan(format!(
+                "partition row count mismatch: {partition_count} partitions, {} row counts",
+                partition_row_counts.len()
+            )));
+        }
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema),
@@ -59,6 +67,7 @@ impl IndexLakeScanExec {
             output_schema,
             partition_count,
             scan_partitions,
+            partition_row_counts,
             projection,
             filters,
             batch_size,
@@ -76,6 +85,10 @@ impl IndexLakeScanExec {
 
     pub(crate) fn scan_partitions(&self) -> &Arc<Vec<TableScanPartition>> {
         &self.scan_partitions
+    }
+
+    pub(crate) fn partition_row_counts(&self) -> &Arc<Vec<usize>> {
+        &self.partition_row_counts
     }
 }
 
@@ -152,44 +165,37 @@ impl ExecutionPlan for IndexLakeScanExec {
         &self,
         partition: Option<usize>,
     ) -> Result<Statistics, DataFusionError> {
-        let scan_partition = self.get_scan_partition(partition);
-        let lazy_table = self.lazy_table.clone();
+        let row_count = if let Some(partition) = partition {
+            *self.partition_row_counts.get(partition).ok_or_else(|| {
+                DataFusionError::Plan(format!(
+                    "partition index out of range: {partition} >= {}",
+                    self.partition_row_counts.len()
+                ))
+            })?
+        } else {
+            self.partition_row_counts.iter().copied().sum()
+        };
 
-        let row_count_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let table = lazy_table.get_or_load().await?;
-                let counts = table.count(&[scan_partition]).await?;
-                Ok::<_, indexlake::ILError>(counts[0])
-            })
-        });
-        match row_count_result {
-            Ok(row_count) => {
-                if self.filters.is_empty() {
-                    if let Some(limit) = self.limit {
-                        Ok(Statistics {
-                            num_rows: Precision::Exact(std::cmp::min(row_count, limit)),
-                            total_byte_size: Precision::Absent,
-                            column_statistics: Statistics::unknown_column(&self.schema()),
-                        })
-                    } else {
-                        Ok(Statistics {
-                            num_rows: Precision::Exact(row_count),
-                            total_byte_size: Precision::Absent,
-                            column_statistics: Statistics::unknown_column(&self.schema()),
-                        })
-                    }
-                } else {
-                    Ok(Statistics {
-                        num_rows: Precision::Inexact(row_count),
-                        total_byte_size: Precision::Absent,
-                        column_statistics: Statistics::unknown_column(&self.schema()),
-                    })
-                }
+        if self.filters.is_empty() {
+            if let Some(limit) = self.limit {
+                Ok(Statistics {
+                    num_rows: Precision::Exact(std::cmp::min(row_count, limit)),
+                    total_byte_size: Precision::Absent,
+                    column_statistics: Statistics::unknown_column(&self.schema()),
+                })
+            } else {
+                Ok(Statistics {
+                    num_rows: Precision::Exact(row_count),
+                    total_byte_size: Precision::Absent,
+                    column_statistics: Statistics::unknown_column(&self.schema()),
+                })
             }
-            Err(e) => Err(DataFusionError::Plan(format!(
-                "Error getting indexlake table {}.{} row count: {:?}",
-                self.lazy_table.namespace_name, self.lazy_table.table_name, e
-            ))),
+        } else {
+            Ok(Statistics {
+                num_rows: Precision::Inexact(row_count),
+                total_byte_size: Precision::Absent,
+                column_statistics: Statistics::unknown_column(&self.schema()),
+            })
         }
     }
 
@@ -198,6 +204,7 @@ impl ExecutionPlan for IndexLakeScanExec {
             self.lazy_table.clone(),
             self.output_schema.clone(),
             self.scan_partitions.clone(),
+            self.partition_row_counts.clone(),
             self.projection.clone(),
             self.filters.clone(),
             self.batch_size,
