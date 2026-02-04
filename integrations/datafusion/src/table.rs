@@ -148,10 +148,17 @@ impl TableProvider for IndexLakeTable {
         .with_table(self.table.clone());
 
         let scan_partitions = Arc::new(build_scan_partitions(self.num_scan_partitions, data_files));
+        let partition_row_counts = self
+            .table
+            .count(scan_partitions.as_ref())
+            .await
+            .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+        let partition_row_counts = Arc::new(partition_row_counts);
         let exec = IndexLakeScanExec::try_new(
             lazy_table,
             self.table.output_schema.clone(),
             scan_partitions,
+            partition_row_counts,
             il_projection,
             filters.to_vec(),
             self.batch_size,

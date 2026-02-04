@@ -62,11 +62,18 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
 
                 let scan_partitions = parse_scan_partitions(&node.partitions)?;
+                let partition_row_counts = node
+                    .partition_row_counts
+                    .iter()
+                    .map(|value| *value as usize)
+                    .collect::<Vec<_>>();
+                let partition_row_counts = Arc::new(partition_row_counts);
 
                 Ok(Arc::new(IndexLakeScanExec::try_new(
                     lazy_table,
                     schema,
                     scan_partitions,
+                    partition_row_counts,
                     projection,
                     filters,
                     node.batch_size as usize,
@@ -110,6 +117,11 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             let schema = serialize_schema(&exec.output_schema)?;
 
             let partitions = serialize_scan_partitions(exec.scan_partitions());
+            let partition_row_counts = exec
+                .partition_row_counts()
+                .iter()
+                .map(|value| *value as u64)
+                .collect();
 
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Scan(
@@ -123,6 +135,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         batch_size: exec.batch_size as u32,
                         limit: exec.limit.map(|l| l as u32),
                         schema: Some(schema),
+                        partition_row_counts,
                     },
                 )),
             };

@@ -38,6 +38,8 @@ pub struct IndexLakeScanExecNode {
     pub limit: ::core::option::Option<u32>,
     #[prost(message, optional, tag = "9")]
     pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
+    #[prost(uint64, repeated, tag = "10")]
+    pub partition_row_counts: ::prost::alloc::vec::Vec<u64>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TableScanPartition {
