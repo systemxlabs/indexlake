@@ -192,7 +192,7 @@ impl Table {
         let needs_auto_partition = partitions
             .iter()
             .any(|partition| matches!(partition, TableScanPartition::Auto { .. }));
-        let mut ordered_data_files = if needs_auto_partition {
+        let ordered_data_files = if needs_auto_partition {
             let mut data_files = catalog_helper.get_data_files(&self.table_id).await?;
             data_files.sort_by(|left, right| {
                 left.data_file_id
@@ -217,14 +217,10 @@ impl Table {
                     .iter()
                     .map(|record| record.valid_row_count())
                     .sum(),
-                TableScanPartition::Auto { .. } => {
-                    let TableScanPartition::Auto {
-                        partition_idx,
-                        partition_count,
-                    } = partition
-                    else {
-                        0
-                    };
+                TableScanPartition::Auto {
+                    partition_idx,
+                    partition_count,
+                } => {
                     let (offset, limit) = TableScanPartition::data_file_offset_limit(
                         data_file_count,
                         *partition_count,

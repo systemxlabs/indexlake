@@ -30,10 +30,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let total_rows = 1000000;
-    let num_tasks = 10;
+    let total_rows = 1_000_000usize;
+    let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 100000;
+    let insert_batch_size = 100_000usize;
 
     let start_time = Instant::now();
     let mut handles = Vec::new();
@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let table_count = table
         .count(&[TableScanPartition::single_partition()])
         .await?;
-    assert_eq!(table_count[0], total_rows as usize);
+    assert_eq!(table_count[0], total_rows);
 
     let start_time = Instant::now();
     let mut handles = Vec::new();
