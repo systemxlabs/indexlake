@@ -27,12 +27,11 @@ pub struct IndexLakeScanExec {
     pub lazy_table: LazyTable,
     pub output_schema: SchemaRef,
     pub partition_count: usize,
-    pub data_files: Option<Arc<Vec<DataFileRecord>>>,
+    scan_partitions: Arc<Vec<TableScanPartition>>,
     pub projection: Option<Vec<usize>>,
     pub filters: Vec<Expr>,
     pub batch_size: usize,
     pub limit: Option<usize>,
-    pub data_file_partition_ranges: Option<Vec<Option<Range<usize>>>>,
     properties: PlanProperties,
 }
 
@@ -41,13 +40,13 @@ impl IndexLakeScanExec {
     pub fn try_new(
         lazy_table: LazyTable,
         output_schema: SchemaRef,
-        partition_count: usize,
-        data_files: Option<Arc<Vec<DataFileRecord>>>,
+        scan_partitions: Arc<Vec<TableScanPartition>>,
         projection: Option<Vec<usize>>,
         filters: Vec<Expr>,
         batch_size: usize,
         limit: Option<usize>,
     ) -> Result<Self, DataFusionError> {
+        let partition_count = scan_partitions.len();
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema),
@@ -55,48 +54,28 @@ impl IndexLakeScanExec {
             EmissionType::Incremental,
             Boundedness::Bounded,
         );
-        let data_file_partition_ranges = data_files
-            .as_ref()
-            .map(|files| calc_data_file_partition_ranges(partition_count, files.len()));
         Ok(Self {
             lazy_table,
             output_schema,
             partition_count,
-            data_files,
+            scan_partitions,
             projection,
             filters,
             batch_size,
             limit,
-            data_file_partition_ranges,
             properties,
         })
     }
 
     pub fn get_scan_partition(&self, partition: Option<usize>) -> TableScanPartition {
         match partition {
-            Some(partition) => {
-                if let Some(data_files) = self.data_files.as_ref()
-                    && let Some(data_file_partition_ranges) =
-                        self.data_file_partition_ranges.as_ref()
-                {
-                    let range = data_file_partition_ranges[partition].clone();
-                    TableScanPartition::Provided {
-                        contains_inline_rows: partition == 0,
-                        data_file_records: if let Some(range) = range {
-                            data_files[range].to_vec()
-                        } else {
-                            vec![]
-                        },
-                    }
-                } else {
-                    TableScanPartition::Auto {
-                        partition_idx: partition,
-                        partition_count: self.partition_count,
-                    }
-                }
-            }
+            Some(partition) => self.scan_partitions[partition].clone(),
             None => TableScanPartition::single_partition(),
         }
+    }
+
+    pub(crate) fn scan_partitions(&self) -> &Arc<Vec<TableScanPartition>> {
+        &self.scan_partitions
     }
 }
 
@@ -217,8 +196,7 @@ impl ExecutionPlan for IndexLakeScanExec {
         match IndexLakeScanExec::try_new(
             self.lazy_table.clone(),
             self.output_schema.clone(),
-            self.partition_count,
-            self.data_files.clone(),
+            self.scan_partitions.clone(),
             self.projection.clone(),
             self.filters.clone(),
             self.batch_size,
@@ -280,6 +258,40 @@ fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
         }
     }
     true
+}
+
+pub(crate) fn build_scan_partitions(
+    partition_count: usize,
+    data_files: Option<Arc<Vec<DataFileRecord>>>,
+) -> Vec<TableScanPartition> {
+    if partition_count == 0 {
+        return Vec::new();
+    }
+
+    match data_files {
+        Some(data_files) => {
+            let ranges = calc_data_file_partition_ranges(partition_count, data_files.len());
+            (0..partition_count)
+                .map(|partition| {
+                    let range = ranges[partition].clone();
+                    TableScanPartition::Provided {
+                        contains_inline_rows: partition == 0,
+                        data_file_records: if let Some(range) = range {
+                            data_files[range].to_vec()
+                        } else {
+                            vec![]
+                        },
+                    }
+                })
+                .collect()
+        }
+        None => (0..partition_count)
+            .map(|partition| TableScanPartition::Auto {
+                partition_idx: partition,
+                partition_count,
+            })
+            .collect(),
+    }
 }
 
 async fn get_batch_stream(

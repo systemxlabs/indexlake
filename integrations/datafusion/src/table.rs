@@ -18,6 +18,7 @@ use indexlake::utils::schema_without_row_id;
 use log::warn;
 use tokio::sync::Mutex;
 
+use crate::scan::build_scan_partitions;
 use crate::{
     IndexLakeInsertExec, IndexLakeScanExec, datafusion_expr_to_indexlake_expr,
     indexlake_expr_to_datafusion_expr,
@@ -135,11 +136,11 @@ impl TableProvider for IndexLakeTable {
         )
         .with_table(self.table.clone());
 
+        let scan_partitions = Arc::new(build_scan_partitions(self.num_scan_partitions, data_files));
         let exec = IndexLakeScanExec::try_new(
             lazy_table,
             self.table.output_schema.clone(),
-            self.num_scan_partitions,
-            data_files,
+            scan_partitions,
             il_projection,
             filters.to_vec(),
             self.batch_size,
