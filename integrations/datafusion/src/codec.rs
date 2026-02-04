@@ -17,8 +17,9 @@ use uuid::Uuid;
 
 use crate::index_lake_physical_plan_node::IndexLakePhysicalPlanType;
 use crate::{
-    DataFile, DataFiles, IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode,
-    IndexLakeScanExec, IndexLakeScanExecNode, LazyTable,
+    DataFile, IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode,
+    IndexLakeScanExec, IndexLakeScanExecNode, LazyTable, TableScanPartition,
+    TableScanPartitionAuto, TableScanPartitionProvided, table_scan_partition,
 };
 
 #[derive(Debug)]
@@ -54,19 +55,18 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             IndexLakePhysicalPlanType::Scan(node) => {
                 let schema = parse_schema(node.schema)?;
 
-                let data_files = parse_data_files(node.data_files)?;
-
                 let projection = parse_projection(node.projection.as_ref());
                 let filters = parse_exprs(&node.filters, ctx, &DefaultLogicalExtensionCodec {})?;
 
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
 
+                let scan_partitions = parse_scan_partitions(&node.partitions)?;
+
                 Ok(Arc::new(IndexLakeScanExec::try_new(
                     lazy_table,
                     schema,
-                    node.partition_count as usize,
-                    data_files,
+                    scan_partitions,
                     projection,
                     filters,
                     node.batch_size as usize,
@@ -107,9 +107,9 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
             let filters = serialize_exprs(&exec.filters, &DefaultLogicalExtensionCodec {})?;
 
-            let data_files = serialize_data_files(exec.data_files.as_ref())?;
-
             let schema = serialize_schema(&exec.output_schema)?;
+
+            let partitions = serialize_scan_partitions(exec.scan_partitions());
 
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Scan(
@@ -117,7 +117,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         namespace_name: exec.lazy_table.namespace_name.clone(),
                         table_name: exec.lazy_table.table_name.clone(),
                         partition_count: exec.partition_count as u32,
-                        data_files,
+                        partitions,
                         projection,
                         filters,
                         batch_size: exec.batch_size as u32,
@@ -210,61 +210,110 @@ fn parse_insert_op(insert_op: i32) -> Result<InsertOp, DataFusionError> {
     }
 }
 
-fn serialize_data_files(
-    records: Option<&Arc<Vec<DataFileRecord>>>,
-) -> Result<Option<DataFiles>, DataFusionError> {
-    match records {
-        Some(records) => {
-            let mut proto_data_files = vec![];
-            for record in records.iter() {
-                proto_data_files.push(DataFile {
-                    data_file_id: record.data_file_id.as_bytes().to_vec(),
-                    table_id: record.table_id.as_bytes().to_vec(),
-                    format: serialize_data_file_format(record.format),
-                    relative_path: record.relative_path.clone(),
-                    size: record.size,
-                    record_count: record.record_count,
-                    validity: record.validity.bytes().to_vec(),
-                    valid_record_count: record.valid_record_count,
-                });
+fn serialize_scan_partitions(
+    partitions: &Arc<Vec<indexlake::table::TableScanPartition>>,
+) -> Vec<TableScanPartition> {
+    partitions
+        .iter()
+        .map(|partition| match partition {
+            indexlake::table::TableScanPartition::Auto {
+                partition_idx,
+                partition_count,
+            } => TableScanPartition {
+                partition_type: Some(table_scan_partition::PartitionType::Auto(
+                    TableScanPartitionAuto {
+                        partition_idx: *partition_idx as u32,
+                        partition_count: *partition_count as u32,
+                    },
+                )),
+            },
+            indexlake::table::TableScanPartition::Provided {
+                contains_inline_rows,
+                data_file_records,
+            } => TableScanPartition {
+                partition_type: Some(table_scan_partition::PartitionType::Provided(
+                    TableScanPartitionProvided {
+                        contains_inline_rows: *contains_inline_rows,
+                        data_file_records: data_file_records
+                            .iter()
+                            .map(serialize_data_file_record)
+                            .collect(),
+                    },
+                )),
+            },
+        })
+        .collect()
+}
+
+fn parse_scan_partitions(
+    proto_partitions: &[TableScanPartition],
+) -> Result<Arc<Vec<indexlake::table::TableScanPartition>>, DataFusionError> {
+    if proto_partitions.is_empty() {
+        return Err(DataFusionError::Internal(
+            "Missing scan partitions in indexlake scan exec node".to_string(),
+        ));
+    }
+
+    let mut partitions = Vec::with_capacity(proto_partitions.len());
+    for (idx, partition) in proto_partitions.iter().enumerate() {
+        let partition = match &partition.partition_type {
+            Some(table_scan_partition::PartitionType::Auto(auto)) => {
+                indexlake::table::TableScanPartition::Auto {
+                    partition_idx: auto.partition_idx as usize,
+                    partition_count: auto.partition_count as usize,
+                }
             }
-            Ok(Some(DataFiles {
-                files: proto_data_files,
-            }))
-        }
-        None => Ok(None),
+            Some(table_scan_partition::PartitionType::Provided(provided)) => {
+                let mut records = Vec::with_capacity(provided.data_file_records.len());
+                for record in &provided.data_file_records {
+                    records.push(parse_data_file_record(record)?);
+                }
+                indexlake::table::TableScanPartition::Provided {
+                    contains_inline_rows: provided.contains_inline_rows,
+                    data_file_records: records,
+                }
+            }
+            None => {
+                return Err(DataFusionError::Internal(format!(
+                    "Missing partition type for scan partition {idx}"
+                )));
+            }
+        };
+        partitions.push(partition);
+    }
+    Ok(Arc::new(partitions))
+}
+
+fn serialize_data_file_record(record: &DataFileRecord) -> DataFile {
+    DataFile {
+        data_file_id: record.data_file_id.as_bytes().to_vec(),
+        table_id: record.table_id.as_bytes().to_vec(),
+        format: serialize_data_file_format(record.format),
+        relative_path: record.relative_path.clone(),
+        size: record.size,
+        record_count: record.record_count,
+        validity: record.validity.bytes().to_vec(),
+        valid_record_count: record.valid_record_count,
     }
 }
 
-fn parse_data_files(
-    proto_data_files: Option<DataFiles>,
-) -> Result<Option<Arc<Vec<DataFileRecord>>>, DataFusionError> {
-    match proto_data_files {
-        Some(proto_data_files) => {
-            let mut records = vec![];
-            for proto_data_file in proto_data_files.files {
-                records.push(DataFileRecord {
-                    data_file_id: Uuid::from_slice(&proto_data_file.data_file_id).map_err(|e| {
-                        DataFusionError::Internal(format!("Failed to parse data file id: {e:?}"))
-                    })?,
-                    table_id: Uuid::from_slice(&proto_data_file.table_id).map_err(|e| {
-                        DataFusionError::Internal(format!("Failed to parse table id: {e:?}"))
-                    })?,
-                    format: parse_data_file_format(proto_data_file.format)?,
-                    relative_path: proto_data_file.relative_path,
-                    size: proto_data_file.size,
-                    record_count: proto_data_file.record_count,
-                    valid_record_count: proto_data_file.valid_record_count,
-                    validity: RowValidity::from(
-                        proto_data_file.validity,
-                        proto_data_file.record_count as usize,
-                    ),
-                });
-            }
-            Ok(Some(Arc::new(records)))
-        }
-        None => Ok(None),
-    }
+fn parse_data_file_record(proto_data_file: &DataFile) -> Result<DataFileRecord, DataFusionError> {
+    Ok(DataFileRecord {
+        data_file_id: Uuid::from_slice(&proto_data_file.data_file_id).map_err(|e| {
+            DataFusionError::Internal(format!("Failed to parse data file id: {e:?}"))
+        })?,
+        table_id: Uuid::from_slice(&proto_data_file.table_id)
+            .map_err(|e| DataFusionError::Internal(format!("Failed to parse table id: {e:?}")))?,
+        format: parse_data_file_format(proto_data_file.format)?,
+        relative_path: proto_data_file.relative_path.clone(),
+        size: proto_data_file.size,
+        record_count: proto_data_file.record_count,
+        valid_record_count: proto_data_file.valid_record_count,
+        validity: RowValidity::from(
+            proto_data_file.validity.clone(),
+            proto_data_file.record_count as usize,
+        ),
+    })
 }
 
 fn serialize_data_file_format(format: DataFileFormat) -> i32 {

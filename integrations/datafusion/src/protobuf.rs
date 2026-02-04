@@ -26,8 +26,8 @@ pub struct IndexLakeScanExecNode {
     pub table_name: ::prost::alloc::string::String,
     #[prost(uint32, tag = "3")]
     pub partition_count: u32,
-    #[prost(message, optional, tag = "4")]
-    pub data_files: ::core::option::Option<DataFiles>,
+    #[prost(message, repeated, tag = "4")]
+    pub partitions: ::prost::alloc::vec::Vec<TableScanPartition>,
     #[prost(message, optional, tag = "5")]
     pub projection: ::core::option::Option<Projection>,
     #[prost(message, repeated, tag = "6")]
@@ -38,6 +38,35 @@ pub struct IndexLakeScanExecNode {
     pub limit: ::core::option::Option<u32>,
     #[prost(message, optional, tag = "9")]
     pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TableScanPartition {
+    #[prost(oneof = "table_scan_partition::PartitionType", tags = "1, 2")]
+    pub partition_type: ::core::option::Option<table_scan_partition::PartitionType>,
+}
+/// Nested message and enum types in `TableScanPartition`.
+pub mod table_scan_partition {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum PartitionType {
+        #[prost(message, tag = "1")]
+        Auto(super::TableScanPartitionAuto),
+        #[prost(message, tag = "2")]
+        Provided(super::TableScanPartitionProvided),
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TableScanPartitionAuto {
+    #[prost(uint32, tag = "1")]
+    pub partition_idx: u32,
+    #[prost(uint32, tag = "2")]
+    pub partition_count: u32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TableScanPartitionProvided {
+    #[prost(bool, tag = "1")]
+    pub contains_inline_rows: bool,
+    #[prost(message, repeated, tag = "2")]
+    pub data_file_records: ::prost::alloc::vec::Vec<DataFile>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IndexLakeInsertExecNode {
@@ -54,11 +83,6 @@ pub struct IndexLakeInsertExecNode {
 pub struct Projection {
     #[prost(uint32, repeated, tag = "1")]
     pub projection: ::prost::alloc::vec::Vec<u32>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DataFiles {
-    #[prost(message, repeated, tag = "1")]
-    pub files: ::prost::alloc::vec::Vec<DataFile>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DataFile {

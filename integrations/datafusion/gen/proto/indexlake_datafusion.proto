@@ -16,12 +16,29 @@ message IndexLakeScanExecNode {
   string namespace_name = 1;
   string table_name = 2;
   uint32 partition_count = 3;
-  DataFiles data_files = 4;
+  repeated TableScanPartition partitions = 4;
   Projection projection = 5;
   repeated datafusion.LogicalExprNode filters = 6;
   uint32 batch_size = 7;
   optional uint32 limit = 8;
   datafusion_common.Schema schema = 9;
+}
+
+message TableScanPartition {
+  oneof partition_type {
+    TableScanPartitionAuto auto = 1;
+    TableScanPartitionProvided provided = 2;
+  }
+}
+
+message TableScanPartitionAuto {
+  uint32 partition_idx = 1;
+  uint32 partition_count = 2;
+}
+
+message TableScanPartitionProvided {
+  bool contains_inline_rows = 1;
+  repeated DataFile data_file_records = 2;
 }
 
 message IndexLakeInsertExecNode {
@@ -33,10 +50,6 @@ message IndexLakeInsertExecNode {
 
 message Projection {
   repeated uint32 projection = 1;
-}
-
-message DataFiles {
-  repeated DataFile files = 1;
 }
 
 message DataFile {
