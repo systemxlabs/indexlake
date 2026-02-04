@@ -105,6 +105,24 @@ impl TableScanPartition {
         }
     }
 
+    pub fn data_file_offset_limit(
+        data_file_count: usize,
+        partition_count: usize,
+        partition_idx: usize,
+    ) -> (usize, usize) {
+        if data_file_count == 0 {
+            return (0, 0);
+        }
+        let partition_size = std::cmp::max(data_file_count / partition_count, 1);
+        let offset = std::cmp::min(partition_idx * partition_size, data_file_count);
+        let limit = if partition_idx == partition_count - 1 {
+            data_file_count - offset
+        } else {
+            partition_size
+        };
+        (offset, limit)
+    }
+
     pub fn validate(&self) -> ILResult<()> {
         match self {
             Self::Auto {
@@ -220,14 +238,14 @@ pub(crate) async fn get_partitioned_data_file_records(
             partition_count,
         } => {
             let data_file_count = catalog_helper.count_data_files(table_id).await? as usize;
-
-            let partition_size = std::cmp::max(data_file_count / partition_count, 1);
-            let offset = std::cmp::min(partition_idx * partition_size, data_file_count);
-            let limit = if partition_idx == partition_count - 1 {
-                data_file_count - offset
-            } else {
-                partition_size
-            };
+            let (offset, limit) = TableScanPartition::data_file_offset_limit(
+                data_file_count,
+                partition_count,
+                partition_idx,
+            );
+            if limit == 0 || offset >= data_file_count {
+                return Ok(Vec::new());
+            }
 
             // Scan data files
             let data_file_records = catalog_helper

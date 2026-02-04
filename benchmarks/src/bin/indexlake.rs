@@ -64,8 +64,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    let table_count = table.count(TableScanPartition::single_partition()).await?;
-    assert_eq!(table_count, total_rows);
+    let table_count = table
+        .count(&[TableScanPartition::single_partition()])
+        .await?;
+    assert_eq!(table_count[0], total_rows as usize);
 
     let start_time = Instant::now();
     let mut handles = Vec::new();

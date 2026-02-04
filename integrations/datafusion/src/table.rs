@@ -178,9 +178,11 @@ impl TableProvider for IndexLakeTable {
     fn statistics(&self) -> Option<Statistics> {
         let row_count_result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                self.table
-                    .count(TableScanPartition::single_partition())
-                    .await
+                let counts = self
+                    .table
+                    .count(&[TableScanPartition::single_partition()])
+                    .await?;
+                Ok::<_, indexlake::ILError>(counts[0])
             })
         });
         match row_count_result {
