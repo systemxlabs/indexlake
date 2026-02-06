@@ -7,7 +7,7 @@ use indexlake::{ILError, ILResult};
 use rstar::{AABB, RTree, RTreeObject};
 use uuid::Uuid;
 
-use crate::{RStarIndexParams, compute_aabb};
+use crate::{RStarIndexParams, compute_bounds};
 
 #[derive(Debug)]
 pub struct IndexTreeObject {
@@ -96,11 +96,10 @@ fn rtree_intersects(
             "Intersects function must have a literal binary as the second argument",
         ));
     };
-    let aabb = compute_aabb(wkb, params.wkb_dialect)?;
-    let aabb = AABB::from_corners(
-        [aabb.lower().x, aabb.lower().y],
-        [aabb.upper().x, aabb.upper().y],
-    );
+    let Some(aabb) = compute_bounds(wkb, params.wkb_dialect)? else {
+        return Ok(Vec::new());
+    };
+    let aabb = AABB::from_corners([aabb.min_x(), aabb.min_y()], [aabb.max_x(), aabb.max_y()]);
 
     let selection = rtree.locate_in_envelope_intersecting(&aabb);
     let row_ids = selection

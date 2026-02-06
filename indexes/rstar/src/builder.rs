@@ -1,10 +1,11 @@
 use std::sync::{Arc, LazyLock};
 
-use arrow::array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, Float64Array, RecordBatch};
+use arrow::array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, Float64Builder, RecordBatch};
 use arrow::datatypes::{DataType, Field, Float64Type, Schema, SchemaRef};
 use futures::StreamExt;
-use geo::BoundingRect;
-use geozero::wkb::FromWkb;
+use geozero::GeozeroGeometry;
+use geozero::bounds::{Bounds, BoundsProcessor};
+use geozero::wkb::{Ewkb, GpkgWkb, MySQLWkb, SpatiaLiteWkb, Wkb};
 use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
 use indexlake::storage::{InputFile, OutputFile};
 use indexlake::utils::extract_row_id_array_from_record_batch;
@@ -58,9 +59,8 @@ impl IndexBuilder for RStarIndexBuilder {
         let key_column_name = &self.index_def.key_columns[0];
         let key_column_index = batch.schema_ref().index_of(key_column_name)?;
         let key_column = batch.column(key_column_index);
-        let aabbs = compute_aabbs(key_column, params.wkb_dialect)?;
 
-        let index_batch = build_index_record_batch(row_id_array, aabbs)?;
+        let index_batch = build_index_record_batch(key_column, params.wkb_dialect, row_id_array)?;
 
         self.index_batches.push(index_batch);
 
@@ -119,6 +119,12 @@ impl IndexBuilder for RStarIndexBuilder {
     }
 
     fn build(&mut self) -> ILResult<Box<dyn Index>> {
+        Ok(Box::new(self.build_index()?))
+    }
+}
+
+impl RStarIndexBuilder {
+    pub fn build_index(&mut self) -> ILResult<RStarIndex> {
         let num_rows = self
             .index_batches
             .iter()
@@ -145,30 +151,61 @@ impl IndexBuilder for RStarIndexBuilder {
             }
         }
         let rtree = RTree::bulk_load(rtree_objects);
-        Ok(Box::new(RStarIndex {
+        Ok(RStarIndex {
             rtree,
             params: self.params.clone(),
-        }))
+        })
     }
 }
 
-fn compute_aabbs(
+pub(crate) fn compute_bounds(wkb: &[u8], wkb_dialect: WkbDialect) -> ILResult<Option<Bounds>> {
+    let mut processor = BoundsProcessor::new();
+    match wkb_dialect {
+        WkbDialect::Wkb => Wkb(wkb).process_geom(&mut processor),
+        WkbDialect::Ewkb => Ewkb(wkb).process_geom(&mut processor),
+        WkbDialect::Geopackage => GpkgWkb(wkb).process_geom(&mut processor),
+        WkbDialect::MySQL => MySQLWkb(wkb).process_geom(&mut processor),
+        WkbDialect::SpatiaLite => SpatiaLiteWkb(wkb).process_geom(&mut processor),
+    }
+    .map_err(|e| ILError::index(format!("Failed to compute bounds: {e:?}")))
+    .map(|_| processor.bounds())
+}
+
+fn build_index_record_batch(
     array: &ArrayRef,
     wkb_dialect: WkbDialect,
-) -> ILResult<Vec<Option<AABB<geo::Coord<f64>>>>> {
+    row_id_array: FixedSizeBinaryArray,
+) -> ILResult<RecordBatch> {
     let data_type = array.data_type();
-    let mut aabbs = Vec::new();
+    let len = array.len();
+    let mut xmin_builder = Float64Builder::with_capacity(len);
+    let mut ymin_builder = Float64Builder::with_capacity(len);
+    let mut xmax_builder = Float64Builder::with_capacity(len);
+    let mut ymax_builder = Float64Builder::with_capacity(len);
     match data_type {
         DataType::Binary => {
             let binary_array = array.as_binary::<i32>();
             for wkb_opt in binary_array.iter() {
                 match wkb_opt {
                     Some(wkb) => {
-                        let aabb = compute_aabb(wkb, wkb_dialect)?;
-                        aabbs.push(Some(aabb));
+                        let aabb = compute_bounds(wkb, wkb_dialect)?;
+                        if let Some(aabb) = aabb {
+                            xmin_builder.append_value(aabb.min_x());
+                            ymin_builder.append_value(aabb.min_y());
+                            xmax_builder.append_value(aabb.max_x());
+                            ymax_builder.append_value(aabb.max_y());
+                        } else {
+                            xmin_builder.append_null();
+                            ymin_builder.append_null();
+                            xmax_builder.append_null();
+                            ymax_builder.append_null();
+                        }
                     }
                     None => {
-                        aabbs.push(None);
+                        xmin_builder.append_null();
+                        ymin_builder.append_null();
+                        xmax_builder.append_null();
+                        ymax_builder.append_null();
                     }
                 }
             }
@@ -178,11 +215,24 @@ fn compute_aabbs(
             for wkb_opt in large_binary_array.iter() {
                 match wkb_opt {
                     Some(wkb) => {
-                        let aabb = compute_aabb(wkb, wkb_dialect)?;
-                        aabbs.push(Some(aabb));
+                        let aabb = compute_bounds(wkb, wkb_dialect)?;
+                        if let Some(aabb) = aabb {
+                            xmin_builder.append_value(aabb.min_x());
+                            ymin_builder.append_value(aabb.min_y());
+                            xmax_builder.append_value(aabb.max_x());
+                            ymax_builder.append_value(aabb.max_y());
+                        } else {
+                            xmin_builder.append_null();
+                            ymin_builder.append_null();
+                            xmax_builder.append_null();
+                            ymax_builder.append_null();
+                        }
                     }
                     None => {
-                        aabbs.push(None);
+                        xmin_builder.append_null();
+                        ymin_builder.append_null();
+                        xmax_builder.append_null();
+                        ymax_builder.append_null();
                     }
                 }
             }
@@ -192,11 +242,24 @@ fn compute_aabbs(
             for wkb_opt in binary_view_array.iter() {
                 match wkb_opt {
                     Some(wkb) => {
-                        let aabb = compute_aabb(wkb, wkb_dialect)?;
-                        aabbs.push(Some(aabb));
+                        let aabb = compute_bounds(wkb, wkb_dialect)?;
+                        if let Some(aabb) = aabb {
+                            xmin_builder.append_value(aabb.min_x());
+                            ymin_builder.append_value(aabb.min_y());
+                            xmax_builder.append_value(aabb.max_x());
+                            ymax_builder.append_value(aabb.max_y());
+                        } else {
+                            xmin_builder.append_null();
+                            ymin_builder.append_null();
+                            xmax_builder.append_null();
+                            ymax_builder.append_null();
+                        }
                     }
                     None => {
-                        aabbs.push(None);
+                        xmin_builder.append_null();
+                        ymin_builder.append_null();
+                        xmax_builder.append_null();
+                        ymax_builder.append_null();
                     }
                 }
             }
@@ -207,48 +270,11 @@ fn compute_aabbs(
             )));
         }
     }
-    Ok(aabbs)
-}
 
-pub(crate) fn compute_aabb(wkb: &[u8], wkb_dialect: WkbDialect) -> ILResult<AABB<geo::Coord<f64>>> {
-    let mut rdr = std::io::Cursor::new(wkb);
-    let geom = geo::Geometry::from_wkb(&mut rdr, wkb_dialect.to_geozero())
-        .map_err(|e| ILError::index(format!("Failed to parse ewkb: {e:?}")))?;
-    if let Some(rect) = geom.bounding_rect() {
-        Ok(AABB::from_corners(rect.min(), rect.max()))
-    } else {
-        Err(ILError::index("Failed to compute AABB of geometry"))
-    }
-}
-
-fn build_index_record_batch(
-    row_id_array: FixedSizeBinaryArray,
-    aabbs: Vec<Option<AABB<geo::Coord<f64>>>>,
-) -> ILResult<RecordBatch> {
-    let xmin_array = Float64Array::from(
-        aabbs
-            .iter()
-            .map(|aabb| aabb.map(|aabb| aabb.lower().x))
-            .collect::<Vec<_>>(),
-    );
-    let ymin_array = Float64Array::from(
-        aabbs
-            .iter()
-            .map(|aabb| aabb.map(|aabb| aabb.lower().y))
-            .collect::<Vec<_>>(),
-    );
-    let xmax_array = Float64Array::from(
-        aabbs
-            .iter()
-            .map(|aabb| aabb.map(|aabb| aabb.upper().x))
-            .collect::<Vec<_>>(),
-    );
-    let ymax_array = Float64Array::from(
-        aabbs
-            .iter()
-            .map(|aabb| aabb.map(|aabb| aabb.upper().y))
-            .collect::<Vec<_>>(),
-    );
+    let xmin_array = xmin_builder.finish();
+    let ymin_array = ymin_builder.finish();
+    let xmax_array = xmax_builder.finish();
+    let ymax_array = ymax_builder.finish();
     let arrays = vec![
         Arc::new(row_id_array) as ArrayRef,
         Arc::new(xmin_array) as ArrayRef,

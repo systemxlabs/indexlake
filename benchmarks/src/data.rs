@@ -1,7 +1,9 @@
+use std::f64::consts::PI;
 use std::sync::Arc;
 
 use arrow::array::*;
 use arrow::datatypes::*;
+use geozero::{CoordDimensions, ToWkb};
 
 pub fn arrow_table_schema() -> SchemaRef {
     let schema = Schema::new(vec![
@@ -140,4 +142,51 @@ pub fn new_btree_string_record_batch(num_rows: usize) -> RecordBatch {
     );
 
     RecordBatch::try_new(schema, vec![Arc::new(id_array), Arc::new(string_array)]).unwrap()
+}
+
+pub fn arrow_rstar_table_schema() -> SchemaRef {
+    let schema = Schema::new(vec![
+        Field::new("id", DataType::Int32, false),
+        Field::new("geom", DataType::BinaryView, false),
+    ]);
+    Arc::new(schema)
+}
+
+pub fn new_rstar_record_batch(num_rows: usize) -> RecordBatch {
+    let schema = arrow_rstar_table_schema();
+    let id_array = Int32Array::from_iter_values(0..num_rows as i32);
+    let geom_array = BinaryViewArray::from_iter_values((0..num_rows).map(|_| random_geom_wkb()));
+
+    RecordBatch::try_new(schema, vec![Arc::new(id_array), Arc::new(geom_array)]).unwrap()
+}
+
+fn random_geom_wkb() -> Vec<u8> {
+    let base_x = rand::random_range(-170.0f64..170.0);
+    let base_y = rand::random_range(-80.0f64..80.0);
+
+    let polygons: Vec<geo::Polygon<f64>> = (0..4)
+        .map(|_| {
+            let offset_x = rand::random_range(-5.0f64..5.0);
+            let offset_y = rand::random_range(-5.0f64..5.0);
+            let center_x = base_x + offset_x;
+            let center_y = base_y + offset_y;
+            let radius = rand::random_range(0.1f64..1.0);
+
+            let mut coords: Vec<geo::Coord<f64>> = (0..20)
+                .map(|i| {
+                    let angle = 2.0 * PI * (i as f64) / 20.0;
+                    let r = radius * (0.8 + rand::random_range(0.0..0.4));
+                    geo::Coord {
+                        x: center_x + r * angle.cos(),
+                        y: center_y + r * angle.sin(),
+                    }
+                })
+                .collect();
+            coords.push(coords[0]);
+            geo::Polygon::new(geo::LineString(coords), vec![])
+        })
+        .collect();
+
+    let geom = geo::Geometry::MultiPolygon(geo::MultiPolygon(polygons));
+    geom.to_wkb(CoordDimensions::xy()).unwrap()
 }
