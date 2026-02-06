@@ -13,10 +13,14 @@ indexlake = { workspace = true }
 indexlake-index-bm25 = { workspace = true }
 indexlake-index-btree = { workspace = true }
 indexlake-index-hnsw = { workspace = true }
+indexlake-index-rstar = { workspace = true }
 indexlake-integration-tests = { workspace = true }
 
 arrow = { workspace = true }
 futures = { workspace = true }
+geo = { workspace = true }
+geozero = { workspace = true }
 rand = { workspace = true }
+rstar = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4"] }
