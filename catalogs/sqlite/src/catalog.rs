@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
 use arrow::datatypes::Schema;
 use futures::StreamExt;
 use indexlake::catalog::{
@@ -8,7 +11,6 @@ use indexlake::expr::{BinaryExpr, Expr};
 use indexlake::{ILError, ILResult};
 use log::{error, trace};
 use rusqlite::OpenFlags;
-use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -70,6 +72,8 @@ impl Catalog for SqliteCatalog {
                 | OpenFlags::SQLITE_OPEN_URI,
         )
         .map_err(|e| ILError::catalog(format!("failed to open sqlite db: {e}")))?;
+        conn.busy_timeout(Duration::from_secs(30))
+            .map_err(|e| ILError::catalog(format!("failed to set sqlite busy timeout: {e}")))?;
         conn.execute_batch("BEGIN DEFERRED")
             .map_err(|e| ILError::catalog(format!("failed to begin sqlite txn: {e}")))?;
         Ok(Box::new(SqliteTransaction { conn, done: false }))
@@ -83,6 +87,8 @@ impl Catalog for SqliteCatalog {
                 | OpenFlags::SQLITE_OPEN_URI,
         )
         .map_err(|e| ILError::catalog(format!("failed to open sqlite db: {e}")))?;
+        conn.busy_timeout(Duration::from_secs(30))
+            .map_err(|e| ILError::catalog(format!("failed to set sqlite busy timeout: {e}")))?;
         conn.execute(
             &format!("DELETE FROM {}", self.sql_identifier(table_name)),
             [],
@@ -103,6 +109,8 @@ impl Catalog for SqliteCatalog {
                 | OpenFlags::SQLITE_OPEN_URI,
         )
         .map_err(|e| ILError::catalog(format!("failed to open sqlite db: {e}")))?;
+        conn.busy_timeout(Duration::from_secs(30))
+            .map_err(|e| ILError::catalog(format!("failed to set sqlite busy timeout: {e}")))?;
         let size: usize = conn
             .query_row(
                 &format!("SELECT SUM(pgsize) FROM dbstat WHERE name='{table_name}'"),
