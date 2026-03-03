@@ -67,9 +67,6 @@ jobs:
             core.setOutput('pr_number', String(prNumber));
             core.setOutput('head_sha', pr.data.head.sha);
             core.setOutput('head_ref', pr.data.head.ref);
-            core.setOutput('concurrency', String(concurrency));
-            core.setOutput('rows', String(rows));
-            core.setOutput('batch_size', String(batchSize));
 
       - uses: actions/checkout@v4
         with:
@@ -87,11 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo run -p indexlake-benchmarks --bin indexlake_ci_bench --release -- \
-            --concurrency "${{ steps.resolve.outputs.concurrency }}" \
-            --rows "${{ steps.resolve.outputs.rows }}" \
-            --batch-size "${{ steps.resolve.outputs.batch_size }}" \
-            2>&1 | tee bench_output.txt
+          cargo run -p indexlake-benchmarks --bin indexlake_btree --release -- --ci 2>&1 | tee bench_output.txt
           python - << 'PY'
           import json
           from pathlib import Path
