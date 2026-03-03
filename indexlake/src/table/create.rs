@@ -141,8 +141,7 @@ pub struct IndexCreation {
     pub key_columns: Vec<String>,
     pub params: Arc<dyn IndexParams>,
     /// Max concurrency for building per-data-file index files.
-    /// - `0`: auto (based on machine parallelism)
-    /// - `n >= 1`: use `n`
+    /// - Must be `>= 1`
     pub concurrency: usize,
     pub if_not_exists: bool,
 }
@@ -243,18 +242,17 @@ pub(crate) async fn process_create_index(
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
-    // Build per-data-file index files concurrently, capped by the machine's available parallelism.
-    let auto_concurrency = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .max(1);
-    let max_concurrency = (if creation.concurrency == 0 {
-        auto_concurrency
-    } else {
-        creation.concurrency
-    })
+    if creation.concurrency == 0 {
+        return Err(ILError::invalid_input(
+            "concurrency must be >= 1".to_string(),
+        ));
+    }
+
+    // Build per-data-file index files concurrently.
     // No benefit to exceeding the number of data files.
-    .min(data_file_records.len().max(1));
+    let max_concurrency = creation
+        .concurrency
+        .min(data_file_records.len().max(1));
 
     let storage = table.storage.clone();
     let table_schema = table.table_schema.clone();

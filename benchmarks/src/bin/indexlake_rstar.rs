@@ -92,7 +92,7 @@ async fn benchmark_rstar(
         params: Arc::new(RStarIndexParams {
             wkb_dialect: WkbDialect::Wkb,
         }),
-        concurrency: 0,
+        concurrency: 1,
         if_not_exists: false,
     };
     let table = client.load_table(&namespace_name, &table_name).await?;
