@@ -43,7 +43,7 @@ async fn create_hnsw_index(
         params: Arc::new(HnswIndexParams {
             ef_construction: 400,
         }),
-        concurrency: None,
+        concurrency: 0,
         if_not_exists: false,
     };
     table.create_index(index_creation.clone()).await?;

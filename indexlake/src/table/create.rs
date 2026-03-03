@@ -141,9 +141,9 @@ pub struct IndexCreation {
     pub key_columns: Vec<String>,
     pub params: Arc<dyn IndexParams>,
     /// Max concurrency for building per-data-file index files.
-    /// - `None`: auto (based on machine parallelism)
-    /// - `Some(n)`: use `n` (must be >= 1)
-    pub concurrency: Option<usize>,
+    /// - `0`: auto (based on machine parallelism)
+    /// - `n >= 1`: use `n`
+    pub concurrency: usize,
     pub if_not_exists: bool,
 }
 
@@ -248,15 +248,11 @@ pub(crate) async fn process_create_index(
         .map(|n| n.get())
         .unwrap_or(4)
         .max(1);
-    let max_concurrency = match creation.concurrency {
-        Some(0) => {
-            return Err(ILError::invalid_input(
-                "concurrency must be >= 1".to_string(),
-            ));
-        }
-        Some(n) => n,
-        None => auto_concurrency,
-    }
+    let max_concurrency = (if creation.concurrency == 0 {
+        auto_concurrency
+    } else {
+        creation.concurrency
+    })
     // No benefit to exceeding the number of data files.
     .min(data_file_records.len().max(1));
 

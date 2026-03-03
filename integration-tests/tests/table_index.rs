@@ -38,7 +38,7 @@ async fn duplicated_index_name(
         params: Arc::new(RStarIndexParams {
             wkb_dialect: WkbDialect::Wkb,
         }),
-        concurrency: None,
+        concurrency: 0,
         if_not_exists: false,
     };
 
@@ -81,7 +81,7 @@ async fn unsupported_index_kind(
         params: Arc::new(RStarIndexParams {
             wkb_dialect: WkbDialect::Wkb,
         }),
-        concurrency: None,
+        concurrency: 0,
         if_not_exists: false,
     };
 
@@ -120,7 +120,7 @@ async fn drop_index(
         params: Arc::new(RStarIndexParams {
             wkb_dialect: WkbDialect::Wkb,
         }),
-        concurrency: None,
+        concurrency: 0,
         if_not_exists: false,
     };
 
