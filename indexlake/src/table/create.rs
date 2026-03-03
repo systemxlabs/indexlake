@@ -140,6 +140,9 @@ pub struct IndexCreation {
     pub kind: String,
     pub key_columns: Vec<String>,
     pub params: Arc<dyn IndexParams>,
+    /// Max concurrency for building per-data-file index files.
+    /// - Must be `>= 1`
+    pub concurrency: usize,
     pub if_not_exists: bool,
 }
 
@@ -235,49 +238,69 @@ pub(crate) async fn process_create_index(
         projection.push(idx);
     }
     projection.sort();
+    projection.dedup();
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
-    let mut index_file_records = Vec::new();
-    for data_file_record in data_file_records {
-        let mut index_builder = index_kind.builder(&index_def)?;
-        let mut stream = read_data_file_by_record(
-            table.storage.as_ref(),
-            &table.table_schema,
-            &data_file_record,
-            Some(projection.clone()),
-            vec![],
-            1024,
-        )
-        .await?;
-        while let Some(batch) = stream.next().await {
-            let batch = batch?;
-            index_builder.append(&batch)?;
-        }
+    // Build per-data-file index files concurrently.
+    // No benefit to exceeding the number of data files.
+    let max_concurrency = creation.concurrency.min(data_file_records.len().max(1));
 
-        let index_file_id = Uuid::now_v7();
-        let relative_path = IndexFileRecord::build_relative_path(
-            &table.namespace_id,
-            &table.table_id,
-            &index_file_id,
-        );
-        let output_file = table.storage.create(&relative_path).await?;
-        index_builder.write_file(output_file).await?;
-        let size = table
-            .storage
-            .open(&relative_path)
-            .await?
-            .metadata()
-            .await?
-            .size;
-        index_file_records.push(IndexFileRecord {
-            index_file_id,
-            table_id: table.table_id,
-            index_id,
-            data_file_id: data_file_record.data_file_id,
-            relative_path,
-            size: size as i64,
-        });
+    let storage = table.storage.clone();
+    let table_schema = table.table_schema.clone();
+    let index_kind = index_kind.clone();
+    let index_def = index_def.clone();
+    let namespace_id = table.namespace_id;
+    let table_id = table.table_id;
+    let projection = projection.clone();
+
+    let results = futures::stream::iter(data_file_records)
+        .map(|data_file_record| {
+            let storage = storage.clone();
+            let table_schema = table_schema.clone();
+            let index_kind = index_kind.clone();
+            let index_def = index_def.clone();
+            let projection = projection.clone();
+            async move {
+                let mut index_builder = index_kind.builder(&index_def)?;
+                let mut stream = read_data_file_by_record(
+                    storage.as_ref(),
+                    &table_schema,
+                    &data_file_record,
+                    Some(projection),
+                    vec![],
+                    1024,
+                )
+                .await?;
+                while let Some(batch) = stream.next().await {
+                    let batch = batch?;
+                    index_builder.append(&batch)?;
+                }
+
+                let index_file_id = Uuid::now_v7();
+                let relative_path =
+                    IndexFileRecord::build_relative_path(&namespace_id, &table_id, &index_file_id);
+                let output_file = storage.create(&relative_path).await?;
+                index_builder.write_file(output_file).await?;
+                let size = storage.open(&relative_path).await?.metadata().await?.size;
+
+                Ok::<_, ILError>(IndexFileRecord {
+                    index_file_id,
+                    table_id,
+                    index_id,
+                    data_file_id: data_file_record.data_file_id,
+                    relative_path,
+                    size: size as i64,
+                })
+            }
+        })
+        .buffer_unordered(max_concurrency)
+        .collect::<Vec<_>>()
+        .await;
+
+    let mut index_file_records = Vec::with_capacity(results.len());
+    for r in results {
+        index_file_records.push(r?);
     }
 
     tx_helper.insert_index_files(&index_file_records).await?;

@@ -183,6 +183,7 @@ impl BenchmarkContext {
             kind: BTreeIndexKind.kind().to_string(),
             key_columns: vec![config.key_column().to_string()],
             params: Arc::new(BTreeIndexParams {}),
+            concurrency: 1,
             if_not_exists: false,
         };
         let table = self.client.load_table(&namespace_name, &table_name).await?;
