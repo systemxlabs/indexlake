@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         params: Arc::new(HnswIndexParams {
             ef_construction: 400,
         }),
+        concurrency: None,
         if_not_exists: false,
     };
     let table = client.load_table(namespace_name, &table_name).await?;

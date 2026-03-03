@@ -41,6 +41,7 @@ async fn create_btree_index_integer(
         kind: BTreeIndexKind.kind().to_string(),
         key_columns: vec!["integer".to_string()],
         params: Arc::new(BTreeIndexParams {}),
+        concurrency: None,
         if_not_exists: false,
     };
     table.create_index(index_creation.clone()).await?;
@@ -116,6 +117,7 @@ async fn create_btree_index_string(
         kind: BTreeIndexKind.kind().to_string(),
         key_columns: vec!["string".to_string()],
         params: Arc::new(BTreeIndexParams {}),
+        concurrency: None,
         if_not_exists: false,
     };
     table.create_index(index_creation.clone()).await?;
