@@ -1,0 +1,125 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to benchmark
+        required: true
+        type: number
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  bench:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.pull_request != null &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+        (
+          github.event.comment.body == '/bench' ||
+          github.event.comment.body == '/benchmark'
+        )
+      )
+    steps:
+      - name: Resolve PR ref and inputs
+        id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const isDispatch = context.eventName === 'workflow_dispatch';
+            const prNumber = isDispatch ? Number(core.getInput('pr_number')) : context.payload.issue.number;
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+
+            // Safety: do not run benchmarks for forks (would execute untrusted code).
+            const headRepo = pr.data.head.repo.full_name;
+            const thisRepo = `${owner}/${repo}`;
+            if (headRepo !== thisRepo) {
+              const msg = [
+                `Refusing to run benchmarks for forked PRs.`,
+                ``,
+                `- PR: #${prNumber}`,
+                `- head repo: ${headRepo}`,
+                `- expected: ${thisRepo}`,
+              ].join('\n');
+              await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: msg });
+              core.setFailed(msg);
+              return;
+            }
+
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('head_sha', pr.data.head.sha);
+            core.setOutput('head_ref', pr.data.head.ref);
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.head_sha }}
+          fetch-depth: 1
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Run benchmark (release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -p indexlake-benchmarks --bin indexlake_btree --release 2>&1 | tee bench_output.txt
+
+      - name: Upload benchmark output
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-output
+          path: bench_output.txt
+
+      - name: Comment results on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = Number('${{ steps.resolve.outputs.pr_number }}');
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const sha = '${{ steps.resolve.outputs.head_sha }}';
+
+            let output = fs.readFileSync('bench_output.txt', 'utf8');
+            // Avoid breaking markdown code fences if output ever contains them.
+            output = output.replaceAll('```', '``\\`');
+
+            // GitHub comment body limit is ~65536 chars; keep margin for headers.
+            const maxLen = 60000;
+            let truncated = false;
+            if (output.length > maxLen) {
+              output = output.slice(0, maxLen) + "\n\n...(truncated, see artifact `bench-output` for full output)\n";
+              truncated = true;
+            }
+
+            const body = [
+              "### Benchmarks",
+              "",
+              `- workflow run: ${runUrl}`,
+              `- ref: \`${sha}\``,
+              truncated ? "- note: output truncated due to comment size limits" : "",
+              "",
+              "```text",
+              output.trimEnd(),
+              "```",
+            ].filter(Boolean).join("\n");
+
+            await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
