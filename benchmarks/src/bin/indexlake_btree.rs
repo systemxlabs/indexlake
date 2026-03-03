@@ -16,19 +16,10 @@ use indexlake_benchmarks::data::{
     new_btree_integer_record_batch, new_btree_string_record_batch,
 };
 use indexlake_index_btree::{BTreeIndexKind, BTreeIndexParams};
-use indexlake_integration_tests::{
-    catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
-};
+use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
 fn has_flag(flag: &str) -> bool {
     std::env::args().any(|a| a == flag)
-}
-
-fn clean_fs_storage_dir_best_effort() {
-    // integration-tests::storage_fs() uses: integration-tests/tmp/fs_storage
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let dir = root.join("../integration-tests/tmp/fs_storage");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 async fn run_ci() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,10 +29,8 @@ async fn run_ci() -> Result<(), Box<dyn std::error::Error>> {
     let inline_row_count_limit: usize = 5_000;
     let concurrency: usize = 1;
 
-    clean_fs_storage_dir_best_effort();
-
-    let catalog = catalog_sqlite();
-    let storage = storage_fs();
+    let catalog = catalog_postgres().await;
+    let storage = storage_s3().await;
     let mut client = Client::new(catalog, storage);
     client.register_index_kind(Arc::new(BTreeIndexKind));
 
@@ -80,7 +69,7 @@ async fn run_ci() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for background dump task to finish so index build sees data files.
     let expected_files = rows / inline_row_count_limit;
-    let dump_deadline = Instant::now() + Duration::from_secs(60);
+    let dump_deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let inline_rows = table.inline_row_count().await?;
         let data_files = table.data_file_count().await?;
