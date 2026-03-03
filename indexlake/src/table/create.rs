@@ -242,12 +242,6 @@ pub(crate) async fn process_create_index(
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
-    if creation.concurrency == 0 {
-        return Err(ILError::invalid_input(
-            "concurrency must be >= 1".to_string(),
-        ));
-    }
-
     // Build per-data-file index files concurrently.
     // No benefit to exceeding the number of data files.
     let max_concurrency = creation

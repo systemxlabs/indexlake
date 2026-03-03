@@ -109,6 +109,11 @@ impl Table {
     }
 
     pub async fn create_index(self, index_creation: IndexCreation) -> ILResult<()> {
+        if index_creation.concurrency == 0 {
+            return Err(ILError::invalid_input(
+                "concurrency must be >= 1".to_string(),
+            ));
+        }
         let index_creation =
             index_creation.rewrite_columns(&self.table_schema.field_name_id_map)?;
         let mut tx_helper = self.transaction_helper().await?;
