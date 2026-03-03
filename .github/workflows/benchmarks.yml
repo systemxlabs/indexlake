@@ -41,11 +41,6 @@ jobs:
             const isDispatch = context.eventName === 'workflow_dispatch';
             const prNumber = isDispatch ? Number(core.getInput('pr_number')) : context.payload.issue.number;
 
-            // Keep benchmark parameters fixed for repeatability.
-            const concurrency = 1;
-            const rows = 50000;
-            const batchSize = 1000;
-
             const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
 
             // Safety: do not run benchmarks for forks (would execute untrusted code).
