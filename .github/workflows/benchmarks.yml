@@ -7,21 +7,6 @@ on:
         description: PR number to benchmark
         required: true
         type: number
-      concurrency:
-        description: create_index concurrency (>= 1)
-        required: false
-        default: "1"
-        type: string
-      rows:
-        description: number of rows to insert
-        required: false
-        default: "50000"
-        type: string
-      batch_size:
-        description: batch size for inserts
-        required: false
-        default: "1000"
-        type: string
   issue_comment:
     types: [created]
 
@@ -40,8 +25,8 @@ jobs:
         github.event.issue.pull_request != null &&
         contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
         (
-          startsWith(github.event.comment.body, '/bench') ||
-          startsWith(github.event.comment.body, '/benchmark')
+          github.event.comment.body == '/bench' ||
+          github.event.comment.body == '/benchmark'
         )
       )
     steps:
@@ -56,29 +41,10 @@ jobs:
             const isDispatch = context.eventName === 'workflow_dispatch';
             const prNumber = isDispatch ? Number(core.getInput('pr_number')) : context.payload.issue.number;
 
-            let concurrency = isDispatch ? Number(core.getInput('concurrency') || '1') : 1;
-            let rows = isDispatch ? Number(core.getInput('rows') || '50000') : 50000;
-            let batchSize = isDispatch ? Number(core.getInput('batch_size') || '1000') : 1000;
-
-            if (!isDispatch) {
-              const body = (context.payload.comment && context.payload.comment.body) ? context.payload.comment.body.trim() : '';
-              const m = body.match(/^\/bench(?:mark)?(?:\s+(\d+))?(?:\s+rows=(\d+))?(?:\s+batch=(\d+))?/i);
-              if (m) {
-                if (m[1]) concurrency = Number(m[1]);
-                if (m[2]) rows = Number(m[2]);
-                if (m[3]) batchSize = Number(m[3]);
-              }
-            }
-
-            if (!Number.isFinite(concurrency) || concurrency < 1) {
-              concurrency = 1;
-            }
-            if (!Number.isFinite(rows) || rows < 1) {
-              rows = 50000;
-            }
-            if (!Number.isFinite(batchSize) || batchSize < 1) {
-              batchSize = 1000;
-            }
+            // Keep benchmark parameters fixed for repeatability.
+            const concurrency = 1;
+            const rows = 50000;
+            const batchSize = 1000;
 
             const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
 
