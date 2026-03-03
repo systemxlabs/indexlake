@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
@@ -17,103 +17,6 @@ use indexlake_benchmarks::data::{
 };
 use indexlake_index_btree::{BTreeIndexKind, BTreeIndexParams};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
-
-fn has_flag(flag: &str) -> bool {
-    std::env::args().any(|a| a == flag)
-}
-
-async fn run_ci() -> Result<(), Box<dyn std::error::Error>> {
-    // Fixed parameters for CI repeatability.
-    let rows: usize = 50_000;
-    let batch_size: usize = 1_000;
-    let inline_row_count_limit: usize = 5_000;
-    let concurrency: usize = 1;
-
-    let catalog = catalog_postgres().await;
-    let storage = storage_s3().await;
-    let mut client = Client::new(catalog, storage);
-    client.register_index_kind(Arc::new(BTreeIndexKind));
-
-    let namespace_name = uuid::Uuid::new_v4().to_string();
-    client.create_namespace(&namespace_name, true).await?;
-
-    let table_name = uuid::Uuid::new_v4().to_string();
-    let table_config = TableConfig {
-        inline_row_count_limit,
-        parquet_row_group_size: 1024,
-        preferred_data_file_format: DataFileFormat::ParquetV2,
-    };
-    client
-        .create_table(TableCreation {
-            namespace_name: namespace_name.clone(),
-            table_name: table_name.clone(),
-            schema: arrow_btree_integer_table_schema(),
-            default_values: HashMap::new(),
-            config: table_config,
-            if_not_exists: false,
-        })
-        .await?;
-
-    let table = client.load_table(&namespace_name, &table_name).await?;
-
-    let insert_start = Instant::now();
-    let mut inserted = 0usize;
-    while inserted < rows {
-        let n = (rows - inserted).min(batch_size);
-        table
-            .insert(TableInsertion::new(vec![new_btree_integer_record_batch(n)]))
-            .await?;
-        inserted += n;
-    }
-    let insert_ms = insert_start.elapsed().as_millis();
-
-    // Wait for background dump task to finish so index build sees data files.
-    let expected_files = rows / inline_row_count_limit;
-    let dump_deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        let inline_rows = table.inline_row_count().await?;
-        let data_files = table.data_file_count().await?;
-        if inline_rows < inline_row_count_limit && data_files >= expected_files {
-            break;
-        }
-        if Instant::now() > dump_deadline {
-            return Err(format!(
-                "dump did not finish in time (inline_rows={inline_rows}, data_files={data_files}, expected_files={expected_files})"
-            )
-            .into());
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-
-    let data_file_count = table.data_file_count().await?;
-
-    let index_creation = IndexCreation {
-        name: "btree_ci_bench".to_string(),
-        kind: BTreeIndexKind.kind().to_string(),
-        key_columns: vec!["integer".to_string()],
-        params: Arc::new(BTreeIndexParams {}),
-        concurrency,
-        if_not_exists: false,
-    };
-
-    let index_start = Instant::now();
-    table.clone().create_index(index_creation).await?;
-    let index_build_ms = index_start.elapsed().as_millis();
-
-    // Print a single JSON line so CI can extract and comment it.
-    println!(
-        "{{\"rows\":{},\"batch_size\":{},\"inline_row_count_limit\":{},\"data_file_count\":{},\"concurrency\":{},\"insert_ms\":{},\"index_build_ms\":{}}}",
-        rows,
-        batch_size,
-        inline_row_count_limit,
-        data_file_count,
-        concurrency,
-        insert_ms,
-        index_build_ms
-    );
-
-    Ok(())
-}
 
 #[derive(Clone)]
 enum DataType {
@@ -440,10 +343,6 @@ fn print_data_type_comparison_summary(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if has_flag("--ci") {
-        return run_ci().await;
-    }
-
     init_env_logger();
 
     println!("=== IndexLake B-tree benchmark suite: data types ===");

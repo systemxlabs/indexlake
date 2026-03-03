@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo run -p indexlake-benchmarks --bin indexlake_btree --release -- --ci 2>&1 | tee bench_output.txt
+          cargo run -p indexlake-benchmarks --bin indexlake_btree --release 2>&1 | tee bench_output.txt
 
       - name: Upload benchmark output
         uses: actions/upload-artifact@v4
