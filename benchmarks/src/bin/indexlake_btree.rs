@@ -18,6 +18,13 @@ use indexlake_benchmarks::data::{
 use indexlake_index_btree::{BTreeIndexKind, BTreeIndexParams};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
+macro_rules! benchprintln {
+    ($($arg:tt)*) => {{
+        print!("benchmark: ");
+        println!($($arg)*);
+    }};
+}
+
 #[derive(Clone)]
 enum DataType {
     Integer,
@@ -125,12 +132,12 @@ struct BenchmarkResult {
 
 impl BenchmarkResult {
     fn print_summary(&self) {
-        println!(
+        benchprintln!(
             "=== B-tree index performance ({}) | rows: {:>6} ===",
             self.config.key_column(),
             self.config.total_rows,
         );
-        println!(
+        benchprintln!(
             "build: {:>6}ms | point: {:>4}ms ({:>3} results) | range: {:>4}ms ({:>4} results)",
             self.index_build_time_ms,
             self.point_query_time_ms,
@@ -302,15 +309,15 @@ impl BenchmarkContext {
 }
 
 async fn run_data_type_comparison() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== data type comparison benchmark ===");
+    benchprintln!("=== data type comparison benchmark ===");
 
     let context = BenchmarkContext::init().await?;
 
-    println!("running integer benchmark (100,000 rows)...");
+    benchprintln!("running integer benchmark (100,000 rows)...");
     let int_result = context.benchmark_btree_integer(100000).await?;
     int_result.print_summary();
 
-    println!("running string benchmark (100,000 rows)...");
+    benchprintln!("running string benchmark (100,000 rows)...");
     let string_result = context.benchmark_btree_string(100000).await?;
     string_result.print_summary();
 
@@ -322,15 +329,19 @@ fn print_data_type_comparison_summary(
     int_result: &BenchmarkResult,
     string_result: &BenchmarkResult,
 ) {
-    println!("=== performance comparison ===");
-    println!(
+    benchprintln!("=== performance comparison ===");
+    benchprintln!(
         "{:>8} | {:>7} | {:>9} | {:>9} | {:>9}",
-        "type", "rows", "build(ms)", "point(ms)", "range(ms)"
+        "type",
+        "rows",
+        "build(ms)",
+        "point(ms)",
+        "range(ms)"
     );
-    println!("{}", "-".repeat(54));
+    benchprintln!("{}", "-".repeat(54));
 
     for result in [int_result, string_result] {
-        println!(
+        benchprintln!(
             "{:>8} | {:>7} | {:>9} | {:>9} | {:>9}",
             result.config.key_column(),
             result.config.total_rows,
@@ -345,9 +356,9 @@ fn print_data_type_comparison_summary(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
 
-    println!("=== IndexLake B-tree benchmark suite: data types ===");
+    benchprintln!("=== IndexLake B-tree benchmark suite: data types ===");
     run_data_type_comparison().await?;
-    println!("=== benchmark complete ===");
+    benchprintln!("=== benchmark complete ===");
 
     Ok(())
 }
