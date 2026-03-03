@@ -244,9 +244,7 @@ pub(crate) async fn process_create_index(
 
     // Build per-data-file index files concurrently.
     // No benefit to exceeding the number of data files.
-    let max_concurrency = creation
-        .concurrency
-        .min(data_file_records.len().max(1));
+    let max_concurrency = creation.concurrency.min(data_file_records.len().max(1));
 
     let storage = table.storage.clone();
     let table_schema = table.table_schema.clone();
