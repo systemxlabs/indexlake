@@ -80,53 +80,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo run -p indexlake-benchmarks --bin indexlake_btree --release -- --ci 2>&1 | tee bench_output.txt
-          python - << 'PY'
-          import json
-          from pathlib import Path
 
-          lines = Path("bench_output.txt").read_text(encoding="utf-8", errors="replace").splitlines()
-          for line in reversed(lines):
-              line = line.strip()
-              if not line:
-                  continue
-              if not (line.startswith("{") and line.endswith("}")):
-                  continue
-              try:
-                  json.loads(line)
-              except Exception:
-                  continue
-              Path("bench_result.json").write_text(line + "\n", encoding="utf-8")
-              break
-          else:
-              raise SystemExit("Failed to find JSON result line in bench_output.txt")
-          PY
-
-      - name: Create comment body
-        shell: bash
-        env:
-          BENCH_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-          python - << 'PY'
-          import json, os
-          from pathlib import Path
-          d = json.loads(Path("bench_result.json").read_text(encoding="utf-8").strip())
-
-          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          sha = os.environ.get("BENCH_HEAD_SHA", "")
-
-          lines = []
-          lines.append("### Benchmarks")
-          lines.append("")
-          lines.append(f"- workflow run: {run_url}")
-          lines.append(f"- ref: `{sha}`")
-          lines.append("")
-          lines.append("| metric | value |")
-          lines.append("|---|---:|")
-          for k in ["rows","batch_size","inline_row_count_limit","data_file_count","concurrency","insert_ms","index_build_ms"]:
-              lines.append(f"| {k} | {d.get(k)} |")
-          Path("bench_comment.md").write_text("\\n".join(lines) + "\\n", encoding="utf-8")
-          PY
+      - name: Upload benchmark output
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-output
+          path: bench_output.txt
 
       - name: Comment results on PR
         uses: actions/github-script@v7
@@ -136,5 +95,31 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const prNumber = Number('${{ steps.resolve.outputs.pr_number }}');
-            const body = fs.readFileSync('bench_comment.md', 'utf8');
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const sha = '${{ steps.resolve.outputs.head_sha }}';
+
+            let output = fs.readFileSync('bench_output.txt', 'utf8');
+            // Avoid breaking markdown code fences if output ever contains them.
+            output = output.replaceAll('```', '``\\`');
+
+            // GitHub comment body limit is ~65536 chars; keep margin for headers.
+            const maxLen = 60000;
+            let truncated = false;
+            if (output.length > maxLen) {
+              output = output.slice(0, maxLen) + "\n\n...(truncated, see artifact `bench-output` for full output)\n";
+              truncated = true;
+            }
+
+            const body = [
+              "### Benchmarks",
+              "",
+              `- workflow run: ${runUrl}`,
+              `- ref: \`${sha}\``,
+              truncated ? "- note: output truncated due to comment size limits" : "",
+              "",
+              "```text",
+              output.trimEnd(),
+              "```",
+            ].filter(Boolean).join("\n");
+
             await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
