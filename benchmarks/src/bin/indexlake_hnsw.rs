@@ -12,10 +12,6 @@ use indexlake_benchmarks::data::{arrow_hnsw_table_schema, new_hnsw_record_batch}
 use indexlake_index_hnsw::{HnswIndexKind, HnswIndexParams, HnswSearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
-fn has_flag(flag: &str) -> bool {
-    std::env::args().any(|a| a == flag)
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -28,13 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = "test_namespace";
     client.create_namespace(namespace_name, true).await?;
 
-    let is_ci = has_flag("--ci");
-    let (total_rows, num_tasks, insert_batch_size) = if is_ci {
-        (20_000, 4, 500)
-    } else {
-        (100_000, 10, 1_000)
-    };
+    let total_rows = 100000;
+    let num_tasks = 10;
     let task_rows = total_rows / num_tasks;
+    let insert_batch_size = 1000;
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
@@ -98,11 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    if is_ci {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    } else {
-        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
-    }
+    tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
 
     let start_time = Instant::now();
     let limit = 10;

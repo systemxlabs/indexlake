@@ -16,10 +16,6 @@ use indexlake_benchmarks::data::{arrow_rstar_table_schema, new_rstar_record_batc
 use indexlake_index_rstar::{RStarIndexKind, RStarIndexParams, WkbDialect};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
-fn has_flag(flag: &str) -> bool {
-    std::env::args().any(|a| a == flag)
-}
-
 const QUERY_COUNT: usize = 10;
 const BATCH_SIZE: usize = 1000;
 const NUM_TASKS: usize = 4;
@@ -154,13 +150,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     benchprintln!("=== IndexLake R*-tree benchmark suite ===");
 
-    let is_ci = has_flag("--ci");
-    if is_ci {
-        benchmark_rstar(&client, 20_000).await?;
-    } else {
-        for total_rows in [100_000, 1_000_000] {
-            benchmark_rstar(&client, total_rows).await?;
-        }
+    for total_rows in [100_000, 1_000_000] {
+        benchmark_rstar(&client, total_rows).await?;
     }
 
     benchprintln!("=== benchmark complete ===");

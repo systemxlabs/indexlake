@@ -147,10 +147,6 @@ struct BenchmarkContext {
 }
 
 impl BenchmarkContext {
-    fn is_ci() -> bool {
-        std::env::args().any(|a| a == "--ci")
-    }
-
     async fn init() -> Result<Self, Box<dyn std::error::Error>> {
         let catalog = catalog_postgres().await;
         let storage = storage_s3().await;
@@ -265,11 +261,7 @@ impl BenchmarkContext {
 
         let insert_time = self.insert_data_concurrent(&config, &table_name).await?;
 
-        if Self::is_ci() {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        } else {
-            tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
-        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
 
         let point_query = config.point_query();
 
@@ -315,18 +307,12 @@ async fn run_data_type_comparison() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = BenchmarkContext::init().await?;
 
-    let rows = if BenchmarkContext::is_ci() {
-        20_000
-    } else {
-        100_000
-    };
-
-    benchprintln!("running integer benchmark ({rows} rows)...");
-    let int_result = context.benchmark_btree_integer(rows).await?;
+    benchprintln!("running integer benchmark (100,000 rows)...");
+    let int_result = context.benchmark_btree_integer(100000).await?;
     int_result.print_summary();
 
-    benchprintln!("running string benchmark ({rows} rows)...");
-    let string_result = context.benchmark_btree_string(rows).await?;
+    benchprintln!("running string benchmark (100,000 rows)...");
+    let string_result = context.benchmark_btree_string(100000).await?;
     string_result.print_summary();
 
     print_data_type_comparison_summary(&int_result, &string_result);

@@ -13,10 +13,6 @@ use indexlake_benchmarks::data::{arrow_bm25_table_schema, new_bm25_record_batch}
 use indexlake_index_bm25::{BM25IndexKind, BM25IndexParams, BM25SearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
-fn has_flag(flag: &str) -> bool {
-    std::env::args().any(|a| a == flag)
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -29,13 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = "test_namespace";
     client.create_namespace(namespace_name, true).await?;
 
-    let is_ci = has_flag("--ci");
-    let (total_rows, num_tasks, insert_batch_size) = if is_ci {
-        (50_000, 4, 1_000)
-    } else {
-        (1_000_000, 10, 10_000)
-    };
+    let total_rows = 1000000;
+    let num_tasks = 10;
     let task_rows = total_rows / num_tasks;
+    let insert_batch_size = 10000;
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
@@ -97,11 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    if is_ci {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    } else {
-        std::thread::sleep(std::time::Duration::from_secs(10));
-    }
+    std::thread::sleep(std::time::Duration::from_secs(10));
 
     let start_time = Instant::now();
     let limit = 10;

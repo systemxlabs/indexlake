@@ -9,10 +9,6 @@ use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
-fn has_flag(flag: &str) -> bool {
-    std::env::args().any(|a| a == flag)
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
@@ -35,13 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let is_ci = has_flag("--ci");
-    let (total_rows, num_tasks, insert_batch_size) = if is_ci {
-        (50_000usize, 4usize, 5_000usize)
-    } else {
-        (1_000_000usize, 10usize, 100_000usize)
-    };
+    let total_rows = 1_000_000usize;
+    let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
+    let insert_batch_size = 100_000usize;
 
     let start_time = Instant::now();
     let mut handles = Vec::new();
