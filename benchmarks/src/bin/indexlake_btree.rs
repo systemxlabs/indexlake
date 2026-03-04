@@ -11,7 +11,6 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableScan};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::bench_fast_mode_enabled;
 use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{
     arrow_btree_integer_table_schema, arrow_btree_string_table_schema,
@@ -148,6 +147,10 @@ struct BenchmarkContext {
 }
 
 impl BenchmarkContext {
+    fn is_ci() -> bool {
+        std::env::args().any(|a| a == "--ci")
+    }
+
     async fn init() -> Result<Self, Box<dyn std::error::Error>> {
         let catalog = catalog_postgres().await;
         let storage = storage_s3().await;
@@ -262,7 +265,7 @@ impl BenchmarkContext {
 
         let insert_time = self.insert_data_concurrent(&config, &table_name).await?;
 
-        if bench_fast_mode_enabled() {
+        if Self::is_ci() {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         } else {
             tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
@@ -312,7 +315,7 @@ async fn run_data_type_comparison() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = BenchmarkContext::init().await?;
 
-    let rows = if bench_fast_mode_enabled() {
+    let rows = if BenchmarkContext::is_ci() {
         20_000
     } else {
         100_000

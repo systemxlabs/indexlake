@@ -8,10 +8,14 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
+use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_bm25_table_schema, new_bm25_record_batch};
-use indexlake_benchmarks::{bench_fast_mode_enabled, benchprintln};
 use indexlake_index_bm25::{BM25IndexKind, BM25IndexParams, BM25SearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
+
+fn has_flag(flag: &str) -> bool {
+    std::env::args().any(|a| a == flag)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = "test_namespace";
     client.create_namespace(namespace_name, true).await?;
 
-    let (total_rows, num_tasks, insert_batch_size) = if bench_fast_mode_enabled() {
+    let is_ci = has_flag("--ci");
+    let (total_rows, num_tasks, insert_batch_size) = if is_ci {
         (50_000, 4, 1_000)
     } else {
         (1_000_000, 10, 10_000)
@@ -92,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    if bench_fast_mode_enabled() {
+    if is_ci {
         std::thread::sleep(std::time::Duration::from_secs(1));
     } else {
         std::thread::sleep(std::time::Duration::from_secs(10));

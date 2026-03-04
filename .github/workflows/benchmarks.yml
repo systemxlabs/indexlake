@@ -119,7 +119,6 @@ jobs:
         shell: bash
         env:
           BENCH_BINS: ${{ steps.resolve.outputs.bench_bins }}
-          INDEXLAKE_BENCH_FAST: "1"
         run: |
           set -euo pipefail
           mapfile -t BINS < <(python - << 'PY'
@@ -135,7 +134,7 @@ jobs:
           for b in "${BINS[@]}"; do
             echo "running ${b} ..."
             set +e
-            cargo run -p indexlake-benchmarks --bin "${b}" --release 2>&1 | tee "bench_output_${b}.txt"
+            cargo run -p indexlake-benchmarks --bin "${b}" --release -- --ci 2>&1 | tee "bench_output_${b}.txt"
             rc=${PIPESTATUS[0]}
             set -e
             if [ "${rc}" -ne 0 ]; then
