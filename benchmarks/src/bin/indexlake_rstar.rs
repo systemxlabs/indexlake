@@ -11,6 +11,7 @@ use indexlake::expr::{col, func, lit};
 use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableScan};
+use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_rstar_table_schema, new_rstar_record_batch};
 use indexlake_index_rstar::{RStarIndexKind, RStarIndexParams, WkbDialect};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
@@ -23,7 +24,7 @@ async fn benchmark_rstar(
     client: &Client,
     total_rows: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("--- R*-tree benchmark: {} rows ---", total_rows);
+    benchprintln!("--- R*-tree benchmark: {} rows ---", total_rows);
 
     let namespace_name = format!("rstar_benchmark_{}", uuid::Uuid::new_v4());
     client.create_namespace(&namespace_name, true).await?;
@@ -77,7 +78,7 @@ async fn benchmark_rstar(
     }
 
     let insert_time = start_time.elapsed();
-    println!(
+    benchprintln!(
         "insert: {} rows, {} tasks, batch size: {}, in {}ms",
         total_inserted,
         NUM_TASKS,
@@ -99,7 +100,7 @@ async fn benchmark_rstar(
     let index_start = Instant::now();
     table.create_index(index_creation).await?;
     let index_time = index_start.elapsed();
-    println!("index build: {}ms", index_time.as_millis());
+    benchprintln!("index build: {}ms", index_time.as_millis());
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
@@ -127,9 +128,11 @@ async fn benchmark_rstar(
     }
 
     let avg_query_ms = total_query_time.as_millis() / QUERY_COUNT as u128;
-    println!(
-        "query: {} queries, avg {}ms, total {} results\n",
-        QUERY_COUNT, avg_query_ms, total_results,
+    benchprintln!(
+        "query: {} queries, avg {}ms, total {} results",
+        QUERY_COUNT,
+        avg_query_ms,
+        total_results,
     );
 
     Ok(())
@@ -145,13 +148,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = Client::new(catalog, storage);
     client.register_index_kind(Arc::new(RStarIndexKind));
 
-    println!("=== IndexLake R*-tree benchmark suite ===\n");
+    benchprintln!("=== IndexLake R*-tree benchmark suite ===");
 
     for total_rows in [100_000, 1_000_000] {
         benchmark_rstar(&client, total_rows).await?;
     }
 
-    println!("=== benchmark complete ===");
+    benchprintln!("=== benchmark complete ===");
 
     Ok(())
 }
