@@ -5,6 +5,7 @@ use futures::StreamExt;
 use indexlake::expr::{col, lit};
 use indexlake::table::{TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate};
 use indexlake::{Client, ILError};
+use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
@@ -56,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let insert_cost_time = start_time.elapsed();
-    println!(
+    benchprintln!(
         "IndexLake: inserted {} rows, {} tasks, batch size: {}, in {}ms",
         total_rows,
         num_tasks,
@@ -96,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(count, total_rows);
 
     let scan_cost_time = start_time.elapsed();
-    println!(
+    benchprintln!(
         "IndexLake: scanned {} rows by {} tasks in {}ms",
         count,
         num_tasks,
@@ -110,13 +111,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let update_count = table.update(update).await?;
     let update_cost_time = start_time.elapsed().as_millis();
-    println!("IndexLake: updated {update_count} rows in {update_cost_time}ms",);
+    benchprintln!("IndexLake: updated {update_count} rows in {update_cost_time}ms");
 
     let start_time = Instant::now();
     let condition = col("id").eq(lit(100i32));
     let delete_count = table.delete(condition).await?;
     let delete_cost_time = start_time.elapsed().as_millis();
-    println!("IndexLake: deleted {delete_count} rows in {delete_cost_time}ms",);
+    benchprintln!("IndexLake: deleted {delete_count} rows in {delete_cost_time}ms");
 
     Ok(())
 }

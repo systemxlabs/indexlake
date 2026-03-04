@@ -8,6 +8,7 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
+use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_bm25_table_schema, new_bm25_record_batch};
 use indexlake_index_bm25::{BM25IndexKind, BM25IndexParams, BM25SearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
@@ -80,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let insert_cost_time = start_time.elapsed();
-    println!(
+    benchprintln!(
         "IndexLake BM25: inserted {} rows, {} tasks, batch size: {}, format: {}, in {}ms",
         total_rows,
         num_tasks,
@@ -108,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let search_cost_time = start_time.elapsed();
-    println!(
+    benchprintln!(
         "IndexLake BM25: searched {} rows in {}ms",
         limit,
         search_cost_time.as_millis()

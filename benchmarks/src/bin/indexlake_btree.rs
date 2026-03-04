@@ -11,19 +11,13 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableScan};
 use indexlake::{Client, ILError};
+use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{
     arrow_btree_integer_table_schema, arrow_btree_string_table_schema,
     new_btree_integer_record_batch, new_btree_string_record_batch,
 };
 use indexlake_index_btree::{BTreeIndexKind, BTreeIndexParams};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
-
-macro_rules! benchprintln {
-    ($($arg:tt)*) => {{
-        print!("benchmark: ");
-        println!($($arg)*);
-    }};
-}
 
 #[derive(Clone)]
 enum DataType {

@@ -7,6 +7,7 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
+use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_hnsw_table_schema, new_hnsw_record_batch};
 use indexlake_index_hnsw::{HnswIndexKind, HnswIndexParams, HnswSearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
@@ -81,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let insert_cost_time = start_time.elapsed();
-    println!(
+    benchprintln!(
         "IndexLake Hnsw: inserted {} rows, {} tasks, batch size: {}, format: {}, in {}ms",
         total_rows,
         num_tasks,
@@ -110,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(search_count, limit);
 
     let search_cost_time = start_time.elapsed();
-    println!(
+    benchprintln!(
         "IndexLake Hnsw: searched {} rows in {}ms",
         search_count,
         search_cost_time.as_millis()
