@@ -11,6 +11,7 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableScan};
 use indexlake::{Client, ILError};
+use indexlake_benchmarks::bench_fast_mode_enabled;
 use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{
     arrow_btree_integer_table_schema, arrow_btree_string_table_schema,
@@ -261,7 +262,11 @@ impl BenchmarkContext {
 
         let insert_time = self.insert_data_concurrent(&config, &table_name).await?;
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+        if bench_fast_mode_enabled() {
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        } else {
+            tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+        }
 
         let point_query = config.point_query();
 
@@ -307,12 +312,18 @@ async fn run_data_type_comparison() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = BenchmarkContext::init().await?;
 
-    benchprintln!("running integer benchmark (100,000 rows)...");
-    let int_result = context.benchmark_btree_integer(100000).await?;
+    let rows = if bench_fast_mode_enabled() {
+        20_000
+    } else {
+        100_000
+    };
+
+    benchprintln!("running integer benchmark ({rows} rows)...");
+    let int_result = context.benchmark_btree_integer(rows).await?;
     int_result.print_summary();
 
-    benchprintln!("running string benchmark (100,000 rows)...");
-    let string_result = context.benchmark_btree_string(100000).await?;
+    benchprintln!("running string benchmark ({rows} rows)...");
+    let string_result = context.benchmark_btree_string(rows).await?;
     string_result.print_summary();
 
     print_data_type_comparison_summary(&int_result, &string_result);

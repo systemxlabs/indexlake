@@ -5,8 +5,8 @@ use futures::StreamExt;
 use indexlake::expr::{col, lit};
 use indexlake::table::{TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
+use indexlake_benchmarks::{bench_fast_mode_enabled, benchprintln};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
 #[tokio::main]
@@ -31,10 +31,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let total_rows = 1_000_000usize;
-    let num_tasks = 10usize;
+    let (total_rows, num_tasks, insert_batch_size) = if bench_fast_mode_enabled() {
+        (50_000usize, 4usize, 5_000usize)
+    } else {
+        (1_000_000usize, 10usize, 100_000usize)
+    };
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 100_000usize;
 
     let start_time = Instant::now();
     let mut handles = Vec::new();

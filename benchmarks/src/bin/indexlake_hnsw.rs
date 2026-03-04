@@ -7,8 +7,8 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_hnsw_table_schema, new_hnsw_record_batch};
+use indexlake_benchmarks::{bench_fast_mode_enabled, benchprintln};
 use indexlake_index_hnsw::{HnswIndexKind, HnswIndexParams, HnswSearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
@@ -24,10 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = "test_namespace";
     client.create_namespace(namespace_name, true).await?;
 
-    let total_rows = 100000;
-    let num_tasks = 10;
+    let (total_rows, num_tasks, insert_batch_size) = if bench_fast_mode_enabled() {
+        (20_000, 4, 500)
+    } else {
+        (100_000, 10, 1_000)
+    };
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 1000;
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
@@ -91,7 +93,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
+    if bench_fast_mode_enabled() {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    } else {
+        tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
+    }
 
     let start_time = Instant::now();
     let limit = 10;

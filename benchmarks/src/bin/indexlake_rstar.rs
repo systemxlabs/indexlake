@@ -11,8 +11,8 @@ use indexlake::expr::{col, func, lit};
 use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableScan};
-use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_rstar_table_schema, new_rstar_record_batch};
+use indexlake_benchmarks::{bench_fast_mode_enabled, benchprintln};
 use indexlake_index_rstar::{RStarIndexKind, RStarIndexParams, WkbDialect};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
@@ -150,8 +150,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     benchprintln!("=== IndexLake R*-tree benchmark suite ===");
 
-    for total_rows in [100_000, 1_000_000] {
-        benchmark_rstar(&client, total_rows).await?;
+    if bench_fast_mode_enabled() {
+        benchmark_rstar(&client, 20_000).await?;
+    } else {
+        for total_rows in [100_000, 1_000_000] {
+            benchmark_rstar(&client, total_rows).await?;
+        }
     }
 
     benchprintln!("=== benchmark complete ===");

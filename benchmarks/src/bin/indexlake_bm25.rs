@@ -8,8 +8,8 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_bm25_table_schema, new_bm25_record_batch};
+use indexlake_benchmarks::{bench_fast_mode_enabled, benchprintln};
 use indexlake_index_bm25::{BM25IndexKind, BM25IndexParams, BM25SearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
@@ -25,10 +25,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = "test_namespace";
     client.create_namespace(namespace_name, true).await?;
 
-    let total_rows = 1000000;
-    let num_tasks = 10;
+    let (total_rows, num_tasks, insert_batch_size) = if bench_fast_mode_enabled() {
+        (50_000, 4, 1_000)
+    } else {
+        (1_000_000, 10, 10_000)
+    };
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 10000;
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
@@ -90,7 +92,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    std::thread::sleep(std::time::Duration::from_secs(10));
+    if bench_fast_mode_enabled() {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    } else {
+        std::thread::sleep(std::time::Duration::from_secs(10));
+    }
 
     let start_time = Instant::now();
     let limit = 10;
