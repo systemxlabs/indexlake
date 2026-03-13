@@ -2,10 +2,16 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::sync::Arc;
 
+use arrow::array::{ArrayRef, new_null_array};
+use arrow::datatypes::FieldRef;
 use indexlake::catalog::Scalar;
 use indexlake::expr::{BinaryOp, Expr};
-use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{
+    FilterIndexEntries, Index, IndexResultColumn, IndexResultOptions, SearchIndexEntries,
+    SearchQuery,
+};
 use indexlake::{ILError, ILResult};
 use uuid::Uuid;
 
@@ -40,18 +46,14 @@ impl PartialOrd for OrderedScalar {
 #[derive(Debug)]
 pub struct BTreeIndex {
     btree: BTreeMap<OrderedScalar, Vec<Uuid>>,
-}
-
-impl Default for BTreeIndex {
-    fn default() -> Self {
-        Self::new()
-    }
+    key_field: FieldRef,
 }
 
 impl BTreeIndex {
-    pub fn new() -> Self {
+    pub fn new(key_field: FieldRef) -> Self {
         Self {
             btree: BTreeMap::new(),
+            key_field,
         }
     }
 
@@ -60,21 +62,35 @@ impl BTreeIndex {
         Ok(())
     }
 
-    fn point_query(&self, point: &OrderedScalar) -> Vec<Uuid> {
-        self.btree.get(point).cloned().unwrap_or_default()
+    fn point_query(&self, point: &OrderedScalar) -> Vec<(Uuid, Scalar)> {
+        self.btree
+            .get(point)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row_id| (row_id, point.0.clone()))
+            .collect()
     }
 
-    fn range_query(&self, range: (Bound<&OrderedScalar>, Bound<&OrderedScalar>)) -> Vec<Uuid> {
+    fn range_query(
+        &self,
+        range: (Bound<&OrderedScalar>, Bound<&OrderedScalar>),
+    ) -> Vec<(Uuid, Scalar)> {
         let mut results = Vec::new();
 
-        for (_, row_ids) in self.btree.range(range) {
-            results.extend_from_slice(row_ids);
+        for (key, row_ids) in self.btree.range(range) {
+            results.extend(
+                row_ids
+                    .iter()
+                    .copied()
+                    .map(|row_id| (row_id, key.0.clone())),
+            );
         }
 
         results
     }
 
-    fn evaluate_filter(&self, filter: &Expr) -> ILResult<Vec<Uuid>> {
+    fn evaluate_filter(&self, filter: &Expr) -> ILResult<Vec<(Uuid, Scalar)>> {
         match filter {
             // TODO: add between expr && combine expr && is null expr / is not null expr?
             Expr::BinaryExpr(binary_expr) => {
@@ -110,28 +126,96 @@ impl BTreeIndex {
 
 #[async_trait::async_trait]
 impl Index for BTreeIndex {
-    async fn search(&self, _query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
+    async fn search(
+        &self,
+        _query: &dyn SearchQuery,
+        _options: &IndexResultOptions,
+    ) -> ILResult<SearchIndexEntries> {
         Err(ILError::not_supported(
             "B-tree index does not support search",
         ))
     }
 
-    async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        filters: &[Expr],
+        options: &IndexResultOptions,
+    ) -> ILResult<FilterIndexEntries> {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
                 row_ids: Vec::new(),
+                dynamic_columns: Vec::new(),
             });
         }
 
-        let mut result_row_ids = self.evaluate_filter(&filters[0])?;
+        let mut result_entries = self.evaluate_filter(&filters[0])?;
         for filter in &filters[1..] {
-            let filter_row_ids = self.evaluate_filter(filter)?;
+            let filter_row_ids = self
+                .evaluate_filter(filter)?
+                .into_iter()
+                .map(|(row_id, _)| row_id)
+                .collect::<Vec<_>>();
             // TODO: optimize this by using a set
-            result_row_ids.retain(|id| filter_row_ids.contains(id));
+            result_entries.retain(|(row_id, _)| filter_row_ids.contains(row_id));
+        }
+
+        let row_ids = result_entries
+            .iter()
+            .map(|(row_id, _)| *row_id)
+            .collect::<Vec<_>>();
+
+        let mut dynamic_columns = Vec::new();
+        for column in &options.columns {
+            match column.name.as_str() {
+                "index_key" => {
+                    let values = scalars_to_array(
+                        self.key_field.data_type(),
+                        result_entries
+                            .iter()
+                            .map(|(_, value)| value)
+                            .collect::<Vec<_>>()
+                            .as_slice(),
+                    )?;
+                    dynamic_columns.push(IndexResultColumn {
+                        field: Arc::new(
+                            self.key_field
+                                .as_ref()
+                                .clone()
+                                .with_name(&column.output_name),
+                        ),
+                        values,
+                    });
+                }
+                _ => {
+                    return Err(ILError::invalid_input(format!(
+                        "Unsupported result column `{}` for index kind `btree`",
+                        column.name
+                    )));
+                }
+            }
         }
 
         Ok(FilterIndexEntries {
-            row_ids: result_row_ids,
+            row_ids,
+            dynamic_columns,
         })
     }
+}
+
+fn scalars_to_array(
+    data_type: &arrow::datatypes::DataType,
+    values: &[&Scalar],
+) -> ILResult<ArrayRef> {
+    if values.is_empty() {
+        return Ok(new_null_array(data_type, 0));
+    }
+    let arrays = values
+        .iter()
+        .map(|value| value.to_array_of_size(1))
+        .collect::<ILResult<Vec<_>>>()?;
+    let arrays = arrays
+        .iter()
+        .map(|array| array.as_ref())
+        .collect::<Vec<_>>();
+    Ok(arrow::compute::concat(arrays.as_slice())?)
 }

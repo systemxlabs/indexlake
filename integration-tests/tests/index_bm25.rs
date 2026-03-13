@@ -1,8 +1,9 @@
-use arrow::array::StringArray;
+use arrow::array::{Float64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
+use futures::TryStreamExt;
 use indexlake::Client;
 use indexlake::catalog::Catalog;
-use indexlake::index::IndexKind;
+use indexlake::index::{IndexColumnRequest, IndexKind};
 use indexlake::storage::Storage;
 use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake_integration_tests::{
@@ -103,6 +104,7 @@ async fn create_bm25_index(
             limit: Some(2),
         }),
         projection: None,
+        index_columns: vec![],
     };
     let table_str = table_search(&table, search).await?;
     println!("{}", table_str);
@@ -122,6 +124,7 @@ async fn create_bm25_index(
             limit: Some(2),
         }),
         projection: None,
+        index_columns: vec![],
     };
     let table_str = table_search(&table, search).await?;
     println!("{}", table_str);
@@ -134,6 +137,34 @@ async fn create_bm25_index(
 | title5 | 小明硕士毕业于中国科学院计算所，后在日本京都大学深造。                               |
 +--------+--------------------------------------------------------------------------------------+"#,
     );
+
+    let search = TableSearch {
+        query: Arc::new(BM25SearchQuery {
+            query: "pink".to_string(),
+            limit: Some(2),
+        }),
+        projection: None,
+        index_columns: vec![IndexColumnRequest {
+            index_name: None,
+            name: "score".to_string(),
+            alias: None,
+        }],
+    };
+    let batches = table.search(search).await?.try_collect::<Vec<_>>().await?;
+    assert_eq!(batches.len(), 1);
+    let batch = &batches[0];
+    assert_eq!(
+        batch.schema().field(batch.num_columns() - 1).name(),
+        "score"
+    );
+    let scores = batch
+        .column(batch.num_columns() - 1)
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("score should be Float64Array");
+    assert_eq!(scores.len(), 2);
+    assert!(scores.value(0).is_finite());
+    assert!(scores.value(1).is_finite());
 
     Ok(())
 }

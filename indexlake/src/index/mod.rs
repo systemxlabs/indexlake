@@ -8,7 +8,9 @@ use uuid::Uuid;
 use crate::ILResult;
 use crate::expr::Expr;
 use crate::storage::{InputFile, OutputFile};
+use arrow::array::ArrayRef;
 use arrow::array::RecordBatch;
+use arrow::datatypes::FieldRef;
 use std::any::Any;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -28,6 +30,12 @@ pub trait IndexKind: Debug + Send + Sync {
         index_def: &IndexDefinition,
         query: &dyn SearchQuery,
     ) -> ILResult<bool>;
+
+    fn output_fields(
+        &self,
+        index_def: &IndexDefinition,
+        columns: &[RequestedIndexColumn],
+    ) -> ILResult<Vec<FieldRef>>;
 
     fn supports_filter(
         &self,
@@ -55,15 +63,54 @@ pub trait IndexBuilder: Debug + Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Index: Debug + Send + Sync {
-    async fn search(&self, query: &dyn SearchQuery) -> ILResult<SearchIndexEntries>;
+    async fn search(
+        &self,
+        query: &dyn SearchQuery,
+        options: &IndexResultOptions,
+    ) -> ILResult<SearchIndexEntries>;
 
-    async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries>;
+    async fn filter(
+        &self,
+        filters: &[Expr],
+        options: &IndexResultOptions,
+    ) -> ILResult<FilterIndexEntries>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct IndexResultOptions {
+    pub columns: Vec<RequestedIndexColumn>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestedIndexColumn {
+    pub name: String,
+    pub output_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexColumnRequest {
+    pub index_name: Option<String>,
+    pub name: String,
+    pub alias: Option<String>,
+}
+
+impl IndexColumnRequest {
+    pub fn output_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexResultColumn {
+    pub field: FieldRef,
+    pub values: ArrayRef,
 }
 
 #[derive(Debug, Clone)]
 pub struct SearchIndexEntries {
     pub row_id_scores: Vec<RowIdScore>,
     pub score_higher_is_better: bool,
+    pub dynamic_columns: Vec<IndexResultColumn>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +122,7 @@ pub struct RowIdScore {
 #[derive(Debug, Clone)]
 pub struct FilterIndexEntries {
     pub row_ids: Vec<Uuid>,
+    pub dynamic_columns: Vec<IndexResultColumn>,
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -42,9 +42,8 @@ pub async fn full_table_scan(table: &Table) -> ILResult<String> {
 }
 
 pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
-    let batch_schema = scan.output_schema(&table.output_schema)?;
-    let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
-
+    let base_schema = scan.output_schema(&table.output_schema)?;
+    let fallback_schema = Arc::new(schema_without_row_id(base_schema.as_ref()));
     let stream = table.scan(scan).await?;
     let batches = stream.try_collect::<Vec<_>>().await?;
     let mut sorted_batches = if batches.is_empty() {
@@ -60,17 +59,17 @@ pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
         batch.remove_column(idx);
     }
 
+    let batch_schema = sorted_batches
+        .first()
+        .map(|batch| batch.schema())
+        .unwrap_or(fallback_schema);
     let table_str = pretty_format_batches_with_schema(batch_schema, &sorted_batches)?.to_string();
     Ok(table_str)
 }
 
 pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String> {
-    let batch_schema = Arc::new(project_schema(
-        &table.output_schema,
-        search.projection.as_ref(),
-    )?);
-    let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
-
+    let base_schema = project_schema(&table.output_schema, search.projection.as_ref())?;
+    let fallback_schema = Arc::new(schema_without_row_id(&base_schema));
     let stream = table.search(search).await?;
     let mut batches = stream.try_collect::<Vec<_>>().await?;
 
@@ -81,6 +80,11 @@ pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String
         batch.remove_column(idx);
     }
 
+    let batch_schema = if let Some(batch) = batches.first() {
+        batch.schema()
+    } else {
+        fallback_schema
+    };
     let table_str = pretty_format_batches_with_schema(batch_schema, &batches)?.to_string();
     Ok(table_str)
 }

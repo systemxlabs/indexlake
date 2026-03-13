@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use arrow::array::{
-    Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions,
+    Array, ArrayRef, AsArray, FixedSizeBinaryArray, RecordBatch, RecordBatchOptions, UInt32Array,
+    new_null_array,
 };
 use arrow::datatypes::{FieldRef, Schema};
 use arrow::ipc::reader::StreamReader;
@@ -12,6 +13,7 @@ use uuid::Uuid;
 
 use crate::catalog::INTERNAL_ROW_ID_FIELD_NAME;
 use crate::expr::{Expr, visited_columns};
+use crate::index::IndexResultColumn;
 use crate::{ILError, ILResult};
 
 pub fn schema_without_row_id(schema: &Schema) -> Schema {
@@ -185,6 +187,218 @@ pub fn rewrite_batch_schema(
         Arc::new(Schema::new(new_fields).with_metadata(batch_schema.metadata().clone()));
     let new_batch = RecordBatch::try_new(new_schema, batch.columns().to_vec())?;
     Ok(new_batch)
+}
+
+pub fn append_columns_to_record_batch(
+    batch: &RecordBatch,
+    columns: &[IndexResultColumn],
+) -> ILResult<RecordBatch> {
+    if columns.is_empty() {
+        return Ok(batch.clone());
+    }
+
+    let mut fields = batch.schema().fields().iter().cloned().collect::<Vec<_>>();
+    let mut arrays = batch.columns().to_vec();
+
+    for column in columns {
+        if column.values.len() != batch.num_rows() {
+            return Err(ILError::internal(format!(
+                "Dynamic column {} length {} does not match batch row count {}",
+                column.field.name(),
+                column.values.len(),
+                batch.num_rows()
+            )));
+        }
+        fields.push(column.field.clone());
+        arrays.push(column.values.clone());
+    }
+
+    let schema = Arc::new(Schema::new_with_metadata(
+        fields,
+        batch.schema().metadata().clone(),
+    ));
+    Ok(RecordBatch::try_new(schema, arrays)?)
+}
+
+pub fn reorder_index_result_columns(
+    columns: &[IndexResultColumn],
+    indices: &UInt32Array,
+) -> ILResult<Vec<IndexResultColumn>> {
+    columns
+        .iter()
+        .map(|column| {
+            let values = arrow::compute::take(column.values.as_ref(), indices, None)?;
+            Ok(IndexResultColumn {
+                field: column.field.clone(),
+                values,
+            })
+        })
+        .collect()
+}
+
+pub fn empty_index_result_columns(fields: &[FieldRef]) -> Vec<IndexResultColumn> {
+    fields
+        .iter()
+        .map(|field| IndexResultColumn {
+            field: field.clone(),
+            values: new_null_array(field.data_type(), 0),
+        })
+        .collect()
+}
+
+pub fn concat_index_result_columns(
+    column_groups: &[Vec<IndexResultColumn>],
+    fields: &[FieldRef],
+) -> ILResult<Vec<IndexResultColumn>> {
+    if fields.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if column_groups.is_empty() {
+        return Ok(empty_index_result_columns(fields));
+    }
+
+    let mut output = Vec::with_capacity(fields.len());
+    for (idx, field) in fields.iter().enumerate() {
+        let arrays = column_groups
+            .iter()
+            .map(|group| {
+                let column = group.get(idx).ok_or_else(|| {
+                    ILError::internal(format!(
+                        "Dynamic column group missing column {}",
+                        field.name()
+                    ))
+                })?;
+                if column.field.as_ref() != field.as_ref() {
+                    return Err(ILError::internal(format!(
+                        "Dynamic column field mismatch: expected {:?}, got {:?}",
+                        field, column.field
+                    )));
+                }
+                Ok(column.values.as_ref())
+            })
+            .collect::<ILResult<Vec<_>>>()?;
+        let values = arrow::compute::concat(arrays.as_slice())?;
+        output.push(IndexResultColumn {
+            field: field.clone(),
+            values,
+        });
+    }
+    Ok(output)
+}
+
+pub fn validate_index_result_columns(
+    columns: &[IndexResultColumn],
+    fields: &[FieldRef],
+    expected_len: usize,
+) -> ILResult<()> {
+    if columns.len() != fields.len() {
+        return Err(ILError::internal(format!(
+            "Dynamic column count mismatch: expected {}, got {}",
+            fields.len(),
+            columns.len()
+        )));
+    }
+
+    for (column, field) in columns.iter().zip(fields.iter()) {
+        if column.field.as_ref() != field.as_ref() {
+            return Err(ILError::internal(format!(
+                "Dynamic column field mismatch: expected {:?}, got {:?}",
+                field, column.field
+            )));
+        }
+        if column.values.len() != expected_len {
+            return Err(ILError::internal(format!(
+                "Dynamic column {} length {} does not match expected row count {}",
+                column.field.name(),
+                column.values.len(),
+                expected_len
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+pub fn project_schema_and_append_fields(
+    schema: &Schema,
+    projection: Option<&Vec<usize>>,
+    extra_fields: &[FieldRef],
+) -> ILResult<Schema> {
+    let mut fields = project_schema(schema, projection)?
+        .fields()
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    fields.extend(extra_fields.iter().cloned());
+    Ok(Schema::new_with_metadata(fields, schema.metadata().clone()))
+}
+
+pub fn gather_index_result_columns(
+    row_ids: &[Uuid],
+    lookups: &[DynamicColumnLookup],
+) -> ILResult<Vec<IndexResultColumn>> {
+    if lookups.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    lookups
+        .iter()
+        .map(|lookup| {
+            let indices = row_ids
+                .iter()
+                .map(|row_id| {
+                    lookup.row_id_to_index.get(row_id).copied().ok_or_else(|| {
+                        ILError::internal(format!(
+                            "Dynamic column {} lookup missing row id {row_id}",
+                            lookup.field.name()
+                        ))
+                    })
+                })
+                .collect::<ILResult<Vec<_>>>()?;
+            let indices = UInt32Array::from(indices);
+            let values = arrow::compute::take(lookup.values.as_ref(), &indices, None)?;
+            Ok(IndexResultColumn {
+                field: lookup.field.clone(),
+                values,
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicColumnLookup {
+    pub field: FieldRef,
+    pub row_id_to_index: HashMap<Uuid, u32>,
+    pub values: ArrayRef,
+}
+
+impl DynamicColumnLookup {
+    pub fn try_new(field: FieldRef, row_ids: &[Uuid], values: ArrayRef) -> ILResult<Self> {
+        if row_ids.len() != values.len() {
+            return Err(ILError::internal(format!(
+                "Dynamic column {} length {} does not match row id count {}",
+                field.name(),
+                values.len(),
+                row_ids.len()
+            )));
+        }
+
+        let mut row_id_to_index = HashMap::with_capacity(row_ids.len());
+        for (idx, row_id) in row_ids.iter().enumerate() {
+            row_id_to_index.insert(*row_id, idx as u32);
+        }
+
+        Ok(Self {
+            field,
+            row_id_to_index,
+            values,
+        })
+    }
+}
+
+pub fn extract_dynamic_fields(columns: &[IndexResultColumn]) -> Vec<FieldRef> {
+    columns.iter().map(|column| column.field.clone()).collect()
 }
 
 pub fn correct_batch_schema(

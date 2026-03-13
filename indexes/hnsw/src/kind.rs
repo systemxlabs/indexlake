@@ -1,11 +1,11 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, Field, FieldRef};
 use indexlake::expr::Expr;
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    RequestedIndexColumn, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,27 @@ impl IndexKind for HnswIndexKind {
             return Ok(false);
         };
         Ok(true)
+    }
+
+    fn output_fields(
+        &self,
+        _index_def: &IndexDefinition,
+        columns: &[RequestedIndexColumn],
+    ) -> ILResult<Vec<FieldRef>> {
+        columns
+            .iter()
+            .map(|column| match column.name.as_str() {
+                "distance" => Ok(Arc::new(Field::new(
+                    &column.output_name,
+                    DataType::Float64,
+                    false,
+                ))),
+                _ => Err(ILError::invalid_input(format!(
+                    "Unsupported result column `{}` for index kind `hnsw`",
+                    column.name
+                ))),
+            })
+            .collect()
     }
 
     fn supports_filter(

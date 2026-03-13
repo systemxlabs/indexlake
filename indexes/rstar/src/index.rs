@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use indexlake::catalog::Scalar;
 use indexlake::expr::{Expr, Function};
-use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{
+    FilterIndexEntries, Index, IndexResultOptions, SearchIndexEntries, SearchQuery,
+};
 use indexlake::{ILError, ILResult};
 use rstar::{AABB, RTree, RTreeObject};
 use uuid::Uuid;
@@ -31,16 +33,31 @@ pub struct RStarIndex {
 
 #[async_trait::async_trait]
 impl Index for RStarIndex {
-    async fn search(&self, _query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
+    async fn search(
+        &self,
+        _query: &dyn SearchQuery,
+        _options: &IndexResultOptions,
+    ) -> ILResult<SearchIndexEntries> {
         Err(ILError::not_supported(
             "RStar index does not support search",
         ))
     }
 
-    async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        filters: &[Expr],
+        options: &IndexResultOptions,
+    ) -> ILResult<FilterIndexEntries> {
+        if let Some(column) = options.columns.first() {
+            return Err(ILError::invalid_input(format!(
+                "Unsupported result column `{}` for index kind `rstar`",
+                column.name
+            )));
+        }
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
                 row_ids: Vec::new(),
+                dynamic_columns: Vec::new(),
             });
         }
 
@@ -60,6 +77,7 @@ impl Index for RStarIndex {
 
         Ok(FilterIndexEntries {
             row_ids: row_ids.into_iter().collect(),
+            dynamic_columns: Vec::new(),
         })
     }
 }

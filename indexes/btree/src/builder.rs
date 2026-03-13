@@ -115,7 +115,8 @@ impl IndexBuilder for BTreeIndexBuilder {
     }
 
     fn build(&mut self) -> ILResult<Box<dyn Index>> {
-        let mut index = BTreeIndex::new();
+        let key_field = self.index_schema.fields[1].clone();
+        let mut index = BTreeIndex::new(key_field);
 
         for batch in self.index_batches.iter() {
             let row_id_array = batch.column(0).as_fixed_size_binary();

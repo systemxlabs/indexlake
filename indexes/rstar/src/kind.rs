@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, FieldRef};
 use serde::{Deserialize, Serialize};
 
 use geozero::wkb::WkbDialect as GeozeroWkbDialect;
@@ -8,7 +8,7 @@ use indexlake::catalog::Scalar;
 use indexlake::expr::{Expr, Function};
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    RequestedIndexColumn, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 
@@ -60,6 +60,20 @@ impl IndexKind for RStarIndexKind {
         _query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(false)
+    }
+
+    fn output_fields(
+        &self,
+        _index_def: &IndexDefinition,
+        columns: &[RequestedIndexColumn],
+    ) -> ILResult<Vec<FieldRef>> {
+        if let Some(column) = columns.first() {
+            return Err(ILError::invalid_input(format!(
+                "Unsupported result column `{}` for index kind `rstar`",
+                column.name
+            )));
+        }
+        Ok(Vec::new())
     }
 
     fn supports_filter(
