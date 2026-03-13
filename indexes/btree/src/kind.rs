@@ -1,11 +1,11 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, FieldRef};
 use indexlake::expr::{BinaryOp, Expr};
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    RequestedIndexColumn, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
@@ -71,6 +71,30 @@ impl IndexKind for BTreeIndexKind {
         _query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(false)
+    }
+
+    fn output_fields(
+        &self,
+        index_def: &IndexDefinition,
+        columns: &[RequestedIndexColumn],
+    ) -> ILResult<Vec<FieldRef>> {
+        let key_field = index_def
+            .key_fields()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ILError::internal("B-tree index key field not found".to_string()))?;
+        columns
+            .iter()
+            .map(|column| match column.name.as_str() {
+                "index_key" => Ok(Arc::new(
+                    key_field.as_ref().clone().with_name(&column.output_name),
+                )),
+                _ => Err(ILError::invalid_input(format!(
+                    "Unsupported result column `{}` for index kind `btree`",
+                    column.name
+                ))),
+            })
+            .collect()
     }
 
     fn supports_filter(

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use indexlake::Client;
 use indexlake::catalog::{Catalog, Scalar};
 use indexlake::expr::{col, lit};
-use indexlake::index::IndexKind;
+use indexlake::index::{IndexColumnRequest, IndexKind};
 use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{IndexCreation, TableScan};
 use indexlake_index_btree::{BTreeIndexKind, BTreeIndexParams};
@@ -64,6 +64,25 @@ async fn create_btree_index_integer(
 | 3  | 75      |
 | 6  | 75      |
 +----+---------+"#
+    );
+
+    let scan = TableScan::default()
+        .with_filters(vec![col("integer").eq(lit(Scalar::Int32(Some(75))))])
+        .with_index_columns(vec![IndexColumnRequest {
+            index_name: Some("btree_index".to_string()),
+            name: "index_key".to_string(),
+            alias: Some("matched_value".to_string()),
+        }]);
+    let table_str = table_scan(&table, scan).await?;
+    println!("point query result with dynamic column:\n{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+----+---------+---------------+
+| id | integer | matched_value |
++----+---------+---------------+
+| 3  | 75      | 75            |
+| 6  | 75      | 75            |
++----+---------+---------------+"#
     );
 
     // test range query

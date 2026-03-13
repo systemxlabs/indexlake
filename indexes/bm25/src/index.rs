@@ -1,9 +1,13 @@
 use std::any::Any;
+use std::sync::Arc;
 
+use arrow::array::Float64Array;
+use arrow::datatypes::Field;
 use bm25::Embedder;
 use indexlake::expr::Expr;
 use indexlake::index::{
-    FilterIndexEntries, Index, IndexDefinitionRef, RowIdScore, SearchIndexEntries, SearchQuery,
+    FilterIndexEntries, Index, IndexDefinitionRef, IndexResultColumn, IndexResultOptions,
+    RowIdScore, SearchIndexEntries, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 
@@ -38,7 +42,11 @@ pub struct BM25Index {
 
 #[async_trait::async_trait]
 impl Index for BM25Index {
-    async fn search(&self, query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
+    async fn search(
+        &self,
+        query: &dyn SearchQuery,
+        options: &IndexResultOptions,
+    ) -> ILResult<SearchIndexEntries> {
         let query = query
             .as_any()
             .downcast_ref::<BM25SearchQuery>()
@@ -57,13 +65,43 @@ impl Index for BM25Index {
             })
             .collect();
 
+        let mut dynamic_columns = Vec::new();
+        for column in &options.columns {
+            match column.name.as_str() {
+                "score" => dynamic_columns.push(IndexResultColumn {
+                    field: Arc::new(Field::new(
+                        &column.output_name,
+                        arrow::datatypes::DataType::Float64,
+                        false,
+                    )),
+                    values: Arc::new(Float64Array::from(
+                        row_id_scores
+                            .iter()
+                            .map(|row| row.score)
+                            .collect::<Vec<_>>(),
+                    )),
+                }),
+                _ => {
+                    return Err(ILError::invalid_input(format!(
+                        "Unsupported result column `{}` for index kind `bm25`",
+                        column.name
+                    )));
+                }
+            }
+        }
+
         Ok(SearchIndexEntries {
             row_id_scores,
             score_higher_is_better: true,
+            dynamic_columns,
         })
     }
 
-    async fn filter(&self, _filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        _filters: &[Expr],
+        _options: &IndexResultOptions,
+    ) -> ILResult<FilterIndexEntries> {
         Err(ILError::not_supported("BM25 index does not support filter"))
     }
 }

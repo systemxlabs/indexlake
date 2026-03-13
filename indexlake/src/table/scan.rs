@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -6,7 +7,7 @@ use std::task::{Context, Poll};
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
-use arrow_schema::Schema;
+use arrow_schema::{FieldRef, Schema};
 use futures::{Stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -16,16 +17,22 @@ use crate::catalog::{
     rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
-use crate::index::{FilterSupport, IndexManager};
+use crate::index::{
+    FilterSupport, IndexColumnRequest, IndexManager, IndexResultOptions, RequestedIndexColumn,
+};
 use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
-use crate::utils::project_schema;
+use crate::utils::{
+    DynamicColumnLookup, append_columns_to_record_batch, extract_row_ids_from_record_batch,
+    gather_index_result_columns, project_schema, validate_index_result_columns,
+};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, Clone, derive_with::With)]
 pub struct TableScan {
     pub projection: Option<Vec<usize>>,
     pub filters: Vec<Expr>,
+    pub index_columns: Vec<IndexColumnRequest>,
     pub batch_size: usize,
     pub partition: TableScanPartition,
     pub offset: usize,
@@ -77,6 +84,7 @@ impl Default for TableScan {
         Self {
             projection: None,
             filters: vec![],
+            index_columns: vec![],
             batch_size: 1024,
             partition: TableScanPartition::single_partition(),
             offset: 0,
@@ -156,6 +164,18 @@ impl TableScanPartition {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct IndexDynamicResultPlan {
+    options: IndexResultOptions,
+    fields: Vec<FieldRef>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ScanDynamicResultPlan {
+    per_index: HashMap<String, IndexDynamicResultPlan>,
+    output_fields: Vec<FieldRef>,
+}
+
 pub(crate) async fn process_scan(
     catalog_helper: &CatalogHelper,
     table: &Table,
@@ -165,14 +185,27 @@ pub(crate) async fn process_scan(
     scan.filters = filters;
 
     let index_filter_assignment = assign_index_filters(&table.index_manager, &scan.filters)?;
+    let dynamic_result_plan =
+        resolve_scan_dynamic_result_plan(table, &scan, &index_filter_assignment)?;
 
     if index_filter_assignment
         .values()
         .any(|filters| !filters.is_empty())
     {
-        process_index_scan(catalog_helper, table, scan, index_filter_assignment).await
-    } else {
+        process_index_scan(
+            catalog_helper,
+            table,
+            scan,
+            index_filter_assignment,
+            dynamic_result_plan,
+        )
+        .await
+    } else if scan.index_columns.is_empty() {
         process_table_scan(catalog_helper, table, scan).await
+    } else {
+        Err(ILError::invalid_input(
+            "index_columns requires at least one filter assigned to an index".to_string(),
+        ))
     }
 }
 
@@ -345,6 +378,7 @@ async fn process_index_scan(
     table: &Table,
     scan: TableScan,
     index_filter_assignment: HashMap<String, Vec<usize>>,
+    dynamic_result_plan: ScanDynamicResultPlan,
 ) -> ILResult<RecordBatchStream> {
     let non_index_filters = scan
         .filters
@@ -366,6 +400,7 @@ async fn process_index_scan(
             &scan,
             &index_filter_assignment,
             &non_index_filters,
+            &dynamic_result_plan,
         )
         .await?;
         vec![inline_rows_stream]
@@ -374,7 +409,8 @@ async fn process_index_scan(
     };
 
     let data_file_records =
-        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition).await?;
+        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition.clone())
+            .await?;
 
     let mut futs = Vec::with_capacity(data_file_records.len());
     for data_file_record in data_file_records {
@@ -384,6 +420,7 @@ async fn process_index_scan(
         let scan_filters = scan.filters.clone();
         let scan_batch_size = scan.batch_size;
         let index_filter_assignment = index_filter_assignment.clone();
+        let dynamic_result_plan = dynamic_result_plan.clone();
         let fut = async move {
             index_scan_data_file(
                 &catalog_helper,
@@ -393,6 +430,7 @@ async fn process_index_scan(
                 scan_batch_size,
                 &data_file_record,
                 &index_filter_assignment,
+                &dynamic_result_plan,
             )
             .await
         };
@@ -401,8 +439,16 @@ async fn process_index_scan(
     let stream = futures::stream::iter(futs).buffered(1).try_flatten();
 
     streams.push(Box::pin(stream));
-
-    Ok(Box::pin(futures::stream::select_all(streams)))
+    let stream: RecordBatchStream = Box::pin(futures::stream::select_all(streams));
+    if scan.offset_limit_required() {
+        Ok(Box::pin(LimitOffsetRecordBatchStream::new(
+            stream,
+            scan.offset,
+            scan.limit,
+        )))
+    } else {
+        Ok(stream)
+    }
 }
 
 async fn index_scan_inline_rows(
@@ -411,6 +457,7 @@ async fn index_scan_inline_rows(
     scan: &TableScan,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
     non_index_filters: &[Expr],
+    dynamic_result_plan: &ScanDynamicResultPlan,
 ) -> ILResult<RecordBatchStream> {
     let mut index_builder_map = HashMap::new();
     let mut index_ids = Vec::new();
@@ -453,6 +500,7 @@ async fn index_scan_inline_rows(
 
     // filter row ids by indexes
     let mut filter_index_entries_list = Vec::new();
+    let mut dynamic_lookup_map = HashMap::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
         let index_builder = index_builder_map.get_mut(index_name).ok_or_else(|| {
             ILError::internal(format!("Index builder not found for index {index_name}"))
@@ -465,7 +513,25 @@ async fn index_scan_inline_rows(
             .map(|idx| scan.filters[*idx].clone())
             .collect::<Vec<_>>();
 
-        let filter_index_entries = index.filter(&filters).await?;
+        let index_result_plan = dynamic_result_plan
+            .per_index
+            .get(index_name)
+            .cloned()
+            .unwrap_or_default();
+        let filter_index_entries = index.filter(&filters, &index_result_plan.options).await?;
+        validate_index_result_columns(
+            &filter_index_entries.dynamic_columns,
+            &index_result_plan.fields,
+            filter_index_entries.row_ids.len(),
+        )?;
+        let row_ids = filter_index_entries.row_ids.clone();
+        let lookups =
+            build_dynamic_column_lookups(&row_ids, filter_index_entries.dynamic_columns.clone())?;
+        dynamic_lookup_map.extend(
+            lookups
+                .into_iter()
+                .map(|lookup| (lookup.field.name().clone(), lookup)),
+        );
         filter_index_entries_list.push(filter_index_entries);
     }
 
@@ -498,10 +564,11 @@ async fn index_scan_inline_rows(
             None,
         )
         .await?;
+    let output_fields = dynamic_result_plan.output_fields.clone();
     let inline_stream = row_stream.chunks(scan.batch_size).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
         let batch = rows_to_record_batch(&projected_schema, &rows)?;
-        Ok::<_, ILError>(batch)
+        append_requested_dynamic_columns(&batch, &dynamic_lookup_map, &output_fields)
     });
 
     Ok(Box::pin(inline_stream) as RecordBatchStream)
@@ -515,6 +582,7 @@ async fn index_scan_data_file(
     scan_batch_size: usize,
     data_file_record: &DataFileRecord,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
+    dynamic_result_plan: &ScanDynamicResultPlan,
 ) -> ILResult<RecordBatchStream> {
     let index_file_records = catalog_helper
         .get_index_files_by_data_file_id(&data_file_record.data_file_id)
@@ -523,11 +591,12 @@ async fn index_scan_data_file(
         .iter()
         .map(|record| (record.index_id, record))
         .collect::<HashMap<_, _>>();
-    let row_ids = filter_index_files_row_ids(
+    let index_filter_result = filter_index_files_row_ids(
         table,
         scan_filters,
         &index_file_records_map,
         index_filter_assignment,
+        dynamic_result_plan,
     )
     .await?;
 
@@ -542,10 +611,10 @@ async fn index_scan_data_file(
         .map(|(_, filter)| filter.clone())
         .collect::<Vec<_>>();
 
-    let row_id_filter = row_ids_in_list_expr(row_ids.into_iter().collect());
+    let row_id_filter = row_ids_in_list_expr(index_filter_result.row_ids.into_iter().collect());
     left_filters.push(row_id_filter);
 
-    read_data_file_by_record(
+    let stream = read_data_file_by_record(
         table.storage.as_ref(),
         &table.table_schema,
         data_file_record,
@@ -553,7 +622,22 @@ async fn index_scan_data_file(
         left_filters,
         scan_batch_size,
     )
-    .await
+    .await?;
+    if index_filter_result.lookups.is_empty() {
+        Ok(stream)
+    } else {
+        let lookup_map = index_filter_result
+            .lookups
+            .into_iter()
+            .map(|lookup| (lookup.field.name().clone(), lookup))
+            .collect::<HashMap<_, _>>();
+        let output_fields = dynamic_result_plan.output_fields.clone();
+        let stream = stream.map(move |batch| {
+            let batch = batch?;
+            append_requested_dynamic_columns(&batch, &lookup_map, &output_fields)
+        });
+        Ok(Box::pin(stream))
+    }
 }
 
 async fn filter_index_files_row_ids(
@@ -561,8 +645,10 @@ async fn filter_index_files_row_ids(
     filters: &[Expr],
     index_file_records: &HashMap<Uuid, &IndexFileRecord>,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
-) -> ILResult<HashSet<Uuid>> {
+    dynamic_result_plan: &ScanDynamicResultPlan,
+) -> ILResult<IndexFilterResult> {
     let mut filter_index_entries_list = Vec::new();
+    let mut dynamic_lookup_map = HashMap::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
         let index_def = table
             .index_manager
@@ -592,7 +678,25 @@ async fn filter_index_files_row_ids(
 
         let index = index_builder.build()?;
 
-        let filter_index_entries = index.filter(&filters).await?;
+        let index_result_plan = dynamic_result_plan
+            .per_index
+            .get(index_name)
+            .cloned()
+            .unwrap_or_default();
+        let filter_index_entries = index.filter(&filters, &index_result_plan.options).await?;
+        validate_index_result_columns(
+            &filter_index_entries.dynamic_columns,
+            &index_result_plan.fields,
+            filter_index_entries.row_ids.len(),
+        )?;
+        let row_ids = filter_index_entries.row_ids.clone();
+        let lookups =
+            build_dynamic_column_lookups(&row_ids, filter_index_entries.dynamic_columns.clone())?;
+        dynamic_lookup_map.extend(
+            lookups
+                .into_iter()
+                .map(|lookup| (lookup.field.name().clone(), lookup)),
+        );
         filter_index_entries_list.push(filter_index_entries);
     }
 
@@ -605,7 +709,23 @@ async fn filter_index_files_row_ids(
         intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
     }
 
-    Ok(intersected_row_ids.into_iter().copied().collect())
+    let lookups = dynamic_result_plan
+        .output_fields
+        .iter()
+        .map(|field| {
+            dynamic_lookup_map.remove(field.name()).ok_or_else(|| {
+                ILError::internal(format!(
+                    "Dynamic column lookup not found for {}",
+                    field.name()
+                ))
+            })
+        })
+        .collect::<ILResult<Vec<_>>>()?;
+
+    Ok(IndexFilterResult {
+        row_ids: intersected_row_ids.into_iter().copied().collect(),
+        lookups,
+    })
 }
 
 fn assign_index_filters(
@@ -636,6 +756,226 @@ fn assign_index_filters(
         }
     }
     Ok(index_filter_assignment)
+}
+
+fn resolve_scan_dynamic_result_plan(
+    table: &Table,
+    scan: &TableScan,
+    index_filter_assignment: &HashMap<String, Vec<usize>>,
+) -> ILResult<ScanDynamicResultPlan> {
+    if scan.index_columns.is_empty() {
+        return Ok(ScanDynamicResultPlan::default());
+    }
+
+    let participating_indexes = index_filter_assignment
+        .iter()
+        .filter(|(_, filter_indices)| !filter_indices.is_empty())
+        .map(|(index_name, _)| index_name.clone())
+        .collect::<Vec<_>>();
+    if participating_indexes.is_empty() {
+        return Err(ILError::invalid_input(
+            "index_columns requires at least one filter assigned to an index".to_string(),
+        ));
+    }
+
+    let projected_schema = project_schema(&table.output_schema, scan.projection.as_ref())?;
+    let mut output_names = projected_schema
+        .fields()
+        .iter()
+        .map(|field| field.name().clone())
+        .collect::<HashSet<_>>();
+
+    let mut grouped_columns: HashMap<String, Vec<RequestedIndexColumn>> = HashMap::new();
+    let mut ordered_output_names = Vec::with_capacity(scan.index_columns.len());
+
+    for column in &scan.index_columns {
+        let target_index = if let Some(index_name) = &column.index_name {
+            if !participating_indexes.contains(index_name) {
+                return Err(ILError::invalid_input(format!(
+                    "Scan result column `{}` targets index `{index_name}`, but that index does not participate in this scan",
+                    column.name
+                )));
+            }
+            index_name.clone()
+        } else if participating_indexes.len() == 1 {
+            participating_indexes[0].clone()
+        } else {
+            return Err(ILError::invalid_input(format!(
+                "Scan result column `{}` must specify index_name because multiple indexes participate in this scan",
+                column.name
+            )));
+        };
+
+        let output_name = column.output_name().to_string();
+        if !output_names.insert(output_name.clone()) {
+            return Err(ILError::invalid_input(format!(
+                "Duplicate output column name `{output_name}` in scan result"
+            )));
+        }
+
+        grouped_columns
+            .entry(target_index)
+            .or_default()
+            .push(RequestedIndexColumn {
+                name: column.name.clone(),
+                output_name,
+            });
+        ordered_output_names.push(column.output_name().to_string());
+    }
+
+    let mut per_index = HashMap::new();
+    for (index_name, columns) in grouped_columns {
+        let index_def = table
+            .index_manager
+            .get_index(&index_name)
+            .ok_or_else(|| ILError::internal(format!("Index {index_name} not found")))?;
+        let index_kind = table
+            .index_manager
+            .get_index_kind(&index_def.kind)
+            .ok_or_else(|| {
+                ILError::internal(format!("Index kind {} not registered", index_def.kind))
+            })?;
+        let fields = index_kind.output_fields(index_def.as_ref(), &columns)?;
+        per_index.insert(
+            index_name,
+            IndexDynamicResultPlan {
+                options: IndexResultOptions { columns },
+                fields,
+            },
+        );
+    }
+
+    let output_fields = ordered_output_names
+        .iter()
+        .map(|name| {
+            per_index
+                .values()
+                .flat_map(|plan| plan.fields.iter())
+                .find(|field| field.name() == name)
+                .cloned()
+                .ok_or_else(|| {
+                    ILError::internal(format!(
+                        "Dynamic output field {name} not found after scan plan resolution"
+                    ))
+                })
+        })
+        .collect::<ILResult<Vec<_>>>()?;
+
+    Ok(ScanDynamicResultPlan {
+        per_index,
+        output_fields,
+    })
+}
+
+fn build_dynamic_column_lookups(
+    row_ids: &[Uuid],
+    dynamic_columns: Vec<crate::index::IndexResultColumn>,
+) -> ILResult<Vec<DynamicColumnLookup>> {
+    dynamic_columns
+        .into_iter()
+        .map(|column| DynamicColumnLookup::try_new(column.field, row_ids, column.values))
+        .collect()
+}
+
+fn append_requested_dynamic_columns(
+    batch: &RecordBatch,
+    lookup_map: &HashMap<String, DynamicColumnLookup>,
+    output_fields: &[FieldRef],
+) -> ILResult<RecordBatch> {
+    if output_fields.is_empty() {
+        return Ok(batch.clone());
+    }
+
+    let row_ids = extract_row_ids_from_record_batch(batch)?;
+    let lookups = output_fields
+        .iter()
+        .map(|field| {
+            lookup_map.get(field.name()).cloned().ok_or_else(|| {
+                ILError::internal(format!(
+                    "Dynamic column lookup not found for {}",
+                    field.name()
+                ))
+            })
+        })
+        .collect::<ILResult<Vec<_>>>()?;
+    let columns = gather_index_result_columns(&row_ids, &lookups)?;
+    append_columns_to_record_batch(batch, &columns)
+}
+
+#[derive(Debug)]
+struct IndexFilterResult {
+    row_ids: HashSet<Uuid>,
+    lookups: Vec<DynamicColumnLookup>,
+}
+
+struct LimitOffsetRecordBatchStream {
+    stream: RecordBatchStream,
+    query_window: Range<usize>,
+    row_pointer: usize,
+}
+
+impl LimitOffsetRecordBatchStream {
+    fn new(stream: RecordBatchStream, offset: usize, limit: Option<usize>) -> Self {
+        let query_window = if let Some(limit) = limit {
+            offset..offset + limit
+        } else {
+            offset..usize::MAX
+        };
+        Self {
+            stream,
+            query_window,
+            row_pointer: 0,
+        }
+    }
+
+    fn apply_limit_offset(&self, batch: RecordBatch) -> RecordBatch {
+        let num_rows = batch.num_rows();
+        if num_rows == 0 {
+            return batch;
+        }
+
+        let batch_range = self.row_pointer..self.row_pointer + num_rows;
+        let intersection_start = batch_range.start.max(self.query_window.start);
+        let intersection_end = batch_range.end.min(self.query_window.end);
+        if intersection_start >= intersection_end {
+            return RecordBatch::new_empty(batch.schema());
+        }
+
+        let slice_start = intersection_start - batch_range.start;
+        let slice_len = intersection_end - intersection_start;
+        if slice_start == 0 && slice_len == num_rows {
+            batch
+        } else {
+            batch.slice(slice_start, slice_len)
+        }
+    }
+}
+
+impl Stream for LimitOffsetRecordBatchStream {
+    type Item = ILResult<RecordBatch>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            if self.row_pointer >= self.query_window.end {
+                return Poll::Ready(None);
+            }
+
+            let stream = Pin::new(&mut self.stream);
+            match stream.poll_next(cx) {
+                Poll::Ready(Some(Ok(batch))) => {
+                    let num_rows = batch.num_rows();
+                    let batch = self.apply_limit_offset(batch);
+                    self.row_pointer += num_rows;
+                    if batch.num_rows() > 0 {
+                        return Poll::Ready(Some(Ok(batch)));
+                    }
+                }
+                Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
 }
 
 type GettingDataFileStreamFut =

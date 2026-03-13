@@ -101,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             limit,
         }),
         projection: None,
+        index_columns: vec![],
     };
     let mut stream = table.search(table_search).await?;
     let mut search_count = 0;
