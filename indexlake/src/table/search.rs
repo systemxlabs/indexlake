@@ -151,7 +151,7 @@ async fn search_inline_rows(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search.query.as_ref()).await?;
+    let search_index_entries = index.search(search.query.as_ref(), &[]).await?;
 
     Ok(search_index_entries)
 }
@@ -170,7 +170,7 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search_query).await?;
+    let search_index_entries = index.search(search_query, &[]).await?;
 
     Ok(search_index_entries)
 }

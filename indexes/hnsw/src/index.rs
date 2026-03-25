@@ -1,8 +1,11 @@
 use std::any::Any;
+use std::sync::Arc;
 
+use arrow::array::Float64Array;
+use arrow::datatypes::{DataType, Field};
 use hnsw::Hnsw;
 use indexlake::expr::Expr;
-use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{DynamicColumn, FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
 use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
 use space::Knn;
@@ -49,7 +52,11 @@ impl std::fmt::Debug for HnswIndex {
 
 #[async_trait::async_trait]
 impl Index for HnswIndex {
-    async fn search(&self, query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
+    async fn search(
+        &self,
+        query: &dyn SearchQuery,
+        dynamic_fields: &[String],
+    ) -> ILResult<SearchIndexEntries> {
         let query = query
             .as_any()
             .downcast_ref::<HnswSearchQuery>()
@@ -68,10 +75,26 @@ impl Index for HnswIndex {
             row_ids.push(self.row_ids[neighbor.index]);
             scores.push(neighbor.distance as f64);
         }
+
+        let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
+        for dynamic_field in dynamic_fields {
+            match dynamic_field.as_str() {
+                "distance" => dynamic_columns.push(DynamicColumn {
+                    field: Arc::new(Field::new("distance", DataType::Float64, false)),
+                    values: Arc::new(Float64Array::from(scores.clone())),
+                }),
+                _ => {
+                    return Err(ILError::invalid_input(format!(
+                        "Unsupported dynamic field `{dynamic_field}` for hnsw index"
+                    )));
+                }
+            }
+        }
         Ok(SearchIndexEntries {
             row_ids,
             scores,
             score_higher_is_better: false,
+            dynamic_columns,
         })
     }
 

@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::ILResult;
 use crate::expr::Expr;
 use crate::storage::{InputFile, OutputFile};
-use arrow::array::RecordBatch;
+use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::FieldRef;
 use std::any::Any;
 use std::fmt::Debug;
@@ -58,9 +58,19 @@ pub trait IndexBuilder: Debug + Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Index: Debug + Send + Sync {
-    async fn search(&self, query: &dyn SearchQuery) -> ILResult<SearchIndexEntries>;
+    async fn search(
+        &self,
+        query: &dyn SearchQuery,
+        dynamic_fields: &[String],
+    ) -> ILResult<SearchIndexEntries>;
 
     async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries>;
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicColumn {
+    pub field: FieldRef,
+    pub values: ArrayRef,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +78,7 @@ pub struct SearchIndexEntries {
     pub row_ids: Vec<Uuid>,
     pub scores: Vec<f64>,
     pub score_higher_is_better: bool,
+    pub dynamic_columns: Vec<DynamicColumn>,
 }
 
 #[derive(Debug, Clone)]
