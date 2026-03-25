@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, Field, FieldRef};
 use serde::{Deserialize, Serialize};
 
 use geozero::wkb::WkbDialect as GeozeroWkbDialect;
@@ -60,6 +60,15 @@ impl IndexKind for RStarIndexKind {
         _query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(false)
+    }
+
+    fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {
+        Ok(vec![
+            Arc::new(Field::new("xmin", DataType::Float64, false)),
+            Arc::new(Field::new("ymin", DataType::Float64, false)),
+            Arc::new(Field::new("xmax", DataType::Float64, false)),
+            Arc::new(Field::new("ymax", DataType::Float64, false)),
+        ])
     }
 
     fn supports_filter(

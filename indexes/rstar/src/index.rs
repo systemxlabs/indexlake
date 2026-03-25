@@ -31,7 +31,11 @@ pub struct RStarIndex {
 
 #[async_trait::async_trait]
 impl Index for RStarIndex {
-    async fn search(&self, _query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
+    async fn search(
+        &self,
+        _query: &dyn SearchQuery,
+        _dynamic_fields: &[String],
+    ) -> ILResult<SearchIndexEntries> {
         Err(ILError::not_supported(
             "RStar index does not support search",
         ))

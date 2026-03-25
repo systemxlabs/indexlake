@@ -100,6 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             limit: Some(limit),
         }),
         projection: None,
+        dynamic_fields: vec![],
     };
     let mut stream = table.search(table_search).await?;
     let mut batches = vec![];

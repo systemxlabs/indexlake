@@ -48,16 +48,17 @@ async fn create_hnsw_index(
     };
     table.create_index(index_creation.clone()).await?;
 
-    let search = TableSearch {
+    let mut search = TableSearch {
         query: Arc::new(HnswSearchQuery {
             vector: vec![26.0, 26.0, 26.0],
             limit: 2,
         }),
         projection: None,
+        dynamic_fields: vec![],
     };
 
     let table = client.load_table(&namespace_name, &table_name).await?;
-    let table_str = table_search(&table, search).await?;
+    let table_str = table_search(&table, search.clone()).await?;
     println!("{}", table_str);
     assert_eq!(
         table_str,
@@ -67,6 +68,20 @@ async fn create_hnsw_index(
 | 3  | [30.0, 30.0, 30.0] |
 | 2  | [20.0, 20.0, 20.0] |
 +----+--------------------+"#,
+    );
+
+    search.dynamic_fields = vec!["distance".to_string()];
+
+    let table_str = table_search(&table, search).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+----+--------------------+--------------+
+| id | vector             | distance     |
++----+--------------------+--------------+
+| 3  | [30.0, 30.0, 30.0] | 1088271319.0 |
+| 2  | [20.0, 20.0, 20.0] | 1093027553.0 |
++----+--------------------+--------------+"#,
     );
 
     Ok(())

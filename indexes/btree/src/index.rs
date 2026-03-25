@@ -110,7 +110,11 @@ impl BTreeIndex {
 
 #[async_trait::async_trait]
 impl Index for BTreeIndex {
-    async fn search(&self, _query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
+    async fn search(
+        &self,
+        _query: &dyn SearchQuery,
+        _dynamic_fields: &[String],
+    ) -> ILResult<SearchIndexEntries> {
         Err(ILError::not_supported(
             "B-tree index does not support search",
         ))

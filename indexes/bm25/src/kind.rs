@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, Field, FieldRef};
 use indexlake::expr::Expr;
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
@@ -56,6 +56,14 @@ impl IndexKind for BM25IndexKind {
         } else {
             Ok(false)
         }
+    }
+
+    fn dynamic_fields(&self, _: &IndexDefinition) -> ILResult<Vec<FieldRef>> {
+        Ok(vec![Arc::new(Field::new(
+            "score",
+            DataType::Float64,
+            false,
+        ))])
     }
 
     fn supports_filter(&self, _: &IndexDefinition, _: &Expr) -> ILResult<FilterSupport> {

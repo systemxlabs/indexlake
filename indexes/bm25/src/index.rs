@@ -1,9 +1,12 @@
 use std::any::Any;
+use std::sync::Arc;
 
+use arrow::array::Float64Array;
+use arrow::datatypes::{DataType, Field};
 use bm25::Embedder;
 use indexlake::expr::Expr;
 use indexlake::index::{
-    FilterIndexEntries, Index, IndexDefinitionRef, RowIdScore, SearchIndexEntries, SearchQuery,
+    DynamicColumn, FilterIndexEntries, Index, IndexDefinitionRef, SearchIndexEntries, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 
@@ -38,7 +41,11 @@ pub struct BM25Index {
 
 #[async_trait::async_trait]
 impl Index for BM25Index {
-    async fn search(&self, query: &dyn SearchQuery) -> ILResult<SearchIndexEntries> {
+    async fn search(
+        &self,
+        query: &dyn SearchQuery,
+        dynamic_fields: &[String],
+    ) -> ILResult<SearchIndexEntries> {
         let query = query
             .as_any()
             .downcast_ref::<BM25SearchQuery>()
@@ -49,17 +56,33 @@ impl Index for BM25Index {
             matches.truncate(limit);
         }
 
-        let row_id_scores: Vec<_> = matches
-            .into_iter()
-            .map(|doc| RowIdScore {
-                row_id: doc.id,
-                score: doc.score as f64,
-            })
-            .collect();
+        let mut row_ids = Vec::with_capacity(matches.len());
+        let mut scores = Vec::with_capacity(matches.len());
+        for doc in matches {
+            row_ids.push(doc.id);
+            scores.push(doc.score as f64);
+        }
+
+        let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
+        for dynamic_field in dynamic_fields {
+            match dynamic_field.as_str() {
+                "score" => dynamic_columns.push(DynamicColumn {
+                    field: Arc::new(Field::new("score", DataType::Float64, false)),
+                    values: Arc::new(Float64Array::from(scores.clone())),
+                }),
+                _ => {
+                    return Err(ILError::invalid_input(format!(
+                        "Unsupported dynamic field `{dynamic_field}` for bm25 index"
+                    )));
+                }
+            }
+        }
 
         Ok(SearchIndexEntries {
-            row_id_scores,
+            row_ids,
+            scores,
             score_higher_is_better: true,
+            dynamic_columns,
         })
     }
 

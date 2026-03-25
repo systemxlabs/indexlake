@@ -97,14 +97,15 @@ async fn create_bm25_index(
     assert_inline_row_count(&table, |count| count > 0).await?;
     assert_data_file_count(&table, |count| count > 0).await?;
 
-    let search = TableSearch {
+    let mut search = TableSearch {
         query: Arc::new(BM25SearchQuery {
             query: "pink".to_string(),
             limit: Some(2),
         }),
         projection: None,
+        dynamic_fields: vec![],
     };
-    let table_str = table_search(&table, search).await?;
+    let table_str = table_search(&table, search.clone()).await?;
     println!("{}", table_str);
     assert_eq!(
         table_str,
@@ -116,14 +117,29 @@ async fn create_bm25_index(
 +--------+---------------------------------------------------------------+"#,
     );
 
-    let search = TableSearch {
+    search.dynamic_fields = vec!["score".to_string()];
+
+    let table_str = table_search(&table, search).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+--------+---------------------------------------------------------------+--------------------+
+| title  | content                                                       | score              |
++--------+---------------------------------------------------------------+--------------------+
+| title3 | Apples, oranges, pink grapefruits, and more pink grapefruits. | 0.8737615346908569 |
+| title1 | The sky blushed pink as the sun dipped below the horizon.     | 0.7507261633872986 |
++--------+---------------------------------------------------------------+--------------------+"#,
+    );
+
+    let mut search = TableSearch {
         query: Arc::new(BM25SearchQuery {
             query: "大学".to_string(),
             limit: Some(2),
         }),
         projection: None,
+        dynamic_fields: vec![],
     };
-    let table_str = table_search(&table, search).await?;
+    let table_str = table_search(&table, search.clone()).await?;
     println!("{}", table_str);
     assert_eq!(
         table_str,
@@ -133,6 +149,20 @@ async fn create_bm25_index(
 | title6 | 张华考上了北京大学；李萍进了中国人民大学；我在百货公司当售货员：我们都有光明的前途。 |
 | title5 | 小明硕士毕业于中国科学院计算所，后在日本京都大学深造。                               |
 +--------+--------------------------------------------------------------------------------------+"#,
+    );
+
+    search.dynamic_fields = vec!["score".to_string()];
+
+    let table_str = table_search(&table, search).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+--------+--------------------------------------------------------------------------------------+--------------------+
+| title  | content                                                                              | score              |
++--------+--------------------------------------------------------------------------------------+--------------------+
+| title6 | 张华考上了北京大学；李萍进了中国人民大学；我在百货公司当售货员：我们都有光明的前途。 | 0.8559613823890686 |
+| title5 | 小明硕士毕业于中国科学院计算所，后在日本京都大学深造。                               | 0.7545782923698425 |
++--------+--------------------------------------------------------------------------------------+--------------------+"#,
     );
 
     Ok(())
