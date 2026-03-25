@@ -103,6 +103,7 @@ async fn create_bm25_index(
             limit: Some(2),
         }),
         projection: None,
+        dynamic_fields: vec![],
     };
     let table_str = table_search(&table, search).await?;
     println!("{}", table_str);
@@ -122,6 +123,7 @@ async fn create_bm25_index(
             limit: Some(2),
         }),
         projection: None,
+        dynamic_fields: vec![],
     };
     let table_str = table_search(&table, search).await?;
     println!("{}", table_str);

@@ -54,6 +54,7 @@ async fn create_hnsw_index(
             limit: 2,
         }),
         projection: None,
+        dynamic_fields: vec![],
     };
 
     let table = client.load_table(&namespace_name, &table_name).await?;

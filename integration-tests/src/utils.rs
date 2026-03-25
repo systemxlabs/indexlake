@@ -65,12 +65,7 @@ pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
 }
 
 pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String> {
-    let batch_schema = Arc::new(project_schema(
-        &table.output_schema,
-        search.projection.as_ref(),
-    )?);
-    let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
-
+    let search_projection = search.projection.clone();
     let stream = table.search(search).await?;
     let mut batches = stream.try_collect::<Vec<_>>().await?;
 
@@ -80,6 +75,17 @@ pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String
         };
         batch.remove_column(idx);
     }
+
+    // TODO fix
+    let batch_schema = if let Some(batch) = batches.first() {
+        batch.schema()
+    } else {
+        let batch_schema = Arc::new(project_schema(
+            &table.output_schema,
+            search_projection.as_ref(),
+        )?);
+        Arc::new(schema_without_row_id(&batch_schema))
+    };
 
     let table_str = pretty_format_batches_with_schema(batch_schema, &batches)?.to_string();
     Ok(table_str)

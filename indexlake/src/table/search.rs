@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow::array::{FixedSizeBinaryArray, Float64Array, RecordBatch};
+use arrow::array::{ArrayRef, FixedSizeBinaryArray, Float64Array, RecordBatch};
 use arrow::compute::SortOptions;
+use arrow::datatypes::{FieldRef, Schema};
 use futures::TryStreamExt;
 use uuid::Uuid;
 
@@ -10,16 +11,17 @@ use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, Row, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
-use crate::index::{IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
+use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
 use crate::storage::{Storage, read_data_file_by_record};
 use crate::table::Table;
-use crate::utils::project_schema;
+use crate::utils::{extract_row_ids_from_record_batch, project_schema};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, Clone)]
 pub struct TableSearch {
     pub query: Arc<dyn SearchQuery>,
     pub projection: Option<Vec<usize>>,
+    pub dynamic_fields: Vec<String>,
 }
 
 pub(crate) async fn process_search(
@@ -68,6 +70,7 @@ pub(crate) async fn process_search(
         let index_kind = index_kind.clone();
         let index_def = index_def.clone();
         let search_query = search.query.clone();
+        let dynamic_fields = search.dynamic_fields.clone();
         let handle = tokio::spawn(async move {
             let index_file_record = catalog_helper
                 .get_index_file_by_index_id_and_data_file_id(&index_id, &data_file_id)
@@ -82,6 +85,7 @@ pub(crate) async fn process_search(
                 &index_def,
                 search_query.as_ref(),
                 &index_file_record,
+                &dynamic_fields,
             )
             .await?;
             Ok::<_, ILError>((data_file_id, search_entries))
@@ -91,33 +95,33 @@ pub(crate) async fn process_search(
 
     let join_all = futures::future::join_all(handles).await;
 
-    let mut index_file_search_entries = HashMap::with_capacity(join_all.len());
+    let mut all_search_entries = Vec::with_capacity(join_all.len() + 1);
     for res in join_all {
         let (data_file_id, search_entries) = res??;
-        index_file_search_entries.insert(data_file_id, search_entries);
+        all_search_entries.push((RowLocation::DataFile(data_file_id), search_entries));
     }
 
     let inline_search_entries = inline_handle.await??;
-
     let score_higher_is_better = inline_search_entries.score_higher_is_better;
+    all_search_entries.push((RowLocation::Inline, inline_search_entries));
 
-    let row_id_score_locations = merge_search_index_entries(
-        inline_search_entries,
-        index_file_search_entries,
+    let merged_entries = merge_search_index_entries(
+        all_search_entries,
+        score_higher_is_better,
         search.query.limit(),
     )?;
 
     let inline_batch = read_inline_rows(
         &catalog_helper,
         table,
-        &row_id_score_locations,
+        &merged_entries.row_score_locations,
         search.projection.clone(),
     )
     .await?;
 
     let data_file_batches = read_data_file_rows(
         table,
-        &row_id_score_locations,
+        &merged_entries.row_score_locations,
         search.projection.clone(),
         &data_file_records,
     )
@@ -126,11 +130,14 @@ pub(crate) async fn process_search(
     let sorted_batch = sort_batches(
         inline_batch,
         data_file_batches,
-        &row_id_score_locations,
+        &merged_entries.row_score_locations,
         score_higher_is_better,
     )?;
+    let dynamic_columns =
+        gather_dynamic_columns_from_batch(&sorted_batch, &merged_entries.dynamic_lookups)?;
+    let final_batch = append_dynamic_columns_to_record_batch(&sorted_batch, &dynamic_columns)?;
 
-    Ok(Box::pin(futures::stream::iter(vec![Ok(sorted_batch)])))
+    Ok(Box::pin(futures::stream::iter(vec![Ok(final_batch)])))
 }
 
 async fn search_inline_rows(
@@ -151,7 +158,9 @@ async fn search_inline_rows(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search.query.as_ref(), &[]).await?;
+    let search_index_entries = index
+        .search(search.query.as_ref(), &search.dynamic_fields)
+        .await?;
 
     Ok(search_index_entries)
 }
@@ -162,6 +171,7 @@ async fn search_index_file(
     index_def: &IndexDefinitionRef,
     search_query: &dyn SearchQuery,
     index_file_record: &IndexFileRecord,
+    dynamic_fields: &[String],
 ) -> ILResult<SearchIndexEntries> {
     let index_file = storage.open(&index_file_record.relative_path).await?;
 
@@ -170,59 +180,40 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search_query, &[]).await?;
+    let search_index_entries = index.search(search_query, dynamic_fields).await?;
 
     Ok(search_index_entries)
 }
 
 fn merge_search_index_entries(
-    inline_search_entries: SearchIndexEntries,
-    index_file_search_entries: HashMap<Uuid, SearchIndexEntries>,
+    search_entries: Vec<(RowLocation, SearchIndexEntries)>,
+    score_higher_is_better: bool,
     limit: Option<usize>,
-) -> ILResult<Vec<(RowScore, RowLocation)>> {
-    let mut row_id_score_locations = Vec::new();
-    if inline_search_entries.row_ids.len() != inline_search_entries.scores.len() {
-        return Err(ILError::internal(format!(
-            "Search index entries row_ids length {} does not match scores length {}",
-            inline_search_entries.row_ids.len(),
-            inline_search_entries.scores.len()
-        )));
-    }
-    for (row_id, score) in inline_search_entries
-        .row_ids
-        .into_iter()
-        .zip(inline_search_entries.scores.into_iter())
-    {
-        row_id_score_locations.push((RowScore { row_id, score }, RowLocation::Inline));
-    }
-    for (data_file_id, search_index_entries) in index_file_search_entries.into_iter() {
-        if search_index_entries.row_ids.len() != search_index_entries.scores.len() {
-            return Err(ILError::internal(format!(
-                "Search index entries row_ids length {} does not match scores length {}",
-                search_index_entries.row_ids.len(),
-                search_index_entries.scores.len()
-            )));
-        }
-        for (row_id, score) in search_index_entries
+) -> ILResult<MergedSearchEntries> {
+    let mut row_score_locations = Vec::new();
+    let mut all_row_ids = Vec::new();
+    let mut dynamic_column_groups = Vec::new();
+
+    for (location, search_entries) in search_entries {
+        all_row_ids.extend(search_entries.row_ids.iter().copied());
+        dynamic_column_groups.push(search_entries.dynamic_columns.clone());
+        for (row_id, score) in search_entries
             .row_ids
             .into_iter()
-            .zip(search_index_entries.scores.into_iter())
+            .zip(search_entries.scores.into_iter())
         {
-            row_id_score_locations.push((
-                RowScore { row_id, score },
-                RowLocation::DataFile(data_file_id),
-            ));
+            row_score_locations.push((RowScore { row_id, score }, location.clone()));
         }
     }
 
-    if inline_search_entries.score_higher_is_better {
-        row_id_score_locations.sort_by(|a, b| {
+    if score_higher_is_better {
+        row_score_locations.sort_by(|a, b| {
             b.0.score
                 .partial_cmp(&a.0.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     } else {
-        row_id_score_locations.sort_by(|a, b| {
+        row_score_locations.sort_by(|a, b| {
             a.0.score
                 .partial_cmp(&b.0.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -230,10 +221,16 @@ fn merge_search_index_entries(
     }
 
     if let Some(limit) = limit {
-        row_id_score_locations.truncate(limit);
+        row_score_locations.truncate(limit);
     }
 
-    Ok(row_id_score_locations)
+    let dynamic_columns = concat_dynamic_columns(&dynamic_column_groups)?;
+    let dynamic_lookups = build_dynamic_column_lookups(&all_row_ids, &dynamic_columns)?;
+
+    Ok(MergedSearchEntries {
+        row_score_locations,
+        dynamic_lookups,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -242,10 +239,154 @@ struct RowScore {
     score: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+struct DynamicColumnLookup {
+    field: FieldRef,
+    row_id_to_index: HashMap<Uuid, u32>,
+    values: ArrayRef,
+}
+
+#[derive(Debug, Clone)]
+struct MergedSearchEntries {
+    row_score_locations: Vec<(RowScore, RowLocation)>,
+    dynamic_lookups: Vec<DynamicColumnLookup>,
+}
+
+#[derive(Debug, Clone)]
 enum RowLocation {
     Inline,
     DataFile(Uuid),
+}
+
+fn concat_dynamic_columns(column_groups: &[Vec<DynamicColumn>]) -> ILResult<Vec<DynamicColumn>> {
+    if column_groups.is_empty() {
+        return Err(ILError::internal(
+            "No search index entries found when concatenating dynamic columns",
+        ));
+    }
+
+    let mut output = Vec::new();
+    for (idx, expected_column) in column_groups[0].iter().enumerate() {
+        let arrays = column_groups
+            .iter()
+            .map(|group| {
+                let column = group.get(idx).ok_or_else(|| {
+                    ILError::internal(format!(
+                        "Dynamic column group missing column {}",
+                        expected_column.field.name()
+                    ))
+                })?;
+                if column.field.as_ref() != expected_column.field.as_ref() {
+                    return Err(ILError::internal(format!(
+                        "Dynamic column field mismatch: expected {:?}, got {:?}",
+                        expected_column.field, column.field
+                    )));
+                }
+                Ok(column.values.as_ref())
+            })
+            .collect::<ILResult<Vec<_>>>()?;
+        let values = arrow::compute::concat(arrays.as_slice())?;
+        output.push(DynamicColumn {
+            field: expected_column.field.clone(),
+            values,
+        });
+    }
+    Ok(output)
+}
+
+fn build_dynamic_column_lookups(
+    row_ids: &[Uuid],
+    dynamic_columns: &[DynamicColumn],
+) -> ILResult<Vec<DynamicColumnLookup>> {
+    let mut row_id_to_index = HashMap::with_capacity(row_ids.len());
+    for (idx, row_id) in row_ids.iter().enumerate() {
+        if row_id_to_index.insert(*row_id, idx as u32).is_some() {
+            return Err(ILError::internal(format!(
+                "Duplicate row id {row_id} found while building dynamic column lookups"
+            )));
+        }
+    }
+
+    dynamic_columns
+        .iter()
+        .map(|column| {
+            if column.values.len() != row_ids.len() {
+                return Err(ILError::internal(format!(
+                    "Dynamic column {} length {} does not match row count {}",
+                    column.field.name(),
+                    column.values.len(),
+                    row_ids.len()
+                )));
+            }
+            Ok(DynamicColumnLookup {
+                field: column.field.clone(),
+                row_id_to_index: row_id_to_index.clone(),
+                values: column.values.clone(),
+            })
+        })
+        .collect()
+}
+
+fn gather_dynamic_columns_from_batch(
+    batch: &RecordBatch,
+    lookups: &[DynamicColumnLookup],
+) -> ILResult<Vec<DynamicColumn>> {
+    if lookups.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let row_ids = extract_row_ids_from_record_batch(batch)?;
+    lookups
+        .iter()
+        .map(|lookup| {
+            let indices = row_ids
+                .iter()
+                .map(|row_id| {
+                    lookup.row_id_to_index.get(row_id).copied().ok_or_else(|| {
+                        ILError::internal(format!(
+                            "Dynamic column {} lookup missing row id {row_id}",
+                            lookup.field.name()
+                        ))
+                    })
+                })
+                .collect::<ILResult<Vec<_>>>()?;
+            let indices = arrow::array::UInt32Array::from(indices);
+            let values = arrow::compute::take(lookup.values.as_ref(), &indices, None)?;
+            Ok(DynamicColumn {
+                field: lookup.field.clone(),
+                values,
+            })
+        })
+        .collect()
+}
+
+fn append_dynamic_columns_to_record_batch(
+    batch: &RecordBatch,
+    dynamic_columns: &[DynamicColumn],
+) -> ILResult<RecordBatch> {
+    if dynamic_columns.is_empty() {
+        return Ok(batch.clone());
+    }
+
+    let mut fields = batch.schema().fields().iter().cloned().collect::<Vec<_>>();
+    let mut arrays = batch.columns().to_vec();
+    for column in dynamic_columns {
+        if column.values.len() != batch.num_rows() {
+            return Err(ILError::internal(format!(
+                "Dynamic column {} length {} does not match batch row count {}",
+                column.field.name(),
+                column.values.len(),
+                batch.num_rows()
+            )));
+        }
+        fields.push(column.field.clone());
+        arrays.push(column.values.clone());
+    }
+    let schema = Arc::new(Schema::new_with_metadata(
+        fields,
+        batch.schema().metadata().clone(),
+    ));
+    Ok(RecordBatch::try_new(schema, arrays)?)
 }
 
 async fn read_inline_rows(
