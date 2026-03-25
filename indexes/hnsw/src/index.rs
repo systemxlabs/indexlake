@@ -2,7 +2,7 @@ use std::any::Any;
 
 use hnsw::Hnsw;
 use indexlake::expr::Expr;
-use indexlake::index::{FilterIndexEntries, Index, RowIdScore, SearchIndexEntries, SearchQuery};
+use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
 use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
 use space::Knn;
@@ -62,15 +62,15 @@ impl Index for HnswIndex {
         let limit = std::cmp::min(query.limit, self.hnsw.len());
 
         let neighbors = self.hnsw.knn(&query.vector, limit);
-        let mut row_id_scores = vec![];
+        let mut row_ids = Vec::with_capacity(neighbors.len());
+        let mut scores = Vec::with_capacity(neighbors.len());
         for neighbor in neighbors {
-            row_id_scores.push(RowIdScore {
-                row_id: self.row_ids[neighbor.index],
-                score: neighbor.distance as f64,
-            });
+            row_ids.push(self.row_ids[neighbor.index]);
+            scores.push(neighbor.distance as f64);
         }
         Ok(SearchIndexEntries {
-            row_id_scores,
+            row_ids,
+            scores,
             score_higher_is_better: false,
         })
     }

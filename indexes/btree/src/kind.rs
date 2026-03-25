@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, FieldRef};
 use indexlake::expr::{BinaryOp, Expr};
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
@@ -71,6 +71,10 @@ impl IndexKind for BTreeIndexKind {
         _query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(false)
+    }
+
+    fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {
+        Ok(Vec::new())
     }
 
     fn supports_filter(

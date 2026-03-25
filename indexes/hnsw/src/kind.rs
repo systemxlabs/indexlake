@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, Field, FieldRef};
 use indexlake::expr::Expr;
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
@@ -65,6 +65,14 @@ impl IndexKind for HnswIndexKind {
             return Ok(false);
         };
         Ok(true)
+    }
+
+    fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {
+        Ok(vec![Arc::new(Field::new(
+            "distance",
+            DataType::Float64,
+            false,
+        ))])
     }
 
     fn supports_filter(

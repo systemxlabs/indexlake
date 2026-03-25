@@ -3,7 +3,7 @@ use std::any::Any;
 use bm25::Embedder;
 use indexlake::expr::Expr;
 use indexlake::index::{
-    FilterIndexEntries, Index, IndexDefinitionRef, RowIdScore, SearchIndexEntries, SearchQuery,
+    FilterIndexEntries, Index, IndexDefinitionRef, SearchIndexEntries, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 
@@ -49,16 +49,16 @@ impl Index for BM25Index {
             matches.truncate(limit);
         }
 
-        let row_id_scores: Vec<_> = matches
-            .into_iter()
-            .map(|doc| RowIdScore {
-                row_id: doc.id,
-                score: doc.score as f64,
-            })
-            .collect();
+        let mut row_ids = Vec::with_capacity(matches.len());
+        let mut scores = Vec::with_capacity(matches.len());
+        for doc in matches {
+            row_ids.push(doc.id);
+            scores.push(doc.score as f64);
+        }
 
         Ok(SearchIndexEntries {
-            row_id_scores,
+            row_ids,
+            scores,
             score_higher_is_better: true,
         })
     }

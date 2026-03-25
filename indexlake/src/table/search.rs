@@ -10,7 +10,7 @@ use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, Row, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
-use crate::index::{IndexDefinitionRef, IndexKind, RowIdScore, SearchIndexEntries, SearchQuery};
+use crate::index::{IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
 use crate::storage::{Storage, read_data_file_by_record};
 use crate::table::Table;
 use crate::utils::project_schema;
@@ -179,14 +179,39 @@ fn merge_search_index_entries(
     inline_search_entries: SearchIndexEntries,
     index_file_search_entries: HashMap<Uuid, SearchIndexEntries>,
     limit: Option<usize>,
-) -> ILResult<Vec<(RowIdScore, RowLocation)>> {
+) -> ILResult<Vec<(RowScore, RowLocation)>> {
     let mut row_id_score_locations = Vec::new();
-    for row_id_score in inline_search_entries.row_id_scores.into_iter() {
-        row_id_score_locations.push((row_id_score, RowLocation::Inline));
+    if inline_search_entries.row_ids.len() != inline_search_entries.scores.len() {
+        return Err(ILError::internal(format!(
+            "Search index entries row_ids length {} does not match scores length {}",
+            inline_search_entries.row_ids.len(),
+            inline_search_entries.scores.len()
+        )));
+    }
+    for (row_id, score) in inline_search_entries
+        .row_ids
+        .into_iter()
+        .zip(inline_search_entries.scores.into_iter())
+    {
+        row_id_score_locations.push((RowScore { row_id, score }, RowLocation::Inline));
     }
     for (data_file_id, search_index_entries) in index_file_search_entries.into_iter() {
-        for row_id_score in search_index_entries.row_id_scores.into_iter() {
-            row_id_score_locations.push((row_id_score, RowLocation::DataFile(data_file_id)));
+        if search_index_entries.row_ids.len() != search_index_entries.scores.len() {
+            return Err(ILError::internal(format!(
+                "Search index entries row_ids length {} does not match scores length {}",
+                search_index_entries.row_ids.len(),
+                search_index_entries.scores.len()
+            )));
+        }
+        for (row_id, score) in search_index_entries
+            .row_ids
+            .into_iter()
+            .zip(search_index_entries.scores.into_iter())
+        {
+            row_id_score_locations.push((
+                RowScore { row_id, score },
+                RowLocation::DataFile(data_file_id),
+            ));
         }
     }
 
@@ -211,6 +236,12 @@ fn merge_search_index_entries(
     Ok(row_id_score_locations)
 }
 
+#[derive(Debug, Clone)]
+struct RowScore {
+    row_id: Uuid,
+    score: f64,
+}
+
 #[derive(Debug)]
 enum RowLocation {
     Inline,
@@ -220,13 +251,13 @@ enum RowLocation {
 async fn read_inline_rows(
     catalog_helper: &CatalogHelper,
     table: &Table,
-    row_id_score_locations: &[(RowIdScore, RowLocation)],
+    row_id_score_locations: &[(RowScore, RowLocation)],
     projection: Option<Vec<usize>>,
 ) -> ILResult<RecordBatch> {
     let inline_row_ids = row_id_score_locations
         .iter()
         .filter(|(_, location)| matches!(location, RowLocation::Inline))
-        .map(|(row_id_score, _)| row_id_score.row_id)
+        .map(|(row, _)| row.row_id)
         .collect::<Vec<_>>();
 
     let projected_schema = Arc::new(project_schema(
@@ -252,19 +283,19 @@ async fn read_inline_rows(
 
 async fn read_data_file_rows(
     table: &Table,
-    row_id_score_locations: &[(RowIdScore, RowLocation)],
+    row_id_score_locations: &[(RowScore, RowLocation)],
     projection: Option<Vec<usize>>,
     data_file_records: &[DataFileRecord],
 ) -> ILResult<Vec<RecordBatch>> {
     let mut data_file_row_ids = HashMap::new();
-    for (row_id_score, location) in row_id_score_locations {
+    for (row, location) in row_id_score_locations {
         match location {
             RowLocation::Inline => {}
             RowLocation::DataFile(data_file_id) => {
                 data_file_row_ids
                     .entry(*data_file_id)
                     .or_insert(Vec::new())
-                    .push(row_id_score.row_id);
+                    .push(row.row_id);
             }
         }
     }
@@ -296,7 +327,7 @@ async fn read_data_file_rows(
 fn sort_batches(
     inline_batch: RecordBatch,
     data_file_batches: Vec<RecordBatch>,
-    row_id_score_locations: &[(RowIdScore, RowLocation)],
+    row_id_score_locations: &[(RowScore, RowLocation)],
     score_higher_is_better: bool,
 ) -> ILResult<RecordBatch> {
     let mut batch = inline_batch;
@@ -313,13 +344,13 @@ fn sort_batches(
     for row_id in row_id_array.iter() {
         let row_id_bytes = row_id.ok_or(ILError::index("Row id is null"))?;
         let row_id = Uuid::from_slice(row_id_bytes)?;
-        let row_id_score = row_id_score_locations
+        let row = row_id_score_locations
             .iter()
-            .find(|(row_id_score, _)| row_id_score.row_id == row_id)
+            .find(|(row, _)| row.row_id == row_id)
             .ok_or(ILError::index(format!(
                 "Row id score not found for row id {row_id}"
             )))?;
-        scores.push(row_id_score.0.score);
+        scores.push(row.0.score);
     }
 
     let scores_array = Float64Array::from(scores);

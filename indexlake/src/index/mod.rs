@@ -9,6 +9,7 @@ use crate::ILResult;
 use crate::expr::Expr;
 use crate::storage::{InputFile, OutputFile};
 use arrow::array::RecordBatch;
+use arrow::datatypes::FieldRef;
 use std::any::Any;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -28,6 +29,8 @@ pub trait IndexKind: Debug + Send + Sync {
         index_def: &IndexDefinition,
         query: &dyn SearchQuery,
     ) -> ILResult<bool>;
+
+    fn dynamic_fields(&self, index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>>;
 
     fn supports_filter(
         &self,
@@ -62,14 +65,9 @@ pub trait Index: Debug + Send + Sync {
 
 #[derive(Debug, Clone)]
 pub struct SearchIndexEntries {
-    pub row_id_scores: Vec<RowIdScore>,
+    pub row_ids: Vec<Uuid>,
+    pub scores: Vec<f64>,
     pub score_higher_is_better: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RowIdScore {
-    pub row_id: Uuid,
-    pub score: f64,
 }
 
 #[derive(Debug, Clone)]
