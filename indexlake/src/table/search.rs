@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, FixedSizeBinaryArray, Float64Array, RecordBatch};
 use arrow::compute::SortOptions;
-use arrow::datatypes::{FieldRef, Schema};
+use arrow::datatypes::{FieldRef, Schema, SchemaRef};
 use futures::TryStreamExt;
 use uuid::Uuid;
 
@@ -22,6 +22,53 @@ pub struct TableSearch {
     pub query: Arc<dyn SearchQuery>,
     pub projection: Option<Vec<usize>>,
     pub dynamic_fields: Vec<String>,
+}
+
+impl TableSearch {
+    pub fn output_schema(&self, table: &Table) -> ILResult<SchemaRef> {
+        let projected_schema = project_schema(&table.output_schema, self.projection.as_ref())?;
+        if self.dynamic_fields.is_empty() {
+            return Ok(Arc::new(projected_schema));
+        }
+
+        let index_kind_name = self.query.index_kind();
+        let (index_def, index_kind) = table
+            .index_manager
+            .iter_index_and_kind()
+            .find(|(index_def, _)| index_def.kind == index_kind_name)
+            .ok_or_else(|| {
+                ILError::index(format!(
+                    "Index not found for search query: {:?}",
+                    self.query
+                ))
+            })?;
+
+        let supported_fields = index_kind
+            .dynamic_fields(index_def.as_ref())?
+            .into_iter()
+            .map(|field| (field.name().clone(), field))
+            .collect::<HashMap<_, _>>();
+
+        let mut fields = projected_schema
+            .fields()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for name in &self.dynamic_fields {
+            let field = supported_fields.get(name).cloned().ok_or_else(|| {
+                ILError::invalid_input(format!(
+                    "Unsupported dynamic field `{name}` for index `{}`",
+                    index_def.name
+                ))
+            })?;
+            fields.push(field);
+        }
+
+        Ok(Arc::new(Schema::new_with_metadata(
+            fields,
+            projected_schema.metadata().clone(),
+        )))
+    }
 }
 
 pub(crate) async fn process_search(

@@ -9,7 +9,7 @@ use datafusion::prelude::SessionContext;
 use futures::TryStreamExt;
 use indexlake::catalog::INTERNAL_ROW_ID_FIELD_NAME;
 use indexlake::table::{Table, TableScan, TableSearch};
-use indexlake::utils::{project_schema, schema_without_row_id};
+use indexlake::utils::schema_without_row_id;
 use indexlake::{ILError, ILResult};
 
 pub fn sort_record_batches(batches: &[RecordBatch], sort_col: &str) -> ILResult<RecordBatch> {
@@ -65,7 +65,8 @@ pub async fn table_scan(table: &Table, scan: TableScan) -> ILResult<String> {
 }
 
 pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String> {
-    let search_projection = search.projection.clone();
+    let batch_schema = search.output_schema(table)?;
+    let batch_schema = Arc::new(schema_without_row_id(&batch_schema));
     let stream = table.search(search).await?;
     let mut batches = stream.try_collect::<Vec<_>>().await?;
 
@@ -75,17 +76,6 @@ pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String
         };
         batch.remove_column(idx);
     }
-
-    // TODO fix
-    let batch_schema = if let Some(batch) = batches.first() {
-        batch.schema()
-    } else {
-        let batch_schema = Arc::new(project_schema(
-            &table.output_schema,
-            search_projection.as_ref(),
-        )?);
-        Arc::new(schema_without_row_id(&batch_schema))
-    };
 
     let table_str = pretty_format_batches_with_schema(batch_schema, &batches)?.to_string();
     Ok(table_str)
