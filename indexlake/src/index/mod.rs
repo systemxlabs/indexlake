@@ -43,6 +43,8 @@ pub trait IndexKind: Debug + Send + Sync {
 pub trait IndexBuilder: Debug + Send + Sync {
     fn index_def(&self) -> &IndexDefinitionRef;
 
+    fn is_empty(&self) -> bool;
+
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()>;
 
     async fn read_file(&mut self, input_file: Box<dyn InputFile>) -> ILResult<()>;

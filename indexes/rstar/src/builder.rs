@@ -51,6 +51,10 @@ impl IndexBuilder for RStarIndexBuilder {
         &self.index_def
     }
 
+    fn is_empty(&self) -> bool {
+        self.index_batches.is_empty()
+    }
+
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()> {
         let params = self.index_def.downcast_params::<RStarIndexParams>()?;
 

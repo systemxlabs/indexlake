@@ -85,6 +85,10 @@ impl IndexBuilder for HnswIndexBuilder {
         &self.index_def
     }
 
+    fn is_empty(&self) -> bool {
+        self.row_id_vector.is_empty()
+    }
+
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()> {
         let row_id_array = extract_row_id_array_from_record_batch(batch)?;
 

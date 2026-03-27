@@ -8,7 +8,8 @@ use futures::TryStreamExt;
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, Row, rows_to_record_batch,
+    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord, Row,
+    rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
 use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
@@ -90,16 +91,27 @@ pub(crate) async fn process_search(
 
     let catalog_helper = CatalogHelper::new(table.catalog.clone());
 
-    let catalog_helper_captured = catalog_helper.clone();
+    let inline_index_records = catalog_helper
+        .get_inline_indexes(&[index_def.index_id])
+        .await?;
+
     let index_kind_captured = index_kind.clone();
     let index_def_captured = index_def.clone();
     let search_captured = search.clone();
     let inline_handle = tokio::spawn(async move {
+        if inline_index_records.is_empty() {
+            return Ok::<_, ILError>(SearchIndexEntries {
+                row_ids: vec![],
+                scores: vec![],
+                score_higher_is_better: false,
+                dynamic_columns: vec![],
+            });
+        }
         let inline_search_entries = search_inline_rows(
-            &catalog_helper_captured,
             index_kind_captured.as_ref(),
             &index_def_captured,
             &search_captured,
+            inline_index_records,
         )
         .await?;
         Ok::<_, ILError>(inline_search_entries)
@@ -188,16 +200,12 @@ pub(crate) async fn process_search(
 }
 
 async fn search_inline_rows(
-    catalog_helper: &CatalogHelper,
     index_kind: &dyn IndexKind,
     index_def: &IndexDefinitionRef,
     search: &TableSearch,
+    inline_index_records: Vec<InlineIndexRecord>,
 ) -> ILResult<SearchIndexEntries> {
     let mut index_builder = index_kind.builder(index_def)?;
-
-    let inline_index_records = catalog_helper
-        .get_inline_indexes(&[index_def.index_id])
-        .await?;
 
     for record in inline_index_records {
         index_builder.read_bytes(&record.index_data)?;
@@ -247,7 +255,7 @@ fn merge_search_index_entries(
         for (row_id, score) in search_entries
             .row_ids
             .into_iter()
-            .zip(search_entries.scores.into_iter())
+            .zip(search_entries.scores)
         {
             row_score_locations.push((RowScore { row_id, score }, location.clone()));
         }

@@ -153,6 +153,9 @@ impl DumpTask {
 
         let mut index_file_records = Vec::new();
         for index_builder in index_builders.iter_mut() {
+            if index_builder.is_empty() {
+                continue;
+            }
             let index_file_id = uuid::Uuid::now_v7();
             let relative_path = IndexFileRecord::build_relative_path(
                 &self.namespace_id,
@@ -293,6 +296,9 @@ pub(crate) async fn rebuild_inline_indexes(
 
         if counter >= 1000 {
             for index_builder in index_builders.iter_mut() {
+                if index_builder.is_empty() {
+                    continue;
+                }
                 let mut index_data = Vec::new();
                 index_builder.write_bytes(&mut index_data)?;
                 inline_index_records.push(InlineIndexRecord {
@@ -309,6 +315,9 @@ pub(crate) async fn rebuild_inline_indexes(
     // build inline index records for left rows
     if counter > 0 {
         for index_builder in index_builders.iter_mut() {
+            if index_builder.is_empty() {
+                continue;
+            }
             let mut index_data = Vec::new();
             index_builder.write_bytes(&mut index_data)?;
             inline_index_records.push(InlineIndexRecord {

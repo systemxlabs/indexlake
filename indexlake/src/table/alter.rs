@@ -262,6 +262,9 @@ async fn rewrite_data_files_add_column(
             });
 
             for builder in index_builders.iter_mut() {
+                if builder.is_empty() {
+                    continue;
+                }
                 let index_file_id = Uuid::now_v7();
                 let index_relative_path = IndexFileRecord::build_relative_path(
                     &table.namespace_id,

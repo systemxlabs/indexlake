@@ -162,6 +162,9 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
         });
 
         for index_builder in index_builders.iter_mut() {
+            if index_builder.is_empty() {
+                continue;
+            }
             let index_file_id = Uuid::now_v7();
             let relative_path = IndexFileRecord::build_relative_path(
                 &table.namespace_id,
