@@ -6,7 +6,7 @@
 
 **IndexLake** is an experimental table format with extensible index and inline table support.
 
-- **Extensible Index System**: Pluggable index types (BM25, B-Tree, HNSW, R*-tree)
+- **Extensible Index System**: Pluggable index types (BM25, B-Tree, HNSW, RaBitQ, R*-tree)
 - **Inline Tables**: Store small datasets directly within the catalog
 - **ACID Transaction**: Support transaction through sql catalog
 - **Flexible Catalog**: PostgreSQL and SQLite catalog support
