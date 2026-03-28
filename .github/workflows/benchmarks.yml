@@ -46,11 +46,11 @@ jobs:
             const allowed = {
               all: ["indexlake", "indexlake_btree", "indexlake_bm25", "indexlake_hnsw", "indexlake_rabitq", "indexlake_rstar"],
               indexlake: ["indexlake"],
-              btree: ["indexlake_btree"],
-              bm25: ["indexlake_bm25"],
-              hnsw: ["indexlake_hnsw"],
-              rabitq: ["indexlake_rabitq"],
-              rstar: ["indexlake_rstar"],
+              indexlake_btree: ["indexlake_btree"],
+              indexlake_bm25: ["indexlake_bm25"],
+              indexlake_hnsw: ["indexlake_hnsw"],
+              indexlake_rabitq: ["indexlake_rabitq"],
+              indexlake_rstar: ["indexlake_rstar"],
             };
 
             let benchKey = "all";
