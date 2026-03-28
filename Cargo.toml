@@ -8,12 +8,13 @@ members = [
   "indexes/btree",
   "indexes/hnsw",
   "indexes/rstar",
+  "indexes/rabitq",
   "indexlake",
   "integration-tests",
   "integrations/datafusion",
   "integrations/datafusion/gen",
   "storages/fs",
-  "storages/s3"
+  "storages/s3",
 ]
 resolver = "3"
 
@@ -34,6 +35,7 @@ indexlake-index-bm25 = { path = "indexes/bm25", version = "0.4.0" }
 indexlake-index-btree = { path = "indexes/btree", version = "0.4.0" }
 indexlake-index-hnsw = { path = "indexes/hnsw", version = "0.4.0" }
 indexlake-index-rstar = { path = "indexes/rstar", version = "0.4.0" }
+indexlake-index-rabitq = { path = "indexes/rabitq", version = "0.4.0" }
 indexlake-integration-tests = { path = "integration-tests", version = "0.4.0" }
 indexlake-storage-fs = { path = "storages/fs", version = "0.4.0" }
 indexlake-storage-s3 = { path = "storages/s3", version = "0.4.0" }
@@ -74,6 +76,7 @@ opendal = "0.54"
 parquet = "57"
 prost = "0.14"
 prost-build = "0.14"
+rabitq-rs = "0.9"
 rand = "0.9"
 rand_pcg = "0.9"
 rstar = "0.12"

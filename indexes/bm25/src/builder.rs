@@ -65,6 +65,10 @@ impl IndexBuilder for Bm25IndexBuilder {
         &self.index_def
     }
 
+    fn is_empty(&self) -> bool {
+        self.embeddings.is_empty()
+    }
+
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()> {
         let row_id_array = extract_row_id_array_from_record_batch(batch)?;
 

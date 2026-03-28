@@ -160,6 +160,9 @@ pub(crate) fn build_inline_indexes(
 
     let mut inline_index_records = Vec::new();
     for builder in index_builders.iter_mut() {
+        if builder.is_empty() {
+            continue;
+        }
         let mut index_data = Vec::new();
         builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
@@ -301,6 +304,9 @@ async fn finish_parquet_file(
 
     let mut index_file_records = Vec::new();
     for index_builder in index_builders.iter_mut() {
+        if index_builder.is_empty() {
+            continue;
+        }
         let index_file_id = Uuid::now_v7();
         let index_relative_path = IndexFileRecord::build_relative_path(
             &table.namespace_id,

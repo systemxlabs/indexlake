@@ -222,14 +222,16 @@ pub(crate) async fn process_create_index(
         index_builder.append(&batch)?;
     }
     drop(inline_stream);
-    let mut index_data = Vec::new();
-    index_builder.write_bytes(&mut index_data)?;
-    tx_helper
-        .insert_inline_indexes(&[InlineIndexRecord {
-            index_id,
-            index_data,
-        }])
-        .await?;
+    if !index_builder.is_empty() {
+        let mut index_data = Vec::new();
+        index_builder.write_bytes(&mut index_data)?;
+        tx_helper
+            .insert_inline_indexes(&[InlineIndexRecord {
+                index_id,
+                index_data,
+            }])
+            .await?;
+    }
 
     // create index file
     let mut projection = vec![0];

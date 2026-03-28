@@ -1,18 +1,22 @@
 [package]
-name = "indexlake-storage-fs"
+name = "indexlake-index-rabitq"
 version.workspace = true
 edition.workspace = true
 homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "IndexLake local fs storage"
+description = "IndexLake RaBitQ index"
 
 [dependencies]
 indexlake = { workspace = true }
 
+arrow = { workspace = true }
 async-trait = { workspace = true }
+bincode = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
-tokio = { workspace = true }
-tokio-stream = { workspace = true, features = ["fs"] }
+rabitq-rs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
