@@ -25,6 +25,7 @@ IndexLake
 │   ├── BM25                        # Full-text search index
 │   ├── B-Tree                      # Traditional B-Tree index
 │   ├── HNSW                        # Hierarchical navigable small world graph
+│   ├── RaBitQ                      # Randomized binary and quantization index
 │   └── R*-tree                     # Spatial index for multidimensional data
 ├── Storages
 │   ├── FS                          # Local filesystem storage
