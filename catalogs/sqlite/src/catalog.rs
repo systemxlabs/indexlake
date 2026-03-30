@@ -74,7 +74,7 @@ impl Catalog for SqliteCatalog {
         .map_err(|e| ILError::catalog(format!("failed to open sqlite db: {e}")))?;
         conn.busy_timeout(Duration::from_secs(30))
             .map_err(|e| ILError::catalog(format!("failed to set sqlite busy timeout: {e}")))?;
-        conn.execute_batch("BEGIN DEFERRED")
+        conn.execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| ILError::catalog(format!("failed to begin sqlite txn: {e}")))?;
         Ok(Box::new(SqliteTransaction { conn, done: false }))
     }
