@@ -15,3 +15,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 opendal = { workspace = true, features = ["services-s3"] }
+
+[lib]
+test = false
+doctest = false

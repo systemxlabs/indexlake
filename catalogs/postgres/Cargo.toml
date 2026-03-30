@@ -24,3 +24,7 @@ hex = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 uuid = { workspace = true }
+
+[lib]
+test = false
+doctest = false

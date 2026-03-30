@@ -12,25 +12,31 @@ publish = false
 indexlake = { workspace = true }
 indexlake-catalog-postgres = { workspace = true }
 indexlake-catalog-sqlite = { workspace = true }
+indexlake-storage-fs = { workspace = true }
+indexlake-storage-s3 = { workspace = true }
+
+arrow = { workspace = true, features = ["prettyprint"] }
+datafusion = { workspace = true }
+env_logger = { workspace = true }
+futures = { workspace = true }
+geo = { workspace = true }
+geozero = { workspace = true, features = ["with-wkb"] }
+opendal = { workspace = true, features = ["services-fs", "services-s3"] }
+rusqlite = { workspace = true, features = ["bundled"] }
+tokio = { workspace = true, features = ["full"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+bytes = { workspace = true }
+datafusion-proto = { workspace = true }
+hex = { workspace = true }
 indexlake-datafusion = { workspace = true }
 indexlake-index-bm25 = { workspace = true }
 indexlake-index-btree = { workspace = true }
 indexlake-index-hnsw = { workspace = true }
 indexlake-index-rstar = { workspace = true }
-indexlake-storage-fs = { workspace = true }
-indexlake-storage-s3 = { workspace = true }
-
-arrow = { workspace = true, features = ["prettyprint"] }
-bytes = { workspace = true }
-datafusion = { workspace = true }
-datafusion-proto = { workspace = true }
-env_logger = { workspace = true }
-futures = { workspace = true }
-geo = { workspace = true }
-geozero = { workspace = true, features = ["with-wkb"] }
-hex = { workspace = true }
-opendal = { workspace = true, features = ["services-fs", "services-s3"] }
 rstest = { workspace = true }
-rusqlite = { workspace = true, features = ["bundled"] }
-tokio = { workspace = true, features = ["full"] }
-uuid = { workspace = true, features = ["v4"] }
+
+[lib]
+test = false
+doctest = false

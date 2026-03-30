@@ -25,3 +25,6 @@ serde_json = { workspace = true }
 simsimd = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+
+[lib]
+doctest = false
