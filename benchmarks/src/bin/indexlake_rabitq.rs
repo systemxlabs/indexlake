@@ -9,51 +9,19 @@ use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableSearch};
 use indexlake::{Client, ILError};
 use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_vector_table_schema, new_vector_record_batch};
-use indexlake_index_rabitq::{
-    RabitqAlgo, RabitqIndexKind, RabitqIndexParams, RabitqMetric, RabitqSearchQuery,
-};
+use indexlake_index_rabitq::{RabitqIndexKind, RabitqIndexParams, RabitqMetric, RabitqSearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_env_logger();
-    let namespace_name = "bench_rabitq";
-
-    bench_algo(
-        namespace_name,
-        RabitqIndexParams {
-            algo: RabitqAlgo::BruteForce,
-            metric: RabitqMetric::L2,
-            total_bits: 7,
-            nlist: 256,
-        },
-    )
-    .await?;
-
-    bench_algo(
-        namespace_name,
-        RabitqIndexParams {
-            algo: RabitqAlgo::Ivf,
-            metric: RabitqMetric::L2,
-            total_bits: 7,
-            nlist: 64,
-        },
-    )
-    .await?;
-
-    Ok(())
-}
-
-async fn bench_algo(
-    namespace_name: &str,
-    params: RabitqIndexParams,
-) -> Result<(), Box<dyn std::error::Error>> {
     let catalog = catalog_postgres().await;
     let storage = storage_s3().await;
 
     let mut client = Client::new(catalog, storage);
     client.register_index_kind(Arc::new(RabitqIndexKind));
 
+    let namespace_name = "benchmark_rabitq";
     client.create_namespace(namespace_name, true).await?;
 
     let total_rows = 100000;
@@ -77,13 +45,15 @@ async fn bench_algo(
     };
     client.create_table(table_creation).await?;
 
-    let algo_name = format!("{:?}", params.algo);
-    let index_name = format!("rabitq_{}_index", algo_name.to_lowercase());
+    let index_name = "rabitq_index";
     let index_creation = IndexCreation {
-        name: index_name.clone(),
+        name: index_name.to_string(),
         kind: RabitqIndexKind.kind().to_string(),
         key_columns: vec!["vector".to_string()],
-        params: Arc::new(params),
+        params: Arc::new(RabitqIndexParams {
+            metric: RabitqMetric::L2,
+            total_bits: 7,
+        }),
         concurrency: 1,
         if_not_exists: false,
     };
@@ -109,27 +79,27 @@ async fn bench_algo(
         });
         handles.push(handle);
     }
+
     for handle in handles {
         handle.await??;
     }
+
     let insert_elapsed = start_time.elapsed();
     benchprintln!(
-        "RaBitQ {algo_name}: inserted {total_rows} rows, {num_tasks} tasks, batch size: {insert_batch_size}, format: {}, in {}ms",
+        "IndexLake RaBitQ: inserted {total_rows} rows, {num_tasks} tasks, batch size: {insert_batch_size}, format: {}, in {}ms",
         table_config.preferred_data_file_format,
         insert_elapsed.as_millis()
     );
 
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
-    let search_query = RabitqSearchQuery {
-        vector: vec![500.0f32; 1024],
-        limit: 10,
-        nprobe: 8,
-    };
-
     let start_time = Instant::now();
+    let limit = 10;
     let table_search = TableSearch {
-        query: Arc::new(search_query),
+        query: Arc::new(RabitqSearchQuery {
+            vector: vec![500.0; 1024],
+            limit,
+        }),
         projection: None,
         dynamic_fields: vec![],
     };
@@ -139,9 +109,11 @@ async fn bench_algo(
         let batch = batch?;
         search_count += batch.num_rows();
     }
+    assert_eq!(search_count, limit);
+
     let search_elapsed = start_time.elapsed();
     benchprintln!(
-        "RaBitQ {algo_name}: searched {search_count} rows in {}ms",
+        "IndexLake RaBitQ: searched {search_count} rows in {}ms",
         search_elapsed.as_millis()
     );
 

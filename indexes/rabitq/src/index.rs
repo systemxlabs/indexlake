@@ -6,26 +6,20 @@ use arrow::datatypes::{DataType, Field};
 use indexlake::expr::Expr;
 use indexlake::index::{DynamicColumn, FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
 use indexlake::{ILError, ILResult};
-use rabitq_rs::{BruteForceRabitqIndex, IvfRabitqIndex};
 use uuid::Uuid;
 
 use crate::RabitqMetric;
+use crate::rabitq::{BruteForceRabitqIndex, BruteForceSearchParams};
 
 #[derive(Debug)]
 pub struct RabitqSearchQuery {
     pub vector: Vec<f32>,
     pub limit: usize,
-    /// IVF: number of clusters to probe during search.
-    pub nprobe: usize,
 }
 
 impl RabitqSearchQuery {
     pub fn new(vector: Vec<f32>, limit: usize) -> Self {
-        Self {
-            vector,
-            limit,
-            nprobe: 8,
-        }
+        Self { vector, limit }
     }
 }
 
@@ -43,13 +37,8 @@ impl SearchQuery for RabitqSearchQuery {
     }
 }
 
-pub enum RabitqIndexInner {
-    BruteForce(BruteForceRabitqIndex),
-    Ivf(IvfRabitqIndex),
-}
-
 pub struct RabitqIndex {
-    pub inner: RabitqIndexInner,
+    pub inner: BruteForceRabitqIndex,
     pub row_ids: Vec<Uuid>,
     pub metric: RabitqMetric,
 }
@@ -80,31 +69,15 @@ impl Index for RabitqIndex {
 
         let score_higher_is_better = matches!(self.metric, RabitqMetric::InnerProduct);
 
-        let (row_ids, scores): (Vec<Uuid>, Vec<f64>) = match &self.inner {
-            RabitqIndexInner::BruteForce(idx) => {
-                let params = rabitq_rs::BruteForceSearchParams { top_k: query.limit };
-                let results = idx.search(&query.vector, params).map_err(|e| {
-                    ILError::index(format!("RaBitQ brute force search failed: {e}"))
-                })?;
-                results
-                    .into_iter()
-                    .map(|r| (self.row_ids[r.id], r.score as f64))
-                    .unzip()
-            }
-            RabitqIndexInner::Ivf(idx) => {
-                let params = rabitq_rs::SearchParams {
-                    top_k: query.limit,
-                    nprobe: query.nprobe,
-                };
-                let results = idx
-                    .search(&query.vector, params)
-                    .map_err(|e| ILError::index(format!("RaBitQ IVF search failed: {e}")))?;
-                results
-                    .into_iter()
-                    .map(|r| (self.row_ids[r.id], r.score as f64))
-                    .unzip()
-            }
-        };
+        let params = BruteForceSearchParams { top_k: query.limit };
+        let results = self
+            .inner
+            .search(&query.vector, params)
+            .map_err(|e| ILError::index(format!("RaBitQ brute force search failed: {e}")))?;
+        let (row_ids, scores): (Vec<Uuid>, Vec<f64>) = results
+            .into_iter()
+            .map(|r| (self.row_ids[r.id], r.score as f64))
+            .unzip();
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
         for dynamic_field in dynamic_fields {
