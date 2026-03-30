@@ -1,3 +1,5 @@
+PRAGMA journal_mode=WAL;
+
 CREATE TABLE IF NOT EXISTS indexlake_namespace (
     namespace_id BLOB PRIMARY KEY,
     namespace_name VARCHAR NOT NULL UNIQUE
