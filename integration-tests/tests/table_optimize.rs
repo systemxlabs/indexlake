@@ -70,7 +70,7 @@ async fn cleanup_orphan_files(
     // cleanup orphan files
     table
         .optimize(TableOptimization::CleanupOrphanFiles {
-            last_modified_before: timestamp_millis(),
+            last_modified_before: timestamp_millis() + 1,
         })
         .await?;
 
