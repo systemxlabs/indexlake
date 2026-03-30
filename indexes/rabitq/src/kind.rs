@@ -13,12 +13,6 @@ use serde::{Deserialize, Serialize};
 use crate::{RabitqIndexBuilder, RabitqSearchQuery};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RabitqAlgo {
-    BruteForce,
-    Ivf,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RabitqMetric {
     L2,
     InnerProduct,
@@ -26,22 +20,14 @@ pub enum RabitqMetric {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RabitqIndexParams {
-    pub algo: RabitqAlgo,
     pub metric: RabitqMetric,
     /// Number of bits for quantization.
     #[serde(default = "default_total_bits")]
     pub total_bits: usize,
-    /// IVF: number of clusters (nlist).
-    #[serde(default = "default_nlist")]
-    pub nlist: usize,
 }
 
 fn default_total_bits() -> usize {
     7
-}
-
-fn default_nlist() -> usize {
-    256
 }
 
 impl IndexParams for RabitqIndexParams {

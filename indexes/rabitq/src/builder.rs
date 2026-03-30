@@ -8,10 +8,10 @@ use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
 use indexlake::storage::{InputFile, OutputFile};
 use indexlake::utils::extract_row_id_array_from_record_batch;
 use indexlake::{ILError, ILResult};
-use rabitq_rs::{BruteForceRabitqIndex, IvfRabitqIndex, Metric, RotatorType};
 use uuid::Uuid;
 
-use crate::{RabitqAlgo, RabitqIndex, RabitqIndexInner, RabitqIndexParams, RabitqMetric};
+use crate::rabitq::{BruteForceRabitqIndex, Metric};
+use crate::{RabitqIndex, RabitqIndexParams, RabitqMetric};
 
 pub struct RabitqIndexBuilder {
     index_def: IndexDefinitionRef,
@@ -63,33 +63,8 @@ impl RabitqIndexBuilder {
             RabitqMetric::L2 => Metric::L2,
             RabitqMetric::InnerProduct => Metric::InnerProduct,
         };
-        let inner = match self.params.algo {
-            RabitqAlgo::BruteForce => {
-                let index = BruteForceRabitqIndex::train(
-                    &vectors,
-                    self.params.total_bits,
-                    metric,
-                    RotatorType::FhtKacRotator,
-                    42,
-                    true,
-                )
-                .map_err(|e| ILError::index(format!("RaBitQ brute force train failed: {e}")))?;
-                RabitqIndexInner::BruteForce(index)
-            }
-            RabitqAlgo::Ivf => {
-                let index = IvfRabitqIndex::train(
-                    &vectors,
-                    self.params.nlist,
-                    self.params.total_bits,
-                    metric,
-                    RotatorType::FhtKacRotator,
-                    42,
-                    true,
-                )
-                .map_err(|e| ILError::index(format!("RaBitQ IVF train failed: {e}")))?;
-                RabitqIndexInner::Ivf(index)
-            }
-        };
+        let inner = BruteForceRabitqIndex::train(&vectors, self.params.total_bits, metric, 42)
+            .map_err(|e| ILError::index(format!("RaBitQ brute force train failed: {e}")))?;
         Ok(RabitqIndex {
             inner,
             row_ids,
@@ -98,26 +73,19 @@ impl RabitqIndexBuilder {
     }
 }
 
-/// On-disk format: 1 byte algo tag + row_ids (bincode) + rabitq index bytes.
-/// Tag: 0 = BruteForce, 1 = Ivf.
+/// On-disk format: row_ids (bincode) + rabitq index bytes.
 fn serialize_index(index: &RabitqIndex) -> ILResult<BytesMut> {
     let mut buf = BytesMut::new();
     let row_ids_bytes = bincode::serialize(&index.row_ids)
         .map_err(|e| ILError::index(format!("Failed to serialize row ids: {e}")))?;
 
-    let tag = match &index.inner {
-        RabitqIndexInner::BruteForce(_) => 0u8,
-        RabitqIndexInner::Ivf(_) => 1u8,
-    };
-    buf.put_u8(tag);
     buf.put_u64_le(row_ids_bytes.len() as u64);
     buf.put_slice(&row_ids_bytes);
 
-    match &index.inner {
-        RabitqIndexInner::BruteForce(idx) => idx.save_to_writer(&mut (&mut buf).writer()),
-        RabitqIndexInner::Ivf(idx) => idx.save_to_writer(&mut (&mut buf).writer()),
-    }
-    .map_err(|e| ILError::index(format!("RaBitQ save failed: {e}")))?;
+    index
+        .inner
+        .save_to_writer(&mut (&mut buf).writer())
+        .map_err(|e| ILError::index(format!("RaBitQ save failed: {e}")))?;
 
     Ok(buf)
 }
@@ -126,23 +94,13 @@ fn deserialize_index(mut buf: Bytes, metric: RabitqMetric) -> ILResult<RabitqInd
     if buf.is_empty() {
         return Err(ILError::index("Empty RaBitQ index data"));
     }
-    let tag = buf.get_u8();
     let row_ids_len = buf.get_u64_le() as usize;
     let row_ids: Vec<Uuid> = bincode::deserialize(&buf[..row_ids_len])
         .map_err(|e| ILError::index(format!("Failed to deserialize row ids: {e}")))?;
     buf.advance(row_ids_len);
     let mut reader = buf.reader();
-    let inner = match tag {
-        0 => RabitqIndexInner::BruteForce(
-            BruteForceRabitqIndex::load_from_reader(&mut reader)
-                .map_err(|e| ILError::index(format!("RaBitQ load failed: {e}")))?,
-        ),
-        1 => RabitqIndexInner::Ivf(
-            IvfRabitqIndex::load_from_reader(&mut reader)
-                .map_err(|e| ILError::index(format!("RaBitQ load failed: {e}")))?,
-        ),
-        _ => return Err(ILError::index(format!("Unknown RaBitQ index tag: {tag}"))),
-    };
+    let inner = BruteForceRabitqIndex::load_from_reader(&mut reader)
+        .map_err(|e| ILError::index(format!("RaBitQ load failed: {e}")))?;
     Ok(RabitqIndex {
         inner,
         row_ids,
