@@ -14,7 +14,9 @@ pub(crate) fn parse_opendal_metadata(metadata: &opendal::Metadata) -> ILResult<F
     Ok(FileMetadata {
         size: metadata.content_length(),
         mode: parse_opendal_entry_mode(metadata.mode())?,
-        last_modified: metadata.last_modified().map(|dt| dt.timestamp_millis()),
+        last_modified: metadata
+            .last_modified()
+            .map(|dt| dt.into_inner().as_millisecond()),
     })
 }
 

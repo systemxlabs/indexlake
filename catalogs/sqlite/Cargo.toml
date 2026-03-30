@@ -16,7 +16,7 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 log = { workspace = true }
-rusqlite = { workspace = true }
+rusqlite = { workspace = true, features = ["fallible_uint"] }
 uuid = { workspace = true }
 
 [lib]

@@ -108,7 +108,7 @@ impl IndexBuilder for HnswIndexBuilder {
     async fn read_file(&mut self, mut input_file: Box<dyn InputFile>) -> ILResult<()> {
         let file_meta = input_file.metadata().await?;
         let data = input_file.read(0..file_meta.size).await?;
-        let hnsw_with_row_ids: HnswWithRowIds = bincode::deserialize(&data)
+        let hnsw_with_row_ids: HnswWithRowIds = postcard::from_bytes(&data)
             .map_err(|e| ILError::index(format!("Failed to deserialize Hnsw and row ids: {e}")))?;
         self.hnsw = hnsw_with_row_ids.hnsw;
         self.row_ids = hnsw_with_row_ids.row_ids;
@@ -121,7 +121,7 @@ impl IndexBuilder for HnswIndexBuilder {
             hnsw: std::mem::take(&mut self.hnsw),
             row_ids: std::mem::take(&mut self.row_ids),
         };
-        let data = bincode::serialize(&hnsw_with_row_ids)
+        let data = postcard::to_allocvec(&hnsw_with_row_ids)
             .map_err(|e| ILError::index(format!("Failed to serialize Hnsw and row ids: {e}")))?;
         output_file.write(Bytes::from_owner(data)).await?;
         output_file.close().await?;
