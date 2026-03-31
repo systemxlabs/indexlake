@@ -2605,6 +2605,7 @@ dependencies = [
  "async-trait",
  "bb8",
  "bb8-postgres",
+ "bytes",
  "futures",
  "hex",
  "indexlake",

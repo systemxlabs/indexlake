@@ -55,7 +55,6 @@ pub(crate) async fn process_insert_into_inline_rows_without_tx(
     let inline_index_records = build_inline_indexes(batches, index_builders)?;
 
     // insert inline rows
-    let sql_values = build_sql_values(batches, table.catalog.as_ref())?;
     let inline_field_names = batches[0]
         .schema()
         .fields()
@@ -65,7 +64,7 @@ pub(crate) async fn process_insert_into_inline_rows_without_tx(
 
     let mut tx_helper = table.transaction_helper().await?;
     tx_helper
-        .insert_inline_rows(&table.table_id, &inline_field_names, sql_values)
+        .insert_inline_rows(&table.table_id, &inline_field_names, batches)
         .await?;
 
     // insert inline index records
@@ -91,7 +90,6 @@ pub(crate) async fn process_insert_into_inline_rows_with_tx(
     let inline_index_records = build_inline_indexes(batches, index_builders)?;
 
     // insert inline rows
-    let sql_values = build_sql_values(batches, table.catalog.as_ref())?;
     let inline_field_names = batches[0]
         .schema()
         .fields()
@@ -99,7 +97,7 @@ pub(crate) async fn process_insert_into_inline_rows_with_tx(
         .map(|field| field.name().clone())
         .collect::<Vec<_>>();
     tx_helper
-        .insert_inline_rows(&table.table_id, &inline_field_names, sql_values)
+        .insert_inline_rows(&table.table_id, &inline_field_names, batches)
         .await?;
 
     // insert inline index records
@@ -133,19 +131,6 @@ pub(crate) async fn process_bypass_insert(
     }
 
     Ok(record_count)
-}
-
-pub(crate) fn build_sql_values(
-    batches: &[RecordBatch],
-    catalog: &dyn Catalog,
-) -> ILResult<Vec<Vec<String>>> {
-    let num_rows = batches.iter().map(|batch| batch.num_rows()).sum();
-    let mut all_sql_values = Vec::with_capacity(num_rows);
-    for batch in batches {
-        let sql_values = record_batch_to_sql_values(batch, catalog)?;
-        all_sql_values.extend(sql_values);
-    }
-    Ok(all_sql_values)
 }
 
 pub(crate) fn build_inline_indexes(
@@ -553,16 +538,4 @@ pub(crate) fn array_to_sql_literals(
         }
     };
     Ok(literals)
-}
-
-pub(crate) fn record_batch_to_sql_values(
-    record: &RecordBatch,
-    catalog: &dyn Catalog,
-) -> ILResult<Vec<Vec<String>>> {
-    let mut column_values_list = Vec::with_capacity(record.num_columns());
-    for array in record.columns() {
-        let column_values = array_to_sql_literals(array, catalog)?;
-        column_values_list.push(column_values);
-    }
-    Ok(column_values_list)
 }

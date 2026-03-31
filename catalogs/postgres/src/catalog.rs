@@ -1,7 +1,10 @@
+use arrow::array::RecordBatch;
 use arrow::datatypes::Schema;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use bb8_postgres::tokio_postgres::NoTls;
+use bb8_postgres::tokio_postgres::binary_copy::BinaryCopyInWriter;
+use bb8_postgres::tokio_postgres::types::ToSql;
 use futures::StreamExt;
 use indexlake::catalog::{
     Catalog, CatalogDataType, CatalogDatabase, CatalogSchemaRef, Row, RowStream, Scalar,
@@ -13,6 +16,7 @@ use log::{error, trace};
 use uuid::Uuid;
 
 use crate::SqlDisplay;
+use crate::types::{catalog_data_type_to_pg_type, scalar_to_pg_value};
 
 #[derive(Debug, Clone)]
 pub struct PostgresCatalog {
@@ -311,6 +315,64 @@ impl Transaction for PostgresTransaction {
                 SqlDisplay(&sql)
             ))
         })
+    }
+
+    async fn insert_rows(
+        &mut self,
+        table_name: &str,
+        field_names: &[String],
+        batches: &[RecordBatch],
+    ) -> ILResult<()> {
+        trace!("postgres txn insert rows: {table_name}");
+        self.check_done()?;
+
+        let copy_sql = format!(
+            "COPY {} ({}) FROM STDIN BINARY",
+            table_name,
+            field_names.join(", ")
+        );
+        trace!("postgres txn binary copy_in: {copy_sql}");
+
+        let sink = self
+            .conn_mut()?
+            .copy_in(&copy_sql)
+            .await
+            .map_err(|e| ILError::catalog(format!("failed to start COPY: {e}")))?;
+        let pg_types = batches[0]
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| CatalogDataType::from_arrow(f.data_type()).map(catalog_data_type_to_pg_type))
+            .collect::<ILResult<Vec<_>>>()?;
+        let mut writer = std::pin::pin!(BinaryCopyInWriter::new(sink, &pg_types));
+
+        for batch in batches {
+            for row_idx in 0..batch.num_rows() {
+                let values = batch
+                    .columns()
+                    .iter()
+                    .map(|col| {
+                        let scalar = Scalar::try_from_array(col.as_ref(), row_idx)?;
+                        scalar_to_pg_value(scalar)
+                    })
+                    .collect::<ILResult<Vec<_>>>()?;
+                let refs: Vec<&(dyn ToSql + Sync)> =
+                    values.iter().map(|v| v as &(dyn ToSql + Sync)).collect();
+                writer
+                    .as_mut()
+                    .write(&refs)
+                    .await
+                    .map_err(|e| ILError::catalog(format!("failed to write COPY row: {e}")))?;
+            }
+        }
+
+        let rows = writer
+            .finish()
+            .await
+            .map_err(|e| ILError::catalog(format!("failed to finish COPY: {e}")))?;
+        trace!("postgres COPY inserted {} rows", rows);
+
+        Ok(())
     }
 
     async fn commit(&mut self) -> ILResult<()> {

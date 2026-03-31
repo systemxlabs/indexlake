@@ -5,7 +5,6 @@ mod row;
 mod scalar;
 mod schema;
 
-use arrow_schema::Schema;
 pub use database::*;
 pub(crate) use helper::*;
 pub use record::*;
@@ -13,15 +12,16 @@ pub use row::*;
 pub use scalar::*;
 pub use schema::*;
 
-use futures::Stream;
-use uuid::Uuid;
-
 use crate::ILResult;
 use crate::expr::Expr;
+use arrow::array::RecordBatch;
 use arrow::datatypes::{DataType, Field, FieldRef};
+use arrow_schema::Schema;
+use futures::Stream;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
+use uuid::Uuid;
 
 pub type RowStream<'a> = Pin<Box<dyn Stream<Item = ILResult<Row>> + Send + 'a>>;
 
@@ -77,6 +77,15 @@ pub trait Transaction: Debug + Send {
 
     /// Execute a batch of SQL statements.
     async fn execute_batch(&mut self, sqls: &[String]) -> ILResult<()>;
+
+    /// Bulk insert rows into a table.
+    /// Each backend uses its optimal strategy (COPY for Postgres, prepared statements for SQLite).
+    async fn insert_rows(
+        &mut self,
+        table_name: &str,
+        field_names: &[String],
+        batches: &[RecordBatch],
+    ) -> ILResult<()>;
 
     /// Commit the transaction.
     async fn commit(&mut self) -> ILResult<()>;
