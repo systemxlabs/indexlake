@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
-[dependencies]
+[dev-dependencies]
 arrow = { workspace = true }
 indexlake = { workspace = true }
 indexlake-catalog-postgres = { workspace = true }

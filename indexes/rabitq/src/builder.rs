@@ -73,10 +73,10 @@ impl RabitqIndexBuilder {
     }
 }
 
-/// On-disk format: row_ids (bincode) + rabitq index bytes.
+/// On-disk format: row_ids (postcard) + rabitq index bytes.
 fn serialize_index(index: &RabitqIndex) -> ILResult<BytesMut> {
     let mut buf = BytesMut::new();
-    let row_ids_bytes = bincode::serialize(&index.row_ids)
+    let row_ids_bytes = postcard::to_allocvec(&index.row_ids)
         .map_err(|e| ILError::index(format!("Failed to serialize row ids: {e}")))?;
 
     buf.put_u64_le(row_ids_bytes.len() as u64);
@@ -95,7 +95,7 @@ fn deserialize_index(mut buf: Bytes, metric: RabitqMetric) -> ILResult<RabitqInd
         return Err(ILError::index("Empty RaBitQ index data"));
     }
     let row_ids_len = buf.get_u64_le() as usize;
-    let row_ids: Vec<Uuid> = bincode::deserialize(&buf[..row_ids_len])
+    let row_ids: Vec<Uuid> = postcard::from_bytes(&buf[..row_ids_len])
         .map_err(|e| ILError::index(format!("Failed to deserialize row ids: {e}")))?;
     buf.advance(row_ids_len);
     let mut reader = buf.reader();
