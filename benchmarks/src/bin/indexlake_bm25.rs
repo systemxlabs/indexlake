@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
-        inline_row_count_limit: 100000,
+        inline_row_count_limit: 10000,
         parquet_row_group_size: 100,
         preferred_data_file_format: DataFileFormat::ParquetV2,
     };
@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     wait_data_files_ready(
         &table,
         total_rows / table.config.inline_row_count_limit,
-        Duration::from_secs(300),
+        Duration::from_secs(2000),
     )
     .await?;
 
