@@ -33,3 +33,4 @@ IndexLake
 └── Integrations
     └── DataFusion                  # Apache DataFusion SQL engine integration
 ```
+
