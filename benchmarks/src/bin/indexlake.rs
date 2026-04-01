@@ -3,9 +3,7 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use indexlake::expr::{col, lit};
-use indexlake::table::{
-    TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate,
-};
+use indexlake::table::{TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate};
 use indexlake::{Client, ILError};
 use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
@@ -29,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         schema: arrow_table_schema(),
         ..Default::default()
     };
-    client.create_table(table_creation.clone()).await?;
+    client.create_table(table_creation).await?;
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
@@ -70,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut retry_count = 0;
     loop {
         let data_file_count = table.data_file_count().await?;
-        if data_file_count == total_rows / table_creation.config.inline_row_count_limit {
+        if data_file_count == total_rows / table.config.inline_row_count_limit {
             break;
         }
         retry_count += 1;
