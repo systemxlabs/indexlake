@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use arrow::util::pretty::pretty_format_batches;
 use futures::StreamExt;
@@ -8,8 +8,8 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_bm25_table_schema, new_bm25_record_batch};
+use indexlake_benchmarks::{benchprintln, wait_data_files_ready};
 use indexlake_index_bm25::{BM25IndexKind, BM25IndexParams, BM25SearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
-        inline_row_count_limit: insert_batch_size,
+        inline_row_count_limit: 100000,
         parquet_row_group_size: 100,
         preferred_data_file_format: DataFileFormat::ParquetV2,
     };
@@ -90,7 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    std::thread::sleep(std::time::Duration::from_secs(10));
+    wait_data_files_ready(
+        &table,
+        total_rows / table.config.inline_row_count_limit,
+        Duration::from_secs(300),
+    )
+    .await?;
 
     let start_time = Instant::now();
     let limit = 10;
