@@ -276,7 +276,8 @@ pub(crate) async fn rebuild_inline_indexes(
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
 ) -> ILResult<()> {
-    let inline_index_records = build_all_inline_indexes(tx_helper, table_id, table_schema, index_manager).await?;
+    let inline_index_records =
+        build_all_inline_indexes(tx_helper, table_id, table_schema, index_manager).await?;
 
     // delete old inline index records
     tx_helper
