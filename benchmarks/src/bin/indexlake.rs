@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use indexlake::expr::{col, lit};
@@ -27,14 +27,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         schema: arrow_table_schema(),
         ..Default::default()
     };
-    client.create_table(table_creation).await?;
+    client.create_table(table_creation.clone()).await?;
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
     let total_rows = 1_000_000usize;
     let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 100_000usize;
+    let insert_batch_size = 10_000usize;
 
     let start_time = Instant::now();
     let mut handles = Vec::new();
@@ -64,6 +64,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_batch_size,
         insert_cost_time.as_millis()
     );
+    
+    let mut retry_count = 0;
+    loop {
+        let data_file_count = table.data_file_count().await?;
+        if data_file_count == total_rows / table_creation.config.inline_row_count_limit {
+            break;
+        }
+        retry_count += 1;
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        if retry_count > 30 {
+            benchprintln!("Table dump timeout, last data file count: {data_file_count}");
+            return Err(ILError::internal("Table dump timeout").into());
+        }
+    }
 
     let table_count = table
         .count(&[TableScanPartition::single_partition()])
