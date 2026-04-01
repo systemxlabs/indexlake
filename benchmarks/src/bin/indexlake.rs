@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let total_rows = 100_000usize;
+    let total_rows = 1_000_000usize;
     let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
     let insert_batch_size = 10_000usize;

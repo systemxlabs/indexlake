@@ -1,3 +1,4 @@
+use arrow::array::RecordBatch;
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -70,46 +71,31 @@ impl TransactionHelper {
         &mut self,
         table_id: &Uuid,
         field_names: &[String],
-        values: Vec<Vec<String>>,
+        batches: &[RecordBatch],
     ) -> ILResult<()> {
-        if values.is_empty() {
+        if batches.is_empty() {
             return Ok(());
         }
-        if field_names.len() != values.len() {
+        if field_names.len() != batches[0].columns().len() {
             return Err(ILError::internal(format!(
-                "field_names and values must have the same length, got {} and {}",
+                "field_names and batches must have the same length, got {} and {}",
                 field_names.len(),
-                values.len()
+                batches[0].columns().len()
             )));
         }
-
-        let num_columns = field_names.len();
-        let num_rows = values[0].len();
-
+        let num_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
         if num_rows == 0 {
             return Ok(());
         }
 
-        let mut values_strs = Vec::with_capacity(num_rows);
-        for row_idx in 0..num_rows {
-            let mut row_values = Vec::with_capacity(num_columns);
-            for col in values.iter() {
-                row_values.push(col[row_idx].as_str());
-            }
-            values_strs.push(format!("({})", row_values.join(",")));
-        }
+        let table_name = inline_row_table_name(table_id);
+        let quoted_field_names: Vec<String> = field_names
+            .iter()
+            .map(|name| self.catalog.sql_identifier(name))
+            .collect();
 
         self.transaction
-            .execute(&format!(
-                "INSERT INTO {} ({}) VALUES {}",
-                inline_row_table_name(table_id),
-                field_names
-                    .iter()
-                    .map(|name| self.catalog.sql_identifier(name))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                values_strs.join(", ")
-            ))
+            .insert_rows(&table_name, &quoted_field_names, batches)
             .await?;
         Ok(())
     }

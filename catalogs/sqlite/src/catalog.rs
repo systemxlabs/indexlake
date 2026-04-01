@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use arrow::array::RecordBatch;
 use arrow::datatypes::Schema;
 use futures::StreamExt;
 use indexlake::catalog::{
@@ -10,8 +11,10 @@ use indexlake::catalog::{
 use indexlake::expr::{BinaryExpr, Expr};
 use indexlake::{ILError, ILResult};
 use log::{error, trace};
-use rusqlite::OpenFlags;
+use rusqlite::{OpenFlags, ToSql};
 use uuid::Uuid;
+
+use crate::types::scalar_to_sqlite_param;
 
 #[derive(Debug)]
 pub struct SqliteCatalog {
@@ -314,6 +317,61 @@ impl Transaction for SqliteTransaction {
         self.conn
             .execute_batch(&sql)
             .map_err(|e| ILError::catalog(format!("failed to execute sqlite batch: {sql} {e}")))
+    }
+
+    async fn insert_rows(
+        &mut self,
+        table_name: &str,
+        field_names: &[String],
+        batches: &[RecordBatch],
+    ) -> ILResult<()> {
+        trace!("sqlite txn insert rows: {table_name}");
+        self.check_done()?;
+
+        let num_columns = field_names.len();
+        let columns = field_names.join(", ");
+        let single_row_placeholders = format!(
+            "({})",
+            std::iter::repeat_n("?", num_columns)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+
+        const CHUNK_SIZE: usize = 256;
+
+        for batch in batches {
+            let num_rows = batch.num_rows();
+            for chunk_start in (0..num_rows).step_by(CHUNK_SIZE) {
+                let chunk_end = (chunk_start + CHUNK_SIZE).min(num_rows);
+                let chunk_rows = chunk_end - chunk_start;
+
+                let sql = format!(
+                    "INSERT INTO {} ({}) VALUES {}",
+                    table_name,
+                    columns,
+                    std::iter::repeat_n(single_row_placeholders.as_str(), chunk_rows)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                let mut stmt = self
+                    .conn
+                    .prepare_cached(&sql)
+                    .map_err(|e| ILError::catalog(format!("failed to prepare sqlite stmt: {e}")))?;
+
+                let mut params = Vec::with_capacity(chunk_rows * num_columns);
+                for row_idx in chunk_start..chunk_end {
+                    for col in batch.columns() {
+                        let scalar = Scalar::try_from_array(col.as_ref(), row_idx)?;
+                        params.push(scalar_to_sqlite_param(scalar)?);
+                    }
+                }
+                let refs: Vec<&dyn ToSql> = params.iter().map(|p| p as &dyn ToSql).collect();
+                stmt.execute(refs.as_slice()).map_err(|e| {
+                    ILError::catalog(format!("failed to execute sqlite insert: {e}"))
+                })?;
+            }
+        }
+        Ok(())
     }
 
     async fn commit(&mut self) -> ILResult<()> {
