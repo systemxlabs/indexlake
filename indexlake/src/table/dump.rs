@@ -102,68 +102,45 @@ impl DumpTask {
         }
 
         let mut tx_helper = TransactionHelper::new(&self.catalog).await?;
-        let inline_row_count = tx_helper.count_inline_rows(&self.table_id).await?;
+        let mut inline_row_count = tx_helper.count_inline_rows(&self.table_id).await?;
         if inline_row_count < self.table_config.inline_row_count_limit as i64 {
+            tx_helper.delete_task(&self.task_id).await?;
+            tx_helper.commit().await?;
             return Ok(false);
         }
 
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&self.table_schema.arrow_schema)?);
-        let row_stream = tx_helper
-            .scan_inline_rows(
-                &self.table_id,
-                &catalog_schema,
-                &[],
-                Some(self.table_config.inline_row_count_limit),
-                Some(col(INTERNAL_ROW_ID_FIELD_NAME)),
-            )
-            .await?;
+        let mut all_data_file_records = Vec::new();
+        let mut all_index_file_records = Vec::new();
 
-        let data_file_id = uuid::Uuid::now_v7();
-        let relative_path = DataFileRecord::build_relative_path(
-            &self.namespace_id,
-            &self.table_id,
-            &data_file_id,
-            self.table_config.preferred_data_file_format,
-        );
+        while inline_row_count >= self.table_config.inline_row_count_limit as i64 {
+            let catalog_schema =
+                Arc::new(CatalogSchema::from_arrow(&self.table_schema.arrow_schema)?);
+            let row_stream = tx_helper
+                .scan_inline_rows(
+                    &self.table_id,
+                    &catalog_schema,
+                    &[],
+                    Some(self.table_config.inline_row_count_limit),
+                    Some(col(INTERNAL_ROW_ID_FIELD_NAME)),
+                )
+                .await?;
 
-        let mut index_builders = self.index_manager.new_index_builders()?;
-
-        let row_ids = match self.table_config.preferred_data_file_format {
-            DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
-                self.write_parquet_file(row_stream, &relative_path, &mut index_builders)
-                    .await?
-            }
-        };
-        let size = self
-            .storage
-            .open(&relative_path)
-            .await?
-            .metadata()
-            .await?
-            .size;
-
-        if row_ids.len() != self.table_config.inline_row_count_limit {
-            self.storage.delete(&relative_path).await?;
-            return Err(ILError::internal(format!(
-                "Read row count mismatch: {} rows read, expected {}",
-                row_ids.len(),
-                self.table_config.inline_row_count_limit
-            )));
-        }
-
-        let mut index_file_records = Vec::new();
-        for index_builder in index_builders.iter_mut() {
-            if index_builder.is_empty() {
-                continue;
-            }
-            let index_file_id = uuid::Uuid::now_v7();
-            let relative_path = IndexFileRecord::build_relative_path(
+            let data_file_id = uuid::Uuid::now_v7();
+            let relative_path = DataFileRecord::build_relative_path(
                 &self.namespace_id,
                 &self.table_id,
-                &index_file_id,
+                &data_file_id,
+                self.table_config.preferred_data_file_format,
             );
-            let output_file = self.storage.create(&relative_path).await?;
-            index_builder.write_file(output_file).await?;
+
+            let mut index_builders = self.index_manager.new_index_builders()?;
+
+            let row_ids = match self.table_config.preferred_data_file_format {
+                DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
+                    self.write_parquet_file(row_stream, &relative_path, &mut index_builders)
+                        .await?
+                }
+            };
             let size = self
                 .storage
                 .open(&relative_path)
@@ -171,18 +148,46 @@ impl DumpTask {
                 .metadata()
                 .await?
                 .size;
-            index_file_records.push(IndexFileRecord {
-                index_file_id,
-                table_id: self.table_id,
-                index_id: index_builder.index_def().index_id,
-                data_file_id,
-                relative_path,
-                size: size as i64,
-            });
-        }
 
-        tx_helper
-            .insert_data_files(&[DataFileRecord {
+            if row_ids.len() != self.table_config.inline_row_count_limit {
+                self.storage.delete(&relative_path).await?;
+                return Err(ILError::internal(format!(
+                    "Read row count mismatch: {} rows read, expected {}",
+                    row_ids.len(),
+                    self.table_config.inline_row_count_limit
+                )));
+            }
+
+            for index_builder in index_builders.iter_mut() {
+                if index_builder.is_empty() {
+                    continue;
+                }
+                let index_file_id = uuid::Uuid::now_v7();
+                let relative_path = IndexFileRecord::build_relative_path(
+                    &self.namespace_id,
+                    &self.table_id,
+                    &index_file_id,
+                );
+                let output_file = self.storage.create(&relative_path).await?;
+                index_builder.write_file(output_file).await?;
+                let size = self
+                    .storage
+                    .open(&relative_path)
+                    .await?
+                    .metadata()
+                    .await?
+                    .size;
+                all_index_file_records.push(IndexFileRecord {
+                    index_file_id,
+                    table_id: self.table_id,
+                    index_id: index_builder.index_def().index_id,
+                    data_file_id,
+                    relative_path,
+                    size: size as i64,
+                });
+            }
+
+            all_data_file_records.push(DataFileRecord {
                 data_file_id,
                 table_id: self.table_id,
                 format: self.table_config.preferred_data_file_format,
@@ -191,21 +196,26 @@ impl DumpTask {
                 record_count: row_ids.len() as i64,
                 valid_record_count: row_ids.len() as i64,
                 validity: RowValidity::new(row_ids.len()),
-            }])
-            .await?;
+            });
 
-        tx_helper.insert_index_files(&index_file_records).await?;
+            let deleted_count = tx_helper
+                .delete_inline_rows(&self.table_id, &[], Some(&row_ids))
+                .await?;
+            if deleted_count != row_ids.len() {
+                return Err(ILError::internal(format!(
+                    "Delete row count mismatch: {} inline rows deleted, expected {}",
+                    deleted_count,
+                    row_ids.len()
+                )));
+            }
 
-        let deleted_count = tx_helper
-            .delete_inline_rows(&self.table_id, &[], Some(&row_ids))
-            .await?;
-        if deleted_count != row_ids.len() {
-            return Err(ILError::internal(format!(
-                "Delete row count mismatch: {} inline rows deleted, expected {}",
-                deleted_count,
-                row_ids.len()
-            )));
+            inline_row_count = tx_helper.count_inline_rows(&self.table_id).await?;
         }
+
+        tx_helper.insert_data_files(&all_data_file_records).await?;
+        tx_helper
+            .insert_index_files(&all_index_file_records)
+            .await?;
 
         rebuild_inline_indexes(
             &mut tx_helper,
@@ -219,14 +229,20 @@ impl DumpTask {
 
         tx_helper.commit().await?;
 
+        let dumped_row_count = all_data_file_records
+            .iter()
+            .map(|r| r.record_count)
+            .sum::<i64>();
+
         debug!(
-            "[indexlake] dumped table {} {} inline rows in {} ms",
+            "[indexlake] dumped table {} {} rows into {} data files in {} ms",
             self.table_id,
-            self.table_config.inline_row_count_limit,
+            dumped_row_count,
+            all_data_file_records.len(),
             now.elapsed().as_millis()
         );
 
-        Ok(true)
+        Ok(!all_data_file_records.is_empty())
     }
 
     async fn write_parquet_file(
