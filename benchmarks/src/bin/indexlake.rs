@@ -20,6 +20,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = uuid::Uuid::new_v4().to_string();
     client.create_namespace(&namespace_name, true).await?;
 
+    let insert_rows_table_name = uuid::Uuid::new_v4().to_string();
+    let insert_rows_table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: insert_rows_table_name.clone(),
+        schema: arrow_table_schema(),
+        ..Default::default()
+    };
+    client.create_table(insert_rows_table_creation).await?;
+
+    let insert_rows_table = client
+        .load_table(&namespace_name, &insert_rows_table_name)
+        .await?;
+
+    let total_rows = 1_000_000usize;
+    let num_tasks = 10usize;
+    let task_rows = total_rows / num_tasks;
+    let insert_batch_size = 100_000usize;
+
+    let start_time = Instant::now();
+    let mut handles = Vec::new();
+    for _ in 0..num_tasks {
+        let table = insert_rows_table.clone();
+        let handle = tokio::spawn(async move {
+            let mut progress = 0;
+            while progress < task_rows {
+                let batch = new_record_batch(insert_batch_size);
+                table
+                    .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
+                    .await?;
+                progress += insert_batch_size;
+            }
+            Ok::<_, ILError>(())
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await??;
+    }
+
+    let insert_rows_cost_time = start_time.elapsed();
+    benchprintln!(
+        "IndexLake: insert_rows {} rows, {} tasks, batch size: {}, in {}ms",
+        total_rows,
+        num_tasks,
+        insert_batch_size,
+        insert_rows_cost_time.as_millis()
+    );
+
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_creation = TableCreation {
         namespace_name: namespace_name.clone(),
@@ -30,11 +79,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.create_table(table_creation).await?;
 
     let table = client.load_table(&namespace_name, &table_name).await?;
-
-    let total_rows = 1_000_000usize;
-    let num_tasks = 10usize;
-    let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 100_000usize;
 
     let start_time = Instant::now();
     let mut handles = Vec::new();

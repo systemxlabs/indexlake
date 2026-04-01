@@ -1,5 +1,6 @@
 mod builder;
 mod catalog;
+mod types;
 
 pub use builder::*;
 pub use catalog::*;
