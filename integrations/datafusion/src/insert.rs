@@ -181,7 +181,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
     }
 }
 
-fn make_result_batch(count: i64) -> Result<RecordBatch, DataFusionError> {
+pub fn make_result_batch(count: i64) -> Result<RecordBatch, DataFusionError> {
     let schema = make_count_schema();
     let array = Arc::new(Int64Array::from(vec![count])) as ArrayRef;
     let batch = RecordBatch::try_new(schema, vec![array])?;

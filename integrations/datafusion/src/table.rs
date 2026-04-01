@@ -13,14 +13,14 @@ use datafusion_expr::dml::InsertOp;
 use datafusion_physical_plan::ExecutionPlan;
 use indexlake::Client;
 use indexlake::index::FilterSupport;
-use indexlake::table::{Table, TableScanPartition};
+use indexlake::table::{Table, TableScanPartition, TableUpdate};
 use indexlake::utils::schema_without_row_id;
 use tokio::sync::Mutex;
 
 use crate::scan::build_scan_partitions;
 use crate::{
-    IndexLakeInsertExec, IndexLakeScanExec, datafusion_expr_to_indexlake_expr,
-    indexlake_expr_to_datafusion_expr,
+    IndexLakeDeleteExec, IndexLakeInsertExec, IndexLakeScanExec, IndexLakeUpdateExec,
+    datafusion_expr_to_indexlake_expr, indexlake_expr_to_datafusion_expr,
 };
 
 #[derive(Debug)]
@@ -223,6 +223,71 @@ impl TableProvider for IndexLakeTable {
         )?;
 
         Ok(Arc::new(insert_exec))
+    }
+
+    async fn delete_from(
+        &self,
+        _state: &dyn Session,
+        filters: Vec<Expr>,
+    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        let df_schema = DFSchema::try_from(self.table.output_schema.clone())?;
+
+        let mut condition = indexlake::expr::lit(true);
+        for filter in filters {
+            let il_filter = datafusion_expr_to_indexlake_expr(&filter, &df_schema)?;
+            condition = indexlake::expr::Expr::BinaryExpr(indexlake::expr::BinaryExpr {
+                left: Box::new(condition),
+                op: indexlake::expr::BinaryOp::And,
+                right: Box::new(il_filter),
+            });
+        }
+
+        let lazy_table = LazyTable::new(
+            self.client.clone(),
+            self.table.namespace_name.clone(),
+            self.table.table_name.clone(),
+        )
+        .with_table(self.table.clone());
+
+        let exec = IndexLakeDeleteExec::try_new(lazy_table, condition)?;
+        Ok(Arc::new(exec))
+    }
+
+    async fn update(
+        &self,
+        _state: &dyn Session,
+        assignments: Vec<(String, Expr)>,
+        filters: Vec<Expr>,
+    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        let df_schema = DFSchema::try_from(self.table.output_schema.clone())?;
+
+        let mut condition = indexlake::expr::lit(true);
+        for filter in filters {
+            let il_filter = datafusion_expr_to_indexlake_expr(&filter, &df_schema)?;
+            condition = indexlake::expr::Expr::BinaryExpr(indexlake::expr::BinaryExpr {
+                left: Box::new(condition),
+                op: indexlake::expr::BinaryOp::And,
+                right: Box::new(il_filter),
+            });
+        }
+
+        let mut set_map = HashMap::with_capacity(assignments.len());
+        for (col, expr) in assignments {
+            let il_expr = datafusion_expr_to_indexlake_expr(&expr, &df_schema)?;
+            set_map.insert(col, il_expr);
+        }
+
+        let update = TableUpdate { set_map, condition };
+
+        let lazy_table = LazyTable::new(
+            self.client.clone(),
+            self.table.namespace_name.clone(),
+            self.table.table_name.clone(),
+        )
+        .with_table(self.table.clone());
+
+        let exec = IndexLakeUpdateExec::try_new(lazy_table, update)?;
+        Ok(Arc::new(exec))
     }
 }
 
