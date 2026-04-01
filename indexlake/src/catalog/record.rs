@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Field};
+use arrow_schema::{Schema, SchemaRef};
 use parquet::arrow::arrow_reader::RowSelection;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -498,19 +500,18 @@ pub(crate) struct InlineIndexRecord {
 }
 
 impl InlineIndexRecord {
-    pub(crate) fn to_sql(&self, catalog: &dyn Catalog) -> String {
-        format!(
-            "({}, {})",
-            catalog.sql_uuid_literal(&self.index_id),
-            catalog.sql_binary_literal(&self.index_data)
-        )
-    }
-
     pub(crate) fn catalog_schema() -> CatalogSchema {
         CatalogSchema::new(vec![
             Column::new("index_id", CatalogDataType::Uuid, false),
             Column::new("index_data", CatalogDataType::Binary, false),
         ])
+    }
+
+    pub(crate) fn arrow_schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("index_id", DataType::FixedSizeBinary(16), false),
+            Field::new("index_id", DataType::LargeBinary, false),
+        ]))
     }
 
     pub(crate) fn from_row(mut row: Row) -> ILResult<Self> {

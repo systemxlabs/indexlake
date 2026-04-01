@@ -1,10 +1,13 @@
-use arrow::array::RecordBatch;
+use std::sync::Arc;
+
+use arrow::array::{LargeBinaryArray, RecordBatch};
 use uuid::Uuid;
 
 use crate::catalog::{
     DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
     TaskRecord, TransactionHelper, inline_row_table_name,
 };
+use crate::utils::build_row_id_array;
 use crate::{ILError, ILResult};
 
 impl TransactionHelper {
@@ -159,22 +162,26 @@ impl TransactionHelper {
     pub(crate) async fn insert_inline_indexes(
         &mut self,
         inline_indexes: &[InlineIndexRecord],
-    ) -> ILResult<usize> {
+    ) -> ILResult<()> {
         if inline_indexes.is_empty() {
-            return Ok(0);
+            return Ok(());
         }
-        let values = inline_indexes
-            .iter()
-            .map(|r| r.to_sql(self.catalog.as_ref()))
-            .collect::<Vec<_>>();
+        let index_id_arr = build_row_id_array(inline_indexes.iter().map(|r| r.index_id))?;
+        let index_data_arr =
+            LargeBinaryArray::from_iter_values(inline_indexes.iter().map(|r| &r.index_data));
+
+        let batch = RecordBatch::try_new(
+            InlineIndexRecord::arrow_schema(),
+            vec![Arc::new(index_id_arr), Arc::new(index_data_arr)],
+        )?;
+
         self.transaction
-            .execute(&format!(
-                "INSERT INTO indexlake_inline_index ({}) VALUES {}",
-                InlineIndexRecord::catalog_schema()
-                    .select_items(self.catalog.as_ref())
-                    .join(", "),
-                values.join(", ")
-            ))
-            .await
+            .insert_rows(
+                "indexlake_inline_index",
+                &["index_id".to_string(), "index_data".to_string()],
+                &[batch],
+            )
+            .await?;
+        Ok(())
     }
 }
