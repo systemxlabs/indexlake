@@ -27,10 +27,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: arrow_table_schema(),
-        config: TableConfig {
-            inline_row_count_limit: 10000,
-            ..Default::default()
-        },
         ..Default::default()
     };
     client.create_table(table_creation.clone()).await?;
