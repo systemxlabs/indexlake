@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_vector_table_schema, new_vector_record_batch};
+use indexlake_benchmarks::{benchprintln, wait_data_files_ready};
 use indexlake_index_hnsw::{HnswIndexKind, HnswIndexParams, HnswSearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
@@ -91,7 +91,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
+    wait_data_files_ready(
+        &table,
+        total_rows / table.config.inline_row_count_limit,
+        Duration::from_secs(300),
+    )
+    .await?;
 
     let start_time = Instant::now();
     let limit = 10;

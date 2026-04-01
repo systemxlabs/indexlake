@@ -5,8 +5,8 @@ use futures::StreamExt;
 use indexlake::expr::{col, lit};
 use indexlake::table::{TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
+use indexlake_benchmarks::{benchprintln, wait_data_files_ready};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
 #[tokio::main]
@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let total_rows = 1_000_000usize;
+    let total_rows = 100_000usize;
     let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
     let insert_batch_size = 10_000usize;
@@ -65,19 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_cost_time.as_millis()
     );
 
-    let mut retry_count = 0;
-    loop {
-        let data_file_count = table.data_file_count().await?;
-        if data_file_count == total_rows / table.config.inline_row_count_limit {
-            break;
-        }
-        retry_count += 1;
-        tokio::time::sleep(Duration::from_secs(10)).await;
-        if retry_count > 30 {
-            benchprintln!("Table dump timeout, last data file count: {data_file_count}");
-            return Err(ILError::internal("Table dump timeout").into());
-        }
-    }
+    wait_data_files_ready(
+        &table,
+        total_rows / table.config.inline_row_count_limit,
+        Duration::from_secs(300),
+    )
+    .await?;
 
     let table_count = table
         .count(&[TableScanPartition::single_partition()])
