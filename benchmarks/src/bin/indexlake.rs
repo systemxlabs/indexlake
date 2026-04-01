@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use indexlake::expr::{col, lit};
-use indexlake::table::{TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate};
+use indexlake::table::{
+    TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition, TableUpdate,
+};
 use indexlake::{Client, ILError};
 use indexlake_benchmarks::benchprintln;
 use indexlake_benchmarks::data::{arrow_table_schema, new_record_batch};
@@ -25,13 +27,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         namespace_name: namespace_name.clone(),
         table_name: table_name.clone(),
         schema: arrow_table_schema(),
+        config: TableConfig {
+            inline_row_count_limit: 10000,
+            ..Default::default()
+        },
         ..Default::default()
     };
     client.create_table(table_creation.clone()).await?;
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let total_rows = 1_000_000usize;
+    let total_rows = 100_000usize;
     let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
     let insert_batch_size = 10_000usize;
