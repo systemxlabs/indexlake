@@ -180,7 +180,7 @@ pub fn datafusion_expr_to_indexlake_expr(
         Expr::ScalarFunction(func) => {
             let mut arg_types = Vec::with_capacity(func.args.len());
             for arg in func.args.iter() {
-                let (data_type, _) = arg.data_type_and_nullable(schema)?;
+                let data_type = arg.to_field(schema)?.1.data_type().clone();
                 arg_types.push(data_type);
             }
             let args = func
