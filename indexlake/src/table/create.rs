@@ -6,14 +6,11 @@ use arrow_schema::Schema;
 use futures::StreamExt;
 use uuid::Uuid;
 
-use crate::catalog::{
-    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
-    TransactionHelper, rows_to_record_batch,
-};
+use crate::catalog::{FieldRecord, IndexFileRecord, IndexRecord, TableRecord, TransactionHelper};
 use crate::expr::Expr;
 use crate::index::{IndexDefinition, IndexParams};
 use crate::storage::read_data_file_by_record;
-use crate::table::{Table, TableConfig, check_default_expr};
+use crate::table::{Table, TableConfig, build_all_inline_indexes, check_default_expr};
 use crate::{ILError, ILResult, check_schema_contains_system_column};
 
 #[derive(Debug, Clone)]
@@ -206,32 +203,16 @@ pub(crate) async fn process_create_index(
     }
 
     // create inline index
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.table_schema.arrow_schema)?);
-    let row_stream = tx_helper
-        .scan_inline_rows(&table.table_id, &catalog_schema, &[], None, None)
+    let inline_index_records = build_all_inline_indexes(
+        tx_helper,
+        &table.table_id,
+        &table.table_schema,
+        &table.index_manager,
+    )
+    .await?;
+    tx_helper
+        .insert_inline_indexes(&inline_index_records)
         .await?;
-    let table_schema = table.table_schema.clone();
-    let mut inline_stream = row_stream.chunks(100).map(move |rows| {
-        let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
-        Ok::<_, ILError>(batch)
-    });
-    let mut index_builder = index_kind.builder(&index_def)?;
-    while let Some(batch) = inline_stream.next().await {
-        let batch = batch?;
-        index_builder.append(&batch)?;
-    }
-    drop(inline_stream);
-    if !index_builder.is_empty() {
-        let mut index_data = Vec::new();
-        index_builder.write_bytes(&mut index_data)?;
-        tx_helper
-            .insert_inline_indexes(&[InlineIndexRecord {
-                index_id,
-                index_data,
-            }])
-            .await?;
-    }
 
     // create index file
     let mut projection = vec![0];

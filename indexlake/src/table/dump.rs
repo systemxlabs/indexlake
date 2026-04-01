@@ -276,6 +276,27 @@ pub(crate) async fn rebuild_inline_indexes(
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
 ) -> ILResult<()> {
+    let inline_index_records = build_all_inline_indexes(tx_helper, table_id, table_schema, index_manager).await?;
+
+    // delete old inline index records
+    tx_helper
+        .delete_inline_indexes(&index_manager.index_ids())
+        .await?;
+
+    // insert inline index records
+    tx_helper
+        .insert_inline_indexes(&inline_index_records)
+        .await?;
+
+    Ok(())
+}
+
+pub(crate) async fn build_all_inline_indexes(
+    tx_helper: &mut TransactionHelper,
+    table_id: &Uuid,
+    table_schema: &TableSchemaRef,
+    index_manager: &IndexManager,
+) -> ILResult<Vec<InlineIndexRecord>> {
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
         .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
@@ -327,15 +348,5 @@ pub(crate) async fn rebuild_inline_indexes(
         }
     }
 
-    // delete old inline index records
-    tx_helper
-        .delete_inline_indexes(&index_manager.index_ids())
-        .await?;
-
-    // insert inline index records
-    tx_helper
-        .insert_inline_indexes(&inline_index_records)
-        .await?;
-
-    Ok(())
+    Ok(inline_index_records)
 }
