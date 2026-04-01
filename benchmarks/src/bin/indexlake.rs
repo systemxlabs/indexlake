@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insert_batch_size,
         insert_cost_time.as_millis()
     );
-    
+
     let mut retry_count = 0;
     loop {
         let data_file_count = table.data_file_count().await?;
