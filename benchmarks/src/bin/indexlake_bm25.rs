@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_rows = 1000000;
     let num_tasks = 10;
     let task_rows = total_rows / num_tasks;
-    let insert_batch_size = 10000;
+    let insert_batch_size = 1000;
 
     let table_name = uuid::Uuid::new_v4().to_string();
     let table_config = TableConfig {
