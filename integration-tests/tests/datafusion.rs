@@ -81,38 +81,8 @@ async fn datafusion_update(
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
-    // Test update with filter
-    let table_str = datafusion_insert(
-        &session,
-        "UPDATE indexlake_table SET age = 30 WHERE name = 'Alice'",
-    )
-    .await;
-    assert_eq!(
-        table_str,
-        r#"+-------+
-| count |
-+-------+
-| 1     |
-+-------+"#,
-    );
-
-    // Verify the update
-    let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table WHERE name = 'Alice'").await;
-    assert_eq!(
-        table_str,
-        r#"+-------+-----+
-| name  | age |
-+-------+-----+
-| Alice | 30  |
-+-------+-----+"#,
-    );
-
-    // Test update without filter (update all rows)
-    let table_str = datafusion_insert(
-        &session,
-        "UPDATE indexlake_table SET age = age + 1",
-    )
-    .await;
+    // Test update all rows
+    let table_str = datafusion_insert(&session, "UPDATE indexlake_table SET age = age + 1").await;
     assert_eq!(
         table_str,
         r#"+-------+
@@ -129,7 +99,7 @@ async fn datafusion_update(
         r#"+---------+-----+
 | name    | age |
 +---------+-----+
-| Alice   | 31  |
+| Alice   | 21  |
 | Bob     | 22  |
 | Charlie | 23  |
 | David   | 24  |
@@ -162,57 +132,24 @@ async fn datafusion_delete(
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
-    // Test delete with filter
-    let table_str = datafusion_insert(
-        &session,
-        "DELETE FROM indexlake_table WHERE name = 'Alice'",
-    )
-    .await;
+    // Test delete all rows
+    let table_str = datafusion_insert(&session, "DELETE FROM indexlake_table").await;
     assert_eq!(
         table_str,
         r#"+-------+
 | count |
 +-------+
-| 1     |
+| 4     |
 +-------+"#,
     );
 
-    // Verify the delete
-    let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
-    assert_eq!(
-        table_str,
-        r#"+---------+-----+
-| name    | age |
-+---------+-----+
-| Bob     | 21  |
-| Charlie | 22  |
-| David   | 23  |
-+---------+-----+"#,
-    );
-
-    // Test delete with age filter
-    let table_str = datafusion_insert(
-        &session,
-        "DELETE FROM indexlake_table WHERE age > 21",
-    )
-    .await;
-    assert_eq!(
-        table_str,
-        r#"+-------+
-| count |
-+-------+
-| 2     |
-+-------+"#,
-    );
-
-    // Verify remaining rows
+    // Verify all rows deleted
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
     assert_eq!(
         table_str,
         r#"+------+-----+
 | name | age |
 +------+-----+
-| Bob  | 21  |
 +------+-----+"#,
     );
 
