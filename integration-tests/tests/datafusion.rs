@@ -63,6 +63,167 @@ async fn datafusion_full_scan(
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
 #[tokio::test(flavor = "multi_thread")]
+async fn datafusion_update(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
+    let session = SessionContext::new();
+    session.register_table("indexlake_table", Arc::new(df_table))?;
+
+    // Test update with filter
+    let table_str = datafusion_insert(
+        &session,
+        "UPDATE indexlake_table SET age = 30 WHERE name = 'Alice'",
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+-------+
+| count |
++-------+
+| 1     |
++-------+"#,
+    );
+
+    // Verify the update
+    let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table WHERE name = 'Alice'").await;
+    assert_eq!(
+        table_str,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| Alice | 30  |
++-------+-----+"#,
+    );
+
+    // Test update without filter (update all rows)
+    let table_str = datafusion_insert(
+        &session,
+        "UPDATE indexlake_table SET age = age + 1",
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+-------+
+| count |
++-------+
+| 4     |
++-------+"#,
+    );
+
+    // Verify all rows updated
+    let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 31  |
+| Bob     | 22  |
+| Charlie | 23  |
+| David   | 24  |
++---------+-----+"#,
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn datafusion_delete(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    let df_table = IndexLakeTable::try_new(Arc::new(client), Arc::new(table))?;
+    let session = SessionContext::new();
+    session.register_table("indexlake_table", Arc::new(df_table))?;
+
+    // Test delete with filter
+    let table_str = datafusion_insert(
+        &session,
+        "DELETE FROM indexlake_table WHERE name = 'Alice'",
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+-------+
+| count |
++-------+
+| 1     |
++-------+"#,
+    );
+
+    // Verify the delete
+    let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
+    );
+
+    // Test delete with age filter
+    let table_str = datafusion_insert(
+        &session,
+        "DELETE FROM indexlake_table WHERE age > 21",
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+-------+
+| count |
++-------+
+| 2     |
++-------+"#,
+    );
+
+    // Verify remaining rows
+    let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
+    assert_eq!(
+        table_str,
+        r#"+------+-----+
+| name | age |
++------+-----+
+| Bob  | 21  |
++------+-----+"#,
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
 async fn datafusion_scan_with_projection(
     #[future(awt)]
     #[case]
