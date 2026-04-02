@@ -17,17 +17,17 @@ use crate::{LazyTable, make_count_schema, make_result_batch};
 pub struct IndexLakeUpdateExec {
     pub lazy_table: LazyTable,
     pub update: TableUpdate,
-    cache: PlanProperties,
+    cache: Arc<PlanProperties>,
 }
 
 impl IndexLakeUpdateExec {
     pub fn try_new(lazy_table: LazyTable, update: TableUpdate) -> Result<Self, DataFusionError> {
-        let cache = PlanProperties::new(
+        let cache = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(make_count_schema()),
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             lazy_table,
@@ -46,7 +46,7 @@ impl ExecutionPlan for IndexLakeUpdateExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
     }
 

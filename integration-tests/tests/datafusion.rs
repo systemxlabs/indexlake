@@ -12,7 +12,8 @@ use indexlake::table::{TableConfig, TableCreation};
 use indexlake_datafusion::{IndexLakePhysicalCodec, IndexLakeTable};
 use indexlake_integration_tests::data::prepare_simple_testing_table;
 use indexlake_integration_tests::utils::{
-    datafusion_insert, datafusion_scan, read_first_row_id_bytes_from_table, sort_record_batches,
+    datafusion_delete, datafusion_insert, datafusion_scan, datafusion_update,
+    read_first_row_id_bytes_from_table, sort_record_batches,
 };
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
@@ -63,7 +64,7 @@ async fn datafusion_full_scan(
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
 #[tokio::test(flavor = "multi_thread")]
-async fn datafusion_update(
+async fn test_datafusion_update(
     #[future(awt)]
     #[case]
     catalog: Arc<dyn Catalog>,
@@ -81,28 +82,32 @@ async fn datafusion_update(
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
-    // Test update all rows
-    let table_str = datafusion_insert(&session, "UPDATE indexlake_table SET age = age + 1").await;
+    // Test update with filter
+    let table_str = datafusion_update(
+        &session,
+        "UPDATE indexlake_table SET age = age + 1 WHERE name = 'Bob'",
+    )
+    .await;
     assert_eq!(
         table_str,
         r#"+-------+
 | count |
 +-------+
-| 4     |
+| 1     |
 +-------+"#,
     );
 
-    // Verify all rows updated
+    // Verify only Bob's age updated
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
     assert_eq!(
         table_str,
         r#"+---------+-----+
 | name    | age |
 +---------+-----+
-| Alice   | 21  |
+| Alice   | 20  |
 | Bob     | 22  |
-| Charlie | 23  |
-| David   | 24  |
+| Charlie | 22  |
+| David   | 23  |
 +---------+-----+"#,
     );
 
@@ -114,7 +119,7 @@ async fn datafusion_update(
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
 #[tokio::test(flavor = "multi_thread")]
-async fn datafusion_delete(
+async fn test_datafusion_delete(
     #[future(awt)]
     #[case]
     catalog: Arc<dyn Catalog>,
@@ -132,25 +137,27 @@ async fn datafusion_delete(
     let session = SessionContext::new();
     session.register_table("indexlake_table", Arc::new(df_table))?;
 
-    // Test delete all rows
-    let table_str = datafusion_insert(&session, "DELETE FROM indexlake_table").await;
+    // Test delete with filter
+    let table_str = datafusion_delete(&session, "DELETE FROM indexlake_table WHERE age > 21").await;
     assert_eq!(
         table_str,
         r#"+-------+
 | count |
 +-------+
-| 4     |
+| 2     |
 +-------+"#,
     );
 
-    // Verify all rows deleted
+    // Verify only rows with age > 21 deleted (Charlie:22, David:23)
     let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
     assert_eq!(
         table_str,
-        r#"+------+-----+
-| name | age |
-+------+-----+
-+------+-----+"#,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| Alice | 20  |
+| Bob   | 21  |
++-------+-----+"#,
     );
 
     Ok(())
