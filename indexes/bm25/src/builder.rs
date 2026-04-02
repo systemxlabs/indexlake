@@ -118,7 +118,7 @@ impl IndexBuilder for Bm25IndexBuilder {
 
     async fn write_file(&mut self, output_file: Box<dyn OutputFile>) -> ILResult<()> {
         let writer_properties = WriterProperties::builder()
-            .set_max_row_group_size(4096)
+            .set_max_row_group_row_count(Some(4096))
             .build();
         let mut arrow_writer = AsyncArrowWriter::try_new(
             output_file,
