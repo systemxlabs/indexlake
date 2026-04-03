@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use futures::StreamExt;
 use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
-use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableSearch};
+use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
 use indexlake::{Client, ILError};
 use indexlake_benchmarks::data::{arrow_vector_table_schema, new_vector_record_batch};
 use indexlake_benchmarks::{benchprintln, wait_data_files_ready};
@@ -70,9 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut progress = 0;
             while progress < task_rows {
                 let batch = new_vector_record_batch(insert_batch_size);
-                table
-                    .bypass_insert(Box::pin(futures::stream::iter(vec![Ok(batch)])))
-                    .await?;
+                table.insert(TableInsertion::new(vec![batch])).await?;
                 progress += insert_batch_size;
             }
             Ok::<_, ILError>(())
