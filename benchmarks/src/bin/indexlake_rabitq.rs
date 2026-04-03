@@ -7,8 +7,8 @@ use indexlake::index::IndexKind;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableSearch};
 use indexlake::{Client, ILError};
-use indexlake_benchmarks::{benchprintln, wait_data_files_ready};
 use indexlake_benchmarks::data::{arrow_vector_table_schema, new_vector_record_batch};
+use indexlake_benchmarks::{benchprintln, wait_data_files_ready};
 use indexlake_index_rabitq::{RabitqIndexKind, RabitqIndexParams, RabitqMetric, RabitqSearchQuery};
 use indexlake_integration_tests::{catalog_postgres, init_env_logger, storage_s3};
 
