@@ -120,24 +120,30 @@ pub(crate) async fn process_search(
     let data_file_records = catalog_helper.get_data_files(&table.table_id).await?;
 
     let index_id = index_def.index_id;
+    let index_file_records = catalog_helper
+        .get_index_files_by_index_id(&index_id)
+        .await?;
+    let index_file_records: HashMap<Uuid, IndexFileRecord> = index_file_records
+        .into_iter()
+        .map(|record| (record.data_file_id, record))
+        .collect();
 
     let mut handles = Vec::new();
     for data_file_record in data_file_records.iter() {
         let data_file_id = data_file_record.data_file_id;
+        let index_file_record =
+            index_file_records
+                .get(&data_file_id)
+                .cloned()
+                .ok_or(ILError::index(format!(
+                    "Index file not found for index {index_id} and data file {data_file_id}"
+                )))?;
         let storage = table.storage.clone();
-        let catalog_helper = catalog_helper.clone();
         let index_kind = index_kind.clone();
         let index_def = index_def.clone();
         let search_query = search.query.clone();
         let dynamic_fields = search.dynamic_fields.clone();
         let handle = tokio::spawn(async move {
-            let index_file_record = catalog_helper
-                .get_index_file_by_index_id_and_data_file_id(&index_id, &data_file_id)
-                .await?
-                .ok_or(ILError::index(format!(
-                    "Index file not found for index {index_id} and data file {data_file_id}"
-                )))?;
-
             let search_entries = search_index_file(
                 storage.as_ref(),
                 index_kind.as_ref(),

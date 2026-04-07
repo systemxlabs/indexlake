@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let namespace_name = "test_namespace";
     client.create_namespace(namespace_name, true).await?;
 
-    let total_rows = 1000000;
+    let total_rows = 100000;
     let num_tasks = 10;
     let task_rows = total_rows / num_tasks;
     let insert_batch_size = 1000;

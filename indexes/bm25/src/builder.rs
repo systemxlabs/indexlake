@@ -1,11 +1,7 @@
-use std::sync::{Arc, LazyLock};
-
-use arrow::array::{
-    ArrayRef, AsArray, FixedSizeBinaryArray, ListArray, ListBuilder, PrimitiveBuilder,
-};
-use arrow::datatypes::{DataType, Field, FieldRef, Float32Type, Schema, SchemaRef, UInt32Type};
+use arrow::array::{ArrayRef, AsArray, FixedSizeBinaryArray};
+use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
-use bm25::{Embedder, EmbedderBuilder, Embedding};
+use bm25::{Embedder, EmbedderBuilder};
 use futures::StreamExt;
 use indexlake::index::{Index, IndexBuilder, IndexDefinitionRef};
 use indexlake::storage::{InputFile, OutputFile};
@@ -13,37 +9,16 @@ use indexlake::utils::extract_row_id_array_from_record_batch;
 use indexlake::{ILError, ILResult};
 use parquet::arrow::{AsyncArrowWriter, ParquetRecordBatchStreamBuilder};
 use parquet::file::properties::WriterProperties;
+use uuid::Uuid;
 
 use crate::{ArrowScorer, BM25Index, BM25IndexParams, JiebaTokenizer};
-
-static BM25_INDEX_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
-    Arc::new(Schema::new(vec![
-        Field::new("row_id", DataType::FixedSizeBinary(16), false),
-        Field::new(
-            "embedding_indices",
-            DataType::List(BM25_INDEX_SCHEMA_EMBEDDING_INDICES_INNER_FIELD.clone()),
-            true,
-        ),
-        Field::new(
-            "embedding_values",
-            DataType::List(BM25_INDEX_SCHEMA_EMBEDDING_VALUES_INNER_FIELD.clone()),
-            true,
-        ),
-    ]))
-});
-
-static BM25_INDEX_SCHEMA_EMBEDDING_INDICES_INNER_FIELD: LazyLock<FieldRef> =
-    LazyLock::new(|| Arc::new(Field::new("item", DataType::UInt32, false)));
-
-static BM25_INDEX_SCHEMA_EMBEDDING_VALUES_INNER_FIELD: LazyLock<FieldRef> =
-    LazyLock::new(|| Arc::new(Field::new("item", DataType::Float32, false)));
 
 #[derive(Debug)]
 pub struct Bm25IndexBuilder {
     index_def: IndexDefinitionRef,
     params: BM25IndexParams,
     embedder: Embedder<u32, JiebaTokenizer>,
-    embeddings: Vec<(FixedSizeBinaryArray, ListArray, ListArray)>,
+    scorer: ArrowScorer,
 }
 
 impl Bm25IndexBuilder {
@@ -54,7 +29,7 @@ impl Bm25IndexBuilder {
             index_def,
             params,
             embedder,
-            embeddings: Vec::new(),
+            scorer: ArrowScorer::default(),
         })
     }
 }
@@ -66,7 +41,7 @@ impl IndexBuilder for Bm25IndexBuilder {
     }
 
     fn is_empty(&self) -> bool {
-        self.embeddings.is_empty()
+        self.scorer.is_empty()
     }
 
     fn append(&mut self, batch: &RecordBatch) -> ILResult<()> {
@@ -76,11 +51,7 @@ impl IndexBuilder for Bm25IndexBuilder {
         let key_column_index = batch.schema_ref().index_of(key_column_name)?;
         let key_column = batch.column(key_column_index);
 
-        let embeddings = compute_embeddings(&self.embedder, key_column)?;
-        let (indices_array, values_array) = embeddings_to_arrays(&embeddings)?;
-        self.embeddings
-            .push((row_id_array, indices_array, values_array));
-        Ok(())
+        append_batch_to_scorer(&self.embedder, &row_id_array, key_column, &mut self.scorer)
     }
 
     async fn read_file(&mut self, input_file: Box<dyn InputFile>) -> ILResult<()> {
@@ -89,28 +60,7 @@ impl IndexBuilder for Bm25IndexBuilder {
 
         while let Some(batch) = batch_stream.next().await {
             let batch = batch?;
-            let row_id_array = batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<FixedSizeBinaryArray>()
-                .ok_or(ILError::index(
-                    "Failed to downcast row id to FixedSizeBinaryArray",
-                ))?;
-            let indices_array = batch
-                .column(1)
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .ok_or(ILError::index("Failed to downcast indices to ListArray"))?;
-            let values_array = batch
-                .column(2)
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .ok_or(ILError::index("Failed to downcast values to ListArray"))?;
-            self.embeddings.push((
-                row_id_array.clone(),
-                indices_array.clone(),
-                values_array.clone(),
-            ));
+            self.scorer.merge_record_batch(&batch)?;
         }
 
         Ok(())
@@ -122,22 +72,12 @@ impl IndexBuilder for Bm25IndexBuilder {
             .build();
         let mut arrow_writer = AsyncArrowWriter::try_new(
             output_file,
-            BM25_INDEX_SCHEMA.clone(),
+            ArrowScorer::schema().clone(),
             Some(writer_properties),
         )?;
 
-        for (row_id_array, indices_array, values_array) in self.embeddings.iter() {
-            let batch = RecordBatch::try_new(
-                BM25_INDEX_SCHEMA.clone(),
-                vec![
-                    Arc::new(row_id_array.clone()),
-                    Arc::new(indices_array.clone()),
-                    Arc::new(values_array.clone()),
-                ],
-            )?;
-            arrow_writer.write(&batch).await?;
-        }
-
+        let batch = self.scorer.record_batch()?;
+        arrow_writer.write(&batch).await?;
         arrow_writer.close().await?;
 
         Ok(())
@@ -147,58 +87,23 @@ impl IndexBuilder for Bm25IndexBuilder {
         let stream_reader = arrow::ipc::reader::StreamReader::try_new(buf, None)?;
         for batch in stream_reader {
             let batch = batch?;
-            let row_id_array = batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<FixedSizeBinaryArray>()
-                .ok_or(ILError::index(
-                    "Failed to downcast row id to FixedSizeBinaryArray",
-                ))?;
-            let indices_array = batch
-                .column(1)
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .ok_or(ILError::index("Failed to downcast indices to ListArray"))?;
-            let values_array = batch
-                .column(2)
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .ok_or(ILError::index("Failed to downcast values to ListArray"))?;
-            self.embeddings.push((
-                row_id_array.clone(),
-                indices_array.clone(),
-                values_array.clone(),
-            ));
+            self.scorer.merge_record_batch(&batch)?;
         }
         Ok(())
     }
 
     fn write_bytes(&mut self, buf: &mut Vec<u8>) -> ILResult<()> {
-        let mut stream_writer = arrow::ipc::writer::StreamWriter::try_new(buf, &BM25_INDEX_SCHEMA)?;
-        for (row_id_array, indices_array, values_array) in self.embeddings.iter() {
-            let batch = RecordBatch::try_new(
-                BM25_INDEX_SCHEMA.clone(),
-                vec![
-                    Arc::new(row_id_array.clone()),
-                    Arc::new(indices_array.clone()),
-                    Arc::new(values_array.clone()),
-                ],
-            )?;
-            stream_writer.write(&batch)?;
-        }
+        let mut stream_writer =
+            arrow::ipc::writer::StreamWriter::try_new(buf, ArrowScorer::schema())?;
+        let batch = self.scorer.record_batch()?;
+        stream_writer.write(&batch)?;
         stream_writer.finish()?;
         Ok(())
     }
 
     fn build(&mut self) -> ILResult<Box<dyn Index>> {
-        let mut scorer = ArrowScorer::new();
-        for (row_id_array, indices_array, values_array) in self.embeddings.iter_mut() {
-            scorer.insert(
-                row_id_array.clone(),
-                indices_array.clone(),
-                values_array.clone(),
-            )?;
-        }
+        let mut scorer = std::mem::take(&mut self.scorer);
+        scorer.finalize();
         let embedder = new_embedder(&self.params);
         let index = BM25Index {
             index_def: self.index_def.clone(),
@@ -216,84 +121,47 @@ fn new_embedder(params: &BM25IndexParams) -> Embedder<u32, JiebaTokenizer> {
         .build()
 }
 
-fn compute_embeddings(
+fn append_batch_to_scorer(
     embedder: &Embedder<u32, JiebaTokenizer>,
+    row_id_array: &FixedSizeBinaryArray,
     key_column: &ArrayRef,
-) -> ILResult<Vec<Option<Embedding>>> {
-    let data_type = key_column.data_type();
-    let mut embeddings = Vec::with_capacity(key_column.len());
-    match data_type {
+    scorer: &mut ArrowScorer,
+) -> ILResult<()> {
+    match key_column.data_type() {
         DataType::Utf8 => {
             let utf8_array = key_column.as_string::<i32>();
-            for value in utf8_array.iter() {
-                match value {
-                    Some(value) => {
-                        let embedding = embedder.embed(value);
-                        embeddings.push(Some(embedding));
-                    }
-                    None => {
-                        embeddings.push(None);
-                    }
-                }
-            }
+            append_embeddings(embedder, row_id_array, utf8_array.iter(), scorer)?;
         }
         DataType::LargeUtf8 => {
             let large_utf8_array = key_column.as_string::<i64>();
-            for value in large_utf8_array.iter() {
-                match value {
-                    Some(value) => {
-                        let embedding = embedder.embed(value);
-                        embeddings.push(Some(embedding));
-                    }
-                    None => {
-                        embeddings.push(None);
-                    }
-                }
-            }
+            append_embeddings(embedder, row_id_array, large_utf8_array.iter(), scorer)?;
         }
         DataType::Utf8View => {
             let utf8_view_array = key_column.as_string_view();
-            for value in utf8_view_array.iter() {
-                match value {
-                    Some(value) => {
-                        let embedding = embedder.embed(value);
-                        embeddings.push(Some(embedding));
-                    }
-                    None => {
-                        embeddings.push(None);
-                    }
-                }
-            }
+            append_embeddings(embedder, row_id_array, utf8_view_array.iter(), scorer)?;
         }
-        _ => {
+        data_type => {
             return Err(ILError::not_supported(format!(
                 "Unsupported data type to compute embeddings: {data_type}"
             )));
         }
     }
-    Ok(embeddings)
+    Ok(())
 }
 
-fn embeddings_to_arrays(embeddings: &[Option<Embedding>]) -> ILResult<(ListArray, ListArray)> {
-    let mut indices_builder = ListBuilder::new(PrimitiveBuilder::<UInt32Type>::new())
-        .with_field(BM25_INDEX_SCHEMA_EMBEDDING_INDICES_INNER_FIELD.clone());
-    let mut values_builder = ListBuilder::new(PrimitiveBuilder::<Float32Type>::new())
-        .with_field(BM25_INDEX_SCHEMA_EMBEDDING_VALUES_INNER_FIELD.clone());
-    for embedding_opt in embeddings.iter() {
-        if let Some(embedding) = embedding_opt {
-            let (indices, values): (Vec<Option<u32>>, Vec<Option<f32>>) = embedding
-                .iter()
-                .map(|te| (Some(te.index), Some(te.value)))
-                .unzip();
-            indices_builder.append_value(indices);
-            values_builder.append_value(values);
-        } else {
-            indices_builder.append(false);
-            values_builder.append(false);
-        }
+fn append_embeddings<'a, I>(
+    embedder: &Embedder<u32, JiebaTokenizer>,
+    row_id_array: &FixedSizeBinaryArray,
+    values: I,
+    scorer: &mut ArrowScorer,
+) -> ILResult<()>
+where
+    I: IntoIterator<Item = Option<&'a str>>,
+{
+    for (row_id, value) in row_id_array.iter().zip(values) {
+        let row_id = Uuid::from_slice(row_id.expect("row id is null"))?;
+        let embedding = value.map(|v| embedder.embed(v));
+        scorer.insert(row_id, embedding.as_ref());
     }
-    let indices_array = indices_builder.finish();
-    let values_array = values_builder.finish();
-
-    Ok((indices_array, values_array))
+    Ok(())
 }
