@@ -15,6 +15,7 @@ arrow = { workspace = true }
 async-trait = { workspace = true }
 bm25 = { workspace = true }
 futures = { workspace = true }
+itertools = { workspace = true }
 jieba-rs = { workspace = true }
 parquet = { workspace = true, features = ["async"] }
 serde = { workspace = true }

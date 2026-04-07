@@ -51,10 +51,7 @@ impl Index for BM25Index {
             .downcast_ref::<BM25SearchQuery>()
             .ok_or(ILError::index("Invalid query type"))?;
         let query_embedding = self.embedder.embed(&query.query);
-        let mut matches = self.scorer.matches(&query_embedding)?;
-        if let Some(limit) = query.limit {
-            matches.truncate(limit);
-        }
+        let matches = self.scorer.matches(&query_embedding, query.limit)?;
 
         let mut row_ids = Vec::with_capacity(matches.len());
         let mut scores = Vec::with_capacity(matches.len());

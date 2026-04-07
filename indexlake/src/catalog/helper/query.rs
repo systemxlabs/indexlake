@@ -549,29 +549,6 @@ impl CatalogHelper {
         Ok(index_files)
     }
 
-    pub(crate) async fn get_index_file_by_index_id_and_data_file_id(
-        &self,
-        index_id: &Uuid,
-        data_file_id: &Uuid,
-    ) -> ILResult<Option<IndexFileRecord>> {
-        let schema = Arc::new(IndexFileRecord::catalog_schema());
-        let row = self
-            .query_single(
-                &format!(
-                    "SELECT {} FROM indexlake_index_file WHERE index_id = {} AND data_file_id = {}",
-                    schema.select_items(self.catalog.as_ref()).join(", "),
-                    self.catalog.sql_uuid_literal(index_id),
-                    self.catalog.sql_uuid_literal(data_file_id)
-                ),
-                schema,
-            )
-            .await?;
-        match row {
-            Some(row) => Ok(Some(IndexFileRecord::from_row(row)?)),
-            None => Ok(None),
-        }
-    }
-
     pub(crate) async fn get_index_files_size(&self, table_id: &Uuid) -> ILResult<i64> {
         let schema = Arc::new(CatalogSchema::new(vec![Column::new(
             "size",
