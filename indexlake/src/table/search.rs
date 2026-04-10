@@ -471,7 +471,7 @@ async fn read_rows(
     // Create inline rows reading task
     let inline_task = async {
         if inline_row_ids.is_empty() {
-            return Ok::<_, ILError>(rows_to_record_batch(&projected_schema, &[])?);
+            return rows_to_record_batch(&projected_schema, &[]);
         }
         let row_stream = catalog_helper
             .scan_inline_rows(
