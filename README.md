@@ -15,6 +15,7 @@
 
 ## Project Structure
 
+
 ```
 IndexLake
 ├── Core Library (indexlake)        # Core table format and APIs
