@@ -88,10 +88,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // Wait additional time for async dump tasks to complete writing files to S3
-    // This ensures DataFusion can see all parquet files when scanning
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
     // Get table info for DataFusion listing table
     let table_path = format!("s3://indexlake/{}/{}", namespace_name, table_name);
     let data_file_count = table.data_file_count().await?;
