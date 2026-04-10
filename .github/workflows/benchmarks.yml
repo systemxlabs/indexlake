@@ -259,7 +259,7 @@ jobs:
               prOutput,
               "```",
               "",
-              `-- main ref: \`${mainSha}\``,
+              `- main ref: \`${mainSha}\``,
               "```text",
               mainOutput,
               "```",
