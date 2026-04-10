@@ -170,25 +170,25 @@ pub(crate) async fn process_search(
         search.query.limit(),
     )?;
 
-    let inline_batch = read_inline_rows(
+    let inline_rows_future = read_inline_rows(
         &catalog_helper,
         table,
         &merged_entries.row_score_locations,
         search.projection.clone(),
-    )
-    .await?;
+    );
 
-    let data_file_batches = read_data_file_rows(
+    let data_file_rows_future = read_data_file_rows(
         table,
         &merged_entries.row_score_locations,
         search.projection.clone(),
         &data_file_records,
-    )
-    .await?;
+    );
+
+    let (inline_batch, data_file_batches) = tokio::join!(inline_rows_future, data_file_rows_future);
 
     let sorted_batch = sort_batches(
-        inline_batch,
-        data_file_batches,
+        inline_batch?,
+        data_file_batches?,
         &merged_entries.row_score_locations,
         score_higher_is_better,
     )?;
