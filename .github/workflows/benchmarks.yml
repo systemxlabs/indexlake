@@ -102,11 +102,6 @@ jobs:
             core.setOutput('head_ref', pr.data.head.ref);
             core.setOutput('bench_bins', JSON.stringify(bins));
 
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.resolve.outputs.head_sha }}
-          fetch-depth: 1
-
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -114,26 +109,34 @@ jobs:
           workspaces: |
             .
 
-      - name: Run benchmark (release)
+      # ===== Run benchmark on PR branch =====
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.head_sha }}
+          fetch-depth: 1
+          path: pr-branch
+
+      - name: Run benchmark on PR branch (release)
         shell: bash
         env:
           BENCH_BINS: ${{ steps.resolve.outputs.bench_bins }}
         run: |
           set -euo pipefail
-          mapfile -t BINS < <(python - << 'PY'
+          mapfile -t BINS < <(python3 - << 'PY'
           import json, os
           for b in json.loads(os.environ["BENCH_BINS"]):
               print(b)
           PY
           )
 
-          rm -f bench_filtered_all.txt
-          touch bench_filtered_all.txt
+          cd pr-branch
+          rm -f ../bench_output_pr_*.txt
 
           for b in "${BINS[@]}"; do
-            echo "running ${b} ..."
+            echo "[PR Branch] running ${b} ..."
             set +e
-            cargo run -p indexlake-benchmarks --bin "${b}" --release 2>&1 | tee "bench_output_${b}.txt"
+            cargo run -p indexlake-benchmarks --bin "${b}" --release 2>&1 | tee "../bench_output_pr_${b}.txt"
             rc=${PIPESTATUS[0]}
             set -e
             if [ "${rc}" -ne 0 ]; then
@@ -141,28 +144,147 @@ jobs:
             fi
           done
 
-      - name: Upload benchmark output
-        uses: actions/upload-artifact@v4
+      # ===== Run benchmark on main branch =====
+      - name: Checkout main branch
+        uses: actions/checkout@v4
         with:
-          name: bench-output
-          path: bench_output_*.txt
+          ref: main
+          fetch-depth: 1
+          path: main-branch
 
-      - name: Extract benchmark lines
+      - name: Run benchmark on main branch (release)
         shell: bash
+        env:
+          BENCH_BINS: ${{ steps.resolve.outputs.bench_bins }}
         run: |
           set -euo pipefail
-          for f in bench_output_*.txt; do
-            b="${f#bench_output_}"
-            b="${b%.txt}"
-            if grep -E '^benchmark:' "$f" >/dev/null 2>&1; then
-              # Prefix with benchmark name for readability in the PR comment.
-              grep -E '^benchmark:' "$f" | sed "s/^benchmark:/benchmark:[$b]/" >> bench_filtered_all.txt
-            else
-              echo "benchmark:[$b] (no benchmark: lines found)" >> bench_filtered_all.txt
+          mapfile -t BINS < <(python3 - << 'PY'
+          import json, os
+          for b in json.loads(os.environ["BENCH_BINS"]):
+              print(b)
+          PY
+          )
+
+          cd main-branch
+          rm -f ../bench_output_main_*.txt
+
+          for b in "${BINS[@]}"; do
+            echo "[Main Branch] running ${b} ..."
+            set +e
+            cargo run -p indexlake-benchmarks --bin "${b}" --release 2>&1 | tee "../bench_output_main_${b}.txt"
+            rc=${PIPESTATUS[0]}
+            set -e
+            if [ "${rc}" -ne 0 ]; then
+              exit "${rc}"
             fi
           done
 
-      - name: Comment results on PR
+      - name: Upload benchmark outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-output
+          path: |
+            bench_output_pr_*.txt
+            bench_output_main_*.txt
+
+      # ===== Extract and compare benchmark results =====
+      - name: Extract and compare benchmark results
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          extract_bench() {
+            local prefix="$1"
+            local suffix="$2"
+            rm -f "bench_filtered_${suffix}.txt"
+            for f in bench_output_${suffix}_*.txt; do
+              [ -f "$f" ] || continue
+              b="${f#bench_output_${suffix}_}"
+              b="${b%.txt}"
+              if grep -E '^benchmark:' "$f" >/dev/null 2>&1; then
+                grep -E '^benchmark:' "$f" | sed "s/^benchmark:/benchmark:[${prefix}:${b}]/" >> "bench_filtered_${suffix}.txt"
+              else
+                echo "benchmark:[${prefix}:${b}] (no benchmark: lines found)" >> "bench_filtered_${suffix}.txt"
+              fi
+            done
+          }
+
+          extract_bench "PR" "pr"
+          extract_bench "main" "main"
+
+          # Generate comparison
+          {
+            echo "### Benchmark Comparison (PR vs main)"
+            echo ""
+          } > bench_comparison.txt
+
+          # Create a comparison table using Python
+          python3 << 'PY'
+          import re
+          import os
+          import sys
+
+          def parse_bench_file(filepath):
+              """Parse benchmark file and return dict of {test_name: time_str}"""
+              results = {}
+              if not os.path.exists(filepath):
+                  return results
+              with open(filepath, 'r') as f:
+                  for line in f:
+                      match = re.search(r'benchmark:\[([^\]]+)\]\s*(.+)', line)
+                      if match:
+                          key = match.group(1)
+                          value = match.group(2).strip()
+                          results[key] = value
+              return results
+
+          pr_results = parse_bench_file('bench_filtered_pr.txt')
+          main_results = parse_bench_file('bench_filtered_main.txt')
+
+          all_keys = sorted(set(pr_results.keys()) | set(main_results.keys()))
+
+          if all_keys:
+              print("| Benchmark | PR Branch | main Branch |")
+              print("|-----------|-----------|-------------|")
+
+              for key in all_keys:
+                  pr_val = pr_results.get(key, "N/A")
+                  main_val = main_results.get(key, "N/A")
+                  print(f"| {key} | {pr_val} | {main_val} |")
+          else:
+              print("*No benchmark results found*")
+          PY >> bench_comparison.txt
+
+          {
+            echo ""
+            echo "### Raw Results"
+            echo ""
+            echo "**PR Branch:**"
+            echo '```text'
+          } >> bench_comparison.txt
+
+          if [ -f bench_filtered_pr.txt ]; then
+              cat bench_filtered_pr.txt >> bench_comparison.txt
+          else
+              echo "(no results)" >> bench_comparison.txt
+          fi
+
+          {
+            echo '```'
+            echo ""
+            echo "**main Branch:**"
+            echo '```text'
+          } >> bench_comparison.txt
+
+          if [ -f bench_filtered_main.txt ]; then
+              cat bench_filtered_main.txt >> bench_comparison.txt
+          else
+              echo "(no results)" >> bench_comparison.txt
+          fi
+
+          echo '```' >> bench_comparison.txt
+
+      - name: Comment comparison results on PR
         uses: actions/github-script@v7
         with:
           script: |
@@ -173,9 +295,9 @@ jobs:
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
             const sha = '${{ steps.resolve.outputs.head_sha }}';
 
-            let output = fs.readFileSync('bench_filtered_all.txt', 'utf8');
+            let output = fs.readFileSync('bench_comparison.txt', 'utf8');
             // Avoid breaking markdown code fences if output ever contains them.
-            output = output.replaceAll('```', '``\\`');
+            output = output.replaceAll('```', '``\`');
 
             // GitHub comment body limit is ~65536 chars; keep margin for headers.
             const maxLen = 60000;
@@ -186,16 +308,12 @@ jobs:
             }
 
             const body = [
-              "### Benchmarks",
+              output,
               "",
+              `---`,
               `- workflow run: ${runUrl}`,
-              `- ref: \`${sha}\``,
+              `- PR ref: \`${sha}\``,
               truncated ? "- note: output truncated due to comment size limits" : "",
-              output.trim().length === 0 ? "- note: empty benchmark output" : "",
-              "",
-              "```text",
-              output.trimEnd(),
-              "```",
             ].filter(Boolean).join("\n");
 
             await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
