@@ -44,13 +44,14 @@ jobs:
             const prNumber = isDispatch ? Number(core.getInput('pr_number')) : context.payload.issue.number;
 
             const allowed = {
-              all: ["indexlake", "indexlake_btree", "indexlake_bm25", "indexlake_hnsw", "indexlake_rabitq", "indexlake_rstar"],
+              all: ["indexlake", "indexlake_btree", "indexlake_bm25", "indexlake_hnsw", "indexlake_rabitq", "indexlake_rstar", "indexlake_vs_datafusion"],
               indexlake: ["indexlake"],
               indexlake_btree: ["indexlake_btree"],
               indexlake_bm25: ["indexlake_bm25"],
               indexlake_hnsw: ["indexlake_hnsw"],
               indexlake_rabitq: ["indexlake_rabitq"],
               indexlake_rstar: ["indexlake_rstar"],
+              indexlake_vs_datafusion: ["indexlake_vs_datafusion"],
             };
 
             let benchKey = "all";
