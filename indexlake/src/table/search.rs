@@ -522,10 +522,8 @@ async fn read_rows(
         .collect();
 
     // Execute inline task and all data file tasks concurrently
-    let (inline_result, data_file_results) = tokio::join!(
-        inline_task,
-        futures::future::join_all(data_file_tasks)
-    );
+    let (inline_result, data_file_results) =
+        tokio::join!(inline_task, futures::future::join_all(data_file_tasks));
 
     let inline_batch = inline_result?;
 
