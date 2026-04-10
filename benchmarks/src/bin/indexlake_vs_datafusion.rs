@@ -88,44 +88,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
+    // Wait additional time for async dump tasks to complete writing files to S3
+    // This ensures DataFusion can see all parquet files when scanning
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     // Get table info for DataFusion listing table
     let table_path = format!("s3://indexlake/{}/{}", namespace_name, table_name);
     let data_file_count = table.data_file_count().await?;
     benchprintln!("Table data files: {}", data_file_count);
 
     // Run IndexLake full table scan benchmark
-    let indexlake_scan_time = bench_indexlake_scan(&table, total_rows, num_tasks).await?;
+    let _indexlake_scan_time = bench_indexlake_scan(&table, total_rows, num_tasks).await?;
 
     // Run DataFusion listing table full scan benchmark
-    let datafusion_scan_time = bench_datafusion_scan(&table_path, total_rows).await?;
-
-    // Print comparison
-    benchprintln!("");
-    benchprintln!("=== Benchmark Summary ===");
-    benchprintln!("Total rows: {}", total_rows);
-    benchprintln!("IndexLake full scan: {}ms", indexlake_scan_time.as_millis());
-    benchprintln!(
-        "DataFusion listing table full scan: {}ms",
-        datafusion_scan_time.as_millis()
-    );
-
-    if indexlake_scan_time < datafusion_scan_time {
-        let diff = datafusion_scan_time - indexlake_scan_time;
-        let pct = (diff.as_secs_f64() / datafusion_scan_time.as_secs_f64()) * 100.0;
-        benchprintln!(
-            "IndexLake is faster by {}ms ({:.1}%)",
-            diff.as_millis(),
-            pct
-        );
-    } else {
-        let diff = indexlake_scan_time - datafusion_scan_time;
-        let pct = (diff.as_secs_f64() / indexlake_scan_time.as_secs_f64()) * 100.0;
-        benchprintln!(
-            "DataFusion is faster by {}ms ({:.1}%)",
-            diff.as_millis(),
-            pct
-        );
-    }
+    let _datafusion_scan_time = bench_datafusion_scan(&table_path, total_rows).await?;
 
     Ok(())
 }
