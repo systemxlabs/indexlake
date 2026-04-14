@@ -131,7 +131,7 @@ pub(crate) fn build_parquet_writer<W: AsyncFileWriter>(
     data_file_format: DataFileFormat,
 ) -> ILResult<AsyncArrowWriter<W>> {
     let writer_properties = WriterProperties::builder()
-        .set_max_row_group_size(row_group_size)
+        .set_max_row_group_row_count(Some(row_group_size))
         .set_writer_version(match data_file_format {
             DataFileFormat::ParquetV1 => WriterVersion::PARQUET_1_0,
             DataFileFormat::ParquetV2 => WriterVersion::PARQUET_2_0,
