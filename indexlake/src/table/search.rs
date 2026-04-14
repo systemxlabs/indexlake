@@ -8,8 +8,8 @@ use futures::TryStreamExt;
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord, Row,
-    rows_to_record_batch,
+    CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord,
+    InlineIndexRecord, Row, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
 use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
@@ -194,6 +194,8 @@ pub(crate) async fn process_search(
     let dynamic_columns =
         gather_dynamic_columns_from_batch(&sorted_batch, &merged_entries.dynamic_lookups)?;
     let final_batch = append_dynamic_columns_to_record_batch(&sorted_batch, &dynamic_columns)?;
+    // Remove internal _row_id column from final output
+    let final_batch = remove_row_id_column(&final_batch)?;
 
     Ok(Box::pin(futures::stream::iter(vec![Ok(final_batch)])))
 }
@@ -443,6 +445,34 @@ fn append_dynamic_columns_to_record_batch(
     Ok(RecordBatch::try_new(schema, arrays)?)
 }
 
+fn remove_row_id_column(batch: &RecordBatch) -> ILResult<RecordBatch> {
+    let schema = batch.schema();
+    let row_id_idx = schema.index_of(INTERNAL_ROW_ID_FIELD_NAME)?;
+    let mut fields = Vec::with_capacity(batch.num_columns() - 1);
+    let mut columns = Vec::with_capacity(batch.num_columns() - 1);
+    for (i, field) in schema.fields().iter().enumerate() {
+        if i != row_id_idx {
+            fields.push(field.clone());
+            columns.push(batch.column(i).clone());
+        }
+    }
+    let new_schema = Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()));
+    RecordBatch::try_new(new_schema, columns)
+        .map_err(|e| ILError::internal(format!("Failed to remove row id column: {}", e)))
+}
+
+/// Reorder batch columns to match the order of the target schema
+fn reorder_batch_to_schema(batch: &RecordBatch, target_schema: &Schema) -> ILResult<RecordBatch> {
+    let batch_schema = batch.schema();
+    let mut columns = Vec::with_capacity(target_schema.fields.len());
+    for target_field in target_schema.fields.iter() {
+        let idx = batch_schema.index_of(target_field.name())?;
+        columns.push(batch.column(idx).clone());
+    }
+    RecordBatch::try_new(Arc::new(target_schema.clone()), columns)
+        .map_err(|e| ILError::internal(format!("Failed to reorder batch: {}", e)))
+}
+
 async fn read_rows(
     catalog_helper: &CatalogHelper,
     table: &Table,
@@ -468,9 +498,29 @@ async fn read_rows(
         }
     }
 
+    // Build internal projection that always includes _row_id for internal processing
+    // (sort_batches and gather_dynamic_columns_from_batch need _row_id)
+    // _row_id must be at position 0, so we PREPEND it to the user projection
+    let row_id_idx = table
+        .table_schema
+        .arrow_schema
+        .index_of(INTERNAL_ROW_ID_FIELD_NAME)?;
+    let internal_projection = if let Some(ref user_proj) = projection {
+        if user_proj.contains(&row_id_idx) {
+            projection.clone()
+        } else {
+            let mut proj = vec![row_id_idx];
+            proj.extend(user_proj.iter());
+            Some(proj)
+        }
+    } else {
+        None // No projection means all columns including _row_id
+    };
+
+    // Use internal_projection (which includes _row_id) for reading data
     let projected_schema = Arc::new(project_schema(
         &table.table_schema.arrow_schema,
-        projection.as_ref(),
+        internal_projection.as_ref(),
     )?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
@@ -498,7 +548,7 @@ async fn read_rows(
         .into_iter()
         .map(|(data_file_id, row_ids)| {
             let table = table.clone();
-            let projection = projection.clone();
+            let internal_projection = internal_projection.clone();
             let data_file_records = data_file_records.to_vec();
 
             tokio::spawn(async move {
@@ -515,7 +565,7 @@ async fn read_rows(
                     table.storage.as_ref(),
                     &table.table_schema,
                     data_file_record,
-                    projection,
+                    internal_projection,
                     vec![row_ids_in_list_expr(row_ids)],
                     1024,
                 )
@@ -551,7 +601,9 @@ fn sort_batches(
 ) -> ILResult<RecordBatch> {
     let mut batch = inline_batch;
     for data_file_batch in data_file_batches {
-        batch = arrow::compute::concat_batches(&batch.schema(), [&batch, &data_file_batch])?;
+        // Ensure data_file_batch has the same column order as batch before concatenating
+        let reordered = reorder_batch_to_schema(&data_file_batch, batch.schema().as_ref())?;
+        batch = arrow::compute::concat_batches(&batch.schema(), [&batch, &reordered])?;
     }
 
     let mut scores = Vec::new();
