@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use object_store::ObjectStore;
 
 use arrow::datatypes::{DataType, Field, Schema};
 use datafusion::datasource::listing::{
@@ -89,7 +90,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Get table info for DataFusion listing table
-    let table_path = format!("s3://indexlake/{}/{}", namespace_name, table_name);
+    let data_files = table.data_file_records().await?;
+    let first_file_path = data_files.first().expect("Table should have data files").relative_path.clone();
+    
+    // Find the directory containing the data files.
+    // relative_path is something like "namespace_id/table_id/version_id/file.parquet"
+    // We want "s3://indexlake/namespace_id/table_id/version_id/"
+    let path_parts: Vec<&str> = first_file_path.split('/').collect();
+    let directory_path = path_parts[..path_parts.len() - 1].join("/");
+    let table_path = format!("s3://indexlake/{}", directory_path);
+    
     let data_file_count = table.data_file_count().await?;
     benchprintln!("Table data files: {}", data_file_count);
 
@@ -165,12 +175,12 @@ async fn bench_datafusion_scan(
     // Create session context with object store
     let ctx = SessionContext::new();
     let object_store_url = url::Url::parse("s3://indexlake/")?;
-    ctx.register_object_store(&object_store_url, Arc::new(s3));
+    ctx.register_object_store(&object_store_url, Arc::new(s3.clone()));
 
     // Define schema (same as indexlake table)
     let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int32, false),
-        Field::new("content", DataType::Utf8, false),
+        Field::new("id", DataType::Int32, true),
+        Field::new("content", DataType::Utf8, true),
         Field::new("data", DataType::Binary, true),
     ]));
 
@@ -178,12 +188,36 @@ async fn bench_datafusion_scan(
     let table_url = ListingTableUrl::parse(format!("{}/", table_path))?;
     let listing_options = ListingOptions::new(Arc::new(
         datafusion::datasource::file_format::parquet::ParquetFormat::default(),
-    ))
-    .with_file_extension(".parquet");
+    )).with_file_extension(".parquet");
 
     let config = ListingTableConfig::new(table_url)
         .with_listing_options(listing_options)
         .with_schema(schema);
+    
+    // DEBUG: Print table URL and check listing
+    println!("DEBUG: Listing table URL: {}", table_path);
+    
+    let prefix_str = table_path.replace("s3://indexlake/", "");
+    println!("DEBUG: Attempting to list S3 objects with prefix: '{}'", prefix_str);
+    
+    let prefix = object_store::path::Path::from(prefix_str);
+    let mut objects = s3.list(Some(&prefix));
+    println!("DEBUG: S3 Objects at prefix {:?}:", prefix);
+    let mut found = false;
+    while let Some(obj) = objects.next().await {
+        println!("  - {:?}", obj);
+        found = true;
+    }
+    if !found {
+        println!("DEBUG: No objects found at prefix {:?}", prefix);
+        println!("DEBUG: Listing root bucket to see what's there...");
+        let mut root_objects = s3.list(None);
+        while let Some(obj) = root_objects.next().await {
+            println!("  - Root Object: {:?}", obj);
+        }
+    }
+    println!("DEBUG: S3 List finished");
+
 
     let listing_table = ListingTable::try_new(config)?;
 
