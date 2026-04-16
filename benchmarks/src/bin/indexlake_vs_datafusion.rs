@@ -175,7 +175,7 @@ async fn bench_datafusion_scan(
     ]));
 
     // Create listing table config
-    let table_url = ListingTableUrl::parse(table_path)?;
+    let table_url = ListingTableUrl::parse(format!("{}/", table_path))?;
     let listing_options = ListingOptions::new(Arc::new(
         datafusion::datasource::file_format::parquet::ParquetFormat::default(),
     ))
