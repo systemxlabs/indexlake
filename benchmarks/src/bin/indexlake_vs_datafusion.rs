@@ -195,29 +195,23 @@ async fn bench_datafusion_scan(
         .with_schema(schema);
     
     // DEBUG: Print table URL and check listing
-    println!("DEBUG: Listing table URL: {}", table_path);
+    
     
     let prefix_str = table_path.replace("s3://indexlake/", "");
-    println!("DEBUG: Attempting to list S3 objects with prefix: '{}'", prefix_str);
     
     let prefix = object_store::path::Path::from(prefix_str);
     let mut objects = s3.list(Some(&prefix));
-    println!("DEBUG: S3 Objects at prefix {:?}:", prefix);
     let mut found = false;
-    while let Some(obj) = objects.next().await {
-        println!("  - {:?}", obj);
+    while let Some(_obj) = objects.next().await {
         found = true;
     }
     if !found {
-        println!("DEBUG: No objects found at prefix {:?}", prefix);
-        println!("DEBUG: Listing root bucket to see what's there...");
         let mut root_objects = s3.list(None);
-        while let Some(obj) = root_objects.next().await {
-            println!("  - Root Object: {:?}", obj);
+        while let Some(_obj) = root_objects.next().await {
         }
     }
-    println!("DEBUG: S3 List finished");
-
+    
+    
 
     let listing_table = ListingTable::try_new(config)?;
 
