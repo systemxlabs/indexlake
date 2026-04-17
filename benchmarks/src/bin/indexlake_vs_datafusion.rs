@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let table = client.load_table(&namespace_name, &table_name).await?;
 
     // Insert data
-    let total_rows = 100_000usize;
+    let total_rows = 1_000_000usize;
     let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
     let insert_batch_size = 10_000usize;
@@ -144,8 +144,6 @@ async fn bench_indexlake_scan(
 }
 
 async fn bench_datafusion_scan(table_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let start_time = Instant::now();
-
     // Create S3 object store
     let s3 = AmazonS3Builder::new()
         .with_endpoint("http://127.0.0.1:9000")
@@ -188,6 +186,9 @@ async fn bench_datafusion_scan(table_path: &str) -> Result<(), Box<dyn std::erro
     )?;
 
     let df = ctx.sql("SELECT * FROM listing_table").await?;
+
+    let start_time = Instant::now();
+
     let batches = df.collect().await?;
 
     let count: usize = batches.iter().map(|b| b.num_rows()).sum();
