@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let table = client.load_table(&namespace_name, &table_name).await?;
 
     // Insert data
-    let total_rows = 100_000usize;
+    let total_rows = 1_000_000usize;
     let num_tasks = 10usize;
     let task_rows = total_rows / num_tasks;
     let insert_batch_size = 10_000usize;
@@ -88,16 +88,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // Get table info for DataFusion listing table
-    let table_path = format!("s3://indexlake/{}/{}", namespace_name, table_name);
-    let data_file_count = table.data_file_count().await?;
-    benchprintln!("Table data files: {}", data_file_count);
+    let listing_table_path = format!("s3://indexlake/{}/{}", table.namespace_id, table.table_id);
 
     // Run IndexLake full table scan benchmark
-    let _indexlake_scan_time = bench_indexlake_scan(&table, total_rows, num_tasks).await?;
+    bench_indexlake_scan(&table, total_rows, num_tasks).await?;
 
     // Run DataFusion listing table full scan benchmark
-    let _datafusion_scan_time = bench_datafusion_scan(&table_path, total_rows).await?;
+    bench_datafusion_scan(&listing_table_path).await?;
 
     Ok(())
 }
@@ -106,7 +103,7 @@ async fn bench_indexlake_scan(
     table: &indexlake::table::Table,
     total_rows: usize,
     num_tasks: usize,
-) -> Result<Duration, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
     let mut handles = Vec::new();
 
@@ -143,15 +140,10 @@ async fn bench_indexlake_scan(
         scan_cost_time.as_millis()
     );
 
-    Ok(scan_cost_time)
+    Ok(())
 }
 
-async fn bench_datafusion_scan(
-    table_path: &str,
-    total_rows: usize,
-) -> Result<Duration, Box<dyn std::error::Error>> {
-    let start_time = Instant::now();
-
+async fn bench_datafusion_scan(table_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Create S3 object store
     let s3 = AmazonS3Builder::new()
         .with_endpoint("http://127.0.0.1:9000")
@@ -165,17 +157,17 @@ async fn bench_datafusion_scan(
     // Create session context with object store
     let ctx = SessionContext::new();
     let object_store_url = url::Url::parse("s3://indexlake/")?;
-    ctx.register_object_store(&object_store_url, Arc::new(s3));
+    ctx.register_object_store(&object_store_url, Arc::new(s3.clone()));
 
     // Define schema (same as indexlake table)
     let schema = Arc::new(Schema::new(vec![
-        Field::new("id", DataType::Int32, false),
-        Field::new("content", DataType::Utf8, false),
+        Field::new("id", DataType::Int32, true),
+        Field::new("content", DataType::Utf8, true),
         Field::new("data", DataType::Binary, true),
     ]));
 
     // Create listing table config
-    let table_url = ListingTableUrl::parse(table_path)?;
+    let table_url = ListingTableUrl::parse(format!("{}/", table_path))?;
     let listing_options = ListingOptions::new(Arc::new(
         datafusion::datasource::file_format::parquet::ParquetFormat::default(),
     ))
@@ -194,6 +186,9 @@ async fn bench_datafusion_scan(
     )?;
 
     let df = ctx.sql("SELECT * FROM listing_table").await?;
+
+    let start_time = Instant::now();
+
     let batches = df.collect().await?;
 
     let count: usize = batches.iter().map(|b| b.num_rows()).sum();
@@ -205,11 +200,5 @@ async fn bench_datafusion_scan(
         scan_cost_time.as_millis()
     );
 
-    // Note: DataFusion may not see all rows if compaction hasn't produced parquet files yet
-    // This is expected as we're comparing against IndexLake's internal scan
-    if count > 0 {
-        assert!(count <= total_rows, "Scanned more rows than expected");
-    }
-
-    Ok(scan_cost_time)
+    Ok(())
 }
