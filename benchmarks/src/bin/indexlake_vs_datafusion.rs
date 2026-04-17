@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use object_store::ObjectStore;
 
 use arrow::datatypes::{DataType, Field, Schema};
 use datafusion::datasource::listing::{
@@ -89,25 +88,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // Get table info for DataFusion listing table
-    let data_files = table.data_file_records().await?;
-    let first_file_path = data_files.first().expect("Table should have data files").relative_path.clone();
-    
-    // Find the directory containing the data files.
-    // relative_path is something like "namespace_id/table_id/version_id/file.parquet"
-    // We want "s3://indexlake/namespace_id/table_id/version_id/"
-    let path_parts: Vec<&str> = first_file_path.split('/').collect();
-    let directory_path = path_parts[..path_parts.len() - 1].join("/");
-    let table_path = format!("s3://indexlake/{}", directory_path);
-    
-    let data_file_count = table.data_file_count().await?;
-    benchprintln!("Table data files: {}", data_file_count);
+    let listing_table_path = format!("s3://indexlake/{}/{}", table.namespace_id, table.table_id);
 
     // Run IndexLake full table scan benchmark
-    let _indexlake_scan_time = bench_indexlake_scan(&table, total_rows, num_tasks).await?;
+    bench_indexlake_scan(&table, total_rows, num_tasks).await?;
 
     // Run DataFusion listing table full scan benchmark
-    let _datafusion_scan_time = bench_datafusion_scan(&table_path, total_rows).await?;
+    bench_datafusion_scan(&listing_table_path).await?;
 
     Ok(())
 }
@@ -116,7 +103,7 @@ async fn bench_indexlake_scan(
     table: &indexlake::table::Table,
     total_rows: usize,
     num_tasks: usize,
-) -> Result<Duration, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
     let mut handles = Vec::new();
 
@@ -153,13 +140,10 @@ async fn bench_indexlake_scan(
         scan_cost_time.as_millis()
     );
 
-    Ok(scan_cost_time)
+    Ok(())
 }
 
-async fn bench_datafusion_scan(
-    table_path: &str,
-    total_rows: usize,
-) -> Result<Duration, Box<dyn std::error::Error>> {
+async fn bench_datafusion_scan(table_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
 
     // Create S3 object store
@@ -188,30 +172,12 @@ async fn bench_datafusion_scan(
     let table_url = ListingTableUrl::parse(format!("{}/", table_path))?;
     let listing_options = ListingOptions::new(Arc::new(
         datafusion::datasource::file_format::parquet::ParquetFormat::default(),
-    )).with_file_extension(".parquet");
+    ))
+    .with_file_extension(".parquet");
 
     let config = ListingTableConfig::new(table_url)
         .with_listing_options(listing_options)
         .with_schema(schema);
-    
-    // DEBUG: Print table URL and check listing
-    
-    
-    let prefix_str = table_path.replace("s3://indexlake/", "");
-    
-    let prefix = object_store::path::Path::from(prefix_str);
-    let mut objects = s3.list(Some(&prefix));
-    let mut found = false;
-    while let Some(_obj) = objects.next().await {
-        found = true;
-    }
-    if !found {
-        let mut root_objects = s3.list(None);
-        while let Some(_obj) = root_objects.next().await {
-        }
-    }
-    
-    
 
     let listing_table = ListingTable::try_new(config)?;
 
@@ -233,11 +199,5 @@ async fn bench_datafusion_scan(
         scan_cost_time.as_millis()
     );
 
-    // Note: DataFusion may not see all rows if compaction hasn't produced parquet files yet
-    // This is expected as we're comparing against IndexLake's internal scan
-    if count > 0 {
-        assert!(count <= total_rows, "Scanned more rows than expected");
-    }
-
-    Ok(scan_cost_time)
+    Ok(())
 }
