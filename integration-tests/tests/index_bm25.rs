@@ -167,3 +167,122 @@ async fn create_bm25_index(
 
     Ok(())
 }
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn search_with_projection_excluding_row_id(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let mut client = Client::new(catalog, storage);
+    client.register_index_kind(Arc::new(BM25IndexKind));
+
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![
+        Field::new("title", DataType::Utf8, false),
+        Field::new("content", DataType::Utf8, false),
+    ]));
+    let table_config = TableConfig {
+        inline_row_count_limit: 3,
+        parquet_row_group_size: 2,
+        preferred_data_file_format: format,
+    };
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: table_schema.clone(),
+        config: table_config,
+        ..Default::default()
+    };
+    client.create_table(table_creation).await?;
+
+    let index_creation = IndexCreation {
+        name: "bm25_index".to_string(),
+        kind: BM25IndexKind.kind().to_string(),
+        key_columns: vec!["content".to_string()],
+        params: Arc::new(BM25IndexParams { avgdl: 256. }),
+        concurrency: 1,
+        if_not_exists: false,
+    };
+    let table = client.load_table(&namespace_name, &table_name).await?;
+    table.create_index(index_creation.clone()).await?;
+
+    let table = client.load_table(&namespace_name, &table_name).await?;
+
+    // Insert 7 rows - first 3 go to inline, remaining 4 go to data files
+    let record_batch = RecordBatch::try_new(
+        table_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec![
+                "title1", "title2", "title3", "title4", "title5", "title6", "title7",
+            ])),
+            Arc::new(StringArray::from(vec![
+                "The sky blushed pink as the sun dipped below the horizon.",
+                "She found a forgotten letter tucked inside an old book.",
+                "Apples, oranges, pink grapefruits, and more pink grapefruits.",
+                "A single drop of rain fell, followed by a thousand more.",
+                "小明硕士毕业于中国科学院计算所，后在日本京都大学深造。",
+                "张华考上了北京大学；李萍进了中国人民大学；我在百货公司当售货员：我们都有光明的前途。",
+                "今天天气真不错，我去了公园，看到了很多花，很漂亮。",
+            ])),
+        ],
+    )?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    // This search uses projection [1] (title only) without _row_id, combined with dynamic_fields
+    // This should trigger the bug: sort_batches expects _row_id at column 0 but gets title instead
+    let search = TableSearch {
+        query: Arc::new(BM25SearchQuery {
+            query: "pink".to_string(),
+            limit: Some(2),
+        }),
+        projection: Some(vec![1]), // Only title column, excluding _row_id
+        dynamic_fields: vec!["score".to_string()],
+    };
+
+    // This search uses projection [1] (title only) without _row_id, combined with dynamic_fields
+    // With the fix, this should now work correctly:
+    // 1. read_rows internally adds _row_id to the projection
+    // 2. sort_batches and gather_dynamic_columns work with _row_id
+    // 3. Final output removes _row_id, returning only title + score
+    let result = table_search(&table, search).await;
+    let table_str = result?;
+
+    // Verify the output contains title and score but not _row_id
+    assert!(
+        table_str.contains("title"),
+        "Output should contain title column"
+    );
+    assert!(
+        table_str.contains("score"),
+        "Output should contain score column"
+    );
+    assert!(
+        !table_str.contains("_row_id"),
+        "Output should NOT contain _row_id column"
+    );
+    assert!(
+        !table_str.contains("_indexlake_row_id"),
+        "Output should NOT contain _indexlake_row_id column"
+    );
+
+    println!("Search succeeded: {}", table_str);
+
+    Ok(())
+}
