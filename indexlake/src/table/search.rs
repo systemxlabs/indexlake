@@ -176,11 +176,35 @@ pub(crate) async fn process_search(
         search.query.limit(),
     )?;
 
+    let row_id_idx = table
+        .table_schema
+        .arrow_schema
+        .index_of(INTERNAL_ROW_ID_FIELD_NAME)?;
+
+    // Determine if user explicitly requested _row_id in their projection
+    let user_wants_row_id = search
+        .projection
+        .as_ref()
+        .map(|p| p.contains(&row_id_idx))
+        .unwrap_or(true); // None means all columns, which includes _row_id
+
+    // Build internal projection that always includes _row_id for internal processing
+    // (sort_batches and gather_dynamic_columns_from_batch need _row_id at position 0)
+    let internal_projection = if user_wants_row_id {
+        search.projection.clone()
+    } else {
+        search.projection.as_ref().map(|p| {
+            let mut proj = vec![row_id_idx];
+            proj.extend(p.iter());
+            proj
+        })
+    };
+
     let (inline_batch, data_file_batches) = read_rows(
         &catalog_helper,
         table,
         &merged_entries.row_score_locations,
-        search.projection.clone(),
+        internal_projection,
         &data_file_records,
     )
     .await?;
@@ -194,8 +218,13 @@ pub(crate) async fn process_search(
     let dynamic_columns =
         gather_dynamic_columns_from_batch(&sorted_batch, &merged_entries.dynamic_lookups)?;
     let final_batch = append_dynamic_columns_to_record_batch(&sorted_batch, &dynamic_columns)?;
-    // Remove internal _row_id column from final output
-    let final_batch = remove_row_id_column(&final_batch)?;
+
+    // Remove internal _row_id column from final output only if user didn't request it
+    let final_batch = if user_wants_row_id {
+        final_batch
+    } else {
+        remove_row_id_column(&final_batch)?
+    };
 
     Ok(Box::pin(futures::stream::iter(vec![Ok(final_batch)])))
 }
@@ -498,29 +527,10 @@ async fn read_rows(
         }
     }
 
-    // Build internal projection that always includes _row_id for internal processing
-    // (sort_batches and gather_dynamic_columns_from_batch need _row_id)
-    // _row_id must be at position 0, so we PREPEND it to the user projection
-    let row_id_idx = table
-        .table_schema
-        .arrow_schema
-        .index_of(INTERNAL_ROW_ID_FIELD_NAME)?;
-    let internal_projection = if let Some(ref user_proj) = projection {
-        if user_proj.contains(&row_id_idx) {
-            projection.clone()
-        } else {
-            let mut proj = vec![row_id_idx];
-            proj.extend(user_proj.iter());
-            Some(proj)
-        }
-    } else {
-        None // No projection means all columns including _row_id
-    };
-
-    // Use internal_projection (which includes _row_id) for reading data
+    // Use the provided projection directly (caller ensures _row_id is included if needed)
     let projected_schema = Arc::new(project_schema(
         &table.table_schema.arrow_schema,
-        internal_projection.as_ref(),
+        projection.as_ref(),
     )?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
@@ -548,7 +558,7 @@ async fn read_rows(
         .into_iter()
         .map(|(data_file_id, row_ids)| {
             let table = table.clone();
-            let internal_projection = internal_projection.clone();
+            let projection = projection.clone();
             let data_file_records = data_file_records.to_vec();
 
             tokio::spawn(async move {
@@ -565,7 +575,7 @@ async fn read_rows(
                     table.storage.as_ref(),
                     &table.table_schema,
                     data_file_record,
-                    internal_projection,
+                    projection,
                     vec![row_ids_in_list_expr(row_ids)],
                     1024,
                 )
@@ -632,4 +642,220 @@ fn sort_batches(
     let batch = arrow::compute::take_record_batch(&batch, &indices)?;
 
     Ok(batch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::{StringArray, UInt64Array};
+    use arrow::datatypes::{DataType, Field};
+
+    fn create_test_batch_with_row_id() -> RecordBatch {
+        let schema = Schema::new(vec![
+            Field::new(INTERNAL_ROW_ID_FIELD_NAME, DataType::UInt64, false),
+            Field::new("title", DataType::Utf8, false),
+            Field::new("score", DataType::Float64, false),
+        ]);
+        RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(UInt64Array::from(vec![1, 2, 3])),
+                Arc::new(StringArray::from(vec!["a", "b", "c"])),
+                Arc::new(arrow::array::Float64Array::from(vec![1.0, 2.0, 3.0])),
+            ],
+        )
+        .unwrap()
+    }
+
+    fn create_test_batch_without_row_id() -> RecordBatch {
+        let schema = Schema::new(vec![
+            Field::new("title", DataType::Utf8, false),
+            Field::new("score", DataType::Float64, false),
+        ]);
+        RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(StringArray::from(vec!["a", "b", "c"])),
+                Arc::new(arrow::array::Float64Array::from(vec![1.0, 2.0, 3.0])),
+            ],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_remove_row_id_column() {
+        let batch = create_test_batch_with_row_id();
+        let result = remove_row_id_column(&batch).unwrap();
+
+        assert_eq!(result.num_columns(), 2);
+        assert_eq!(
+            result
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name())
+                .collect::<Vec<_>>(),
+            vec!["title", "score"]
+        );
+        assert_eq!(result.num_rows(), 3);
+    }
+
+    #[test]
+    fn test_remove_row_id_column_preserves_data() {
+        let batch = create_test_batch_with_row_id();
+        let result = remove_row_id_column(&batch).unwrap();
+
+        let title_col = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(title_col.value(0), "a");
+        assert_eq!(title_col.value(1), "b");
+        assert_eq!(title_col.value(2), "c");
+
+        let score_col = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<arrow::array::Float64Array>()
+            .unwrap();
+        assert_eq!(score_col.value(0), 1.0);
+        assert_eq!(score_col.value(1), 2.0);
+        assert_eq!(score_col.value(2), 3.0);
+    }
+
+    #[test]
+    fn test_reorder_batch_to_schema() {
+        let batch = create_test_batch_with_row_id();
+        let target_schema = Schema::new(vec![
+            Field::new("score", DataType::Float64, false),
+            Field::new("title", DataType::Utf8, false),
+            Field::new(INTERNAL_ROW_ID_FIELD_NAME, DataType::UInt64, false),
+        ]);
+
+        let result = reorder_batch_to_schema(&batch, &target_schema).unwrap();
+
+        assert_eq!(result.num_columns(), 3);
+        // Verify order matches target schema
+        assert_eq!(result.schema().field(0).name(), "score");
+        assert_eq!(result.schema().field(1).name(), "title");
+        assert_eq!(result.schema().field(2).name(), INTERNAL_ROW_ID_FIELD_NAME);
+    }
+
+    #[test]
+    fn test_reorder_batch_preserves_data() {
+        let batch = create_test_batch_with_row_id();
+        let target_schema = Schema::new(vec![
+            Field::new("score", DataType::Float64, false),
+            Field::new("title", DataType::Utf8, false),
+            Field::new(INTERNAL_ROW_ID_FIELD_NAME, DataType::UInt64, false),
+        ]);
+
+        let result = reorder_batch_to_schema(&batch, &target_schema).unwrap();
+
+        // Check score column (was at index 2, now at index 0)
+        let score_col = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<arrow::array::Float64Array>()
+            .unwrap();
+        assert_eq!(score_col.value(0), 1.0);
+    }
+
+    #[test]
+    fn test_user_wants_row_id_logic() {
+        // Test case: projection excludes _row_id (index 0 in full schema with row_id)
+        let projection = Some(vec![1]); // Only "title" column
+        let row_id_idx = 0;
+
+        let user_wants_row_id = projection
+            .as_ref()
+            .map(|p| p.contains(&row_id_idx))
+            .unwrap_or(true);
+        assert!(!user_wants_row_id);
+
+        // Test case: projection includes _row_id
+        let projection_with_row_id = Some(vec![0, 1]); // _row_id and title
+        let user_wants_row_id = projection_with_row_id
+            .as_ref()
+            .map(|p| p.contains(&row_id_idx))
+            .unwrap_or(true);
+        assert!(user_wants_row_id);
+
+        // Test case: None projection means all columns
+        let projection_none: Option<Vec<usize>> = None;
+        let user_wants_row_id = projection_none
+            .as_ref()
+            .map(|p| p.contains(&row_id_idx))
+            .unwrap_or(true);
+        assert!(user_wants_row_id);
+    }
+
+    #[test]
+    fn test_internal_projection_includes_row_id_when_user_excludes() {
+        let row_id_idx = 0;
+        let user_projection = Some(vec![1]); // Only "title" (index 1 in full schema)
+
+        // Simulating the logic in process_search
+        let user_wants_row_id = user_projection
+            .as_ref()
+            .map(|p| p.contains(&row_id_idx))
+            .unwrap_or(true);
+
+        let internal_projection = if user_wants_row_id {
+            user_projection.clone()
+        } else {
+            user_projection.as_ref().map(|p| {
+                let mut proj = vec![row_id_idx];
+                proj.extend(p.iter());
+                proj
+            })
+        };
+
+        // Internal projection should include row_id at position 0
+        let internal_proj = internal_projection.unwrap();
+        assert_eq!(internal_proj[0], row_id_idx);
+        assert_eq!(internal_proj[1], 1); // title is now at position 1
+        assert_eq!(internal_proj.len(), 2);
+    }
+
+    #[test]
+    fn test_internal_projection_preserves_user_row_id_request() {
+        let row_id_idx = 0;
+        let user_projection = Some(vec![0, 1]); // Both _row_id and title
+
+        let user_wants_row_id = user_projection
+            .as_ref()
+            .map(|p| p.contains(&row_id_idx))
+            .unwrap_or(true);
+
+        let internal_projection = if user_wants_row_id {
+            user_projection.clone()
+        } else {
+            user_projection.as_ref().map(|p| {
+                let mut proj = vec![row_id_idx];
+                proj.extend(p.iter());
+                proj
+            })
+        };
+
+        // Should be unchanged since user already included row_id
+        let internal_proj = internal_projection.unwrap();
+        assert_eq!(internal_proj, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_batch_without_row_id_to_schema() {
+        // Test reordering a batch that doesn't have row_id
+        let batch = create_test_batch_without_row_id();
+        let target_schema = Schema::new(vec![
+            Field::new("score", DataType::Float64, false),
+            Field::new("title", DataType::Utf8, false),
+        ]);
+
+        let result = reorder_batch_to_schema(&batch, &target_schema).unwrap();
+        assert_eq!(result.num_columns(), 2);
+        assert_eq!(result.schema().field(0).name(), "score");
+        assert_eq!(result.schema().field(1).name(), "title");
+    }
 }
