@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::{DataType, FieldRef};
@@ -105,10 +104,6 @@ impl IndexKind for BTreeIndexKind {
 pub struct BTreeIndexParams {}
 
 impl IndexParams for BTreeIndexParams {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn encode(&self) -> ILResult<String> {
         serde_json::to_string(self).map_err(|e| ILError::index(e.to_string()))
     }

@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::array::Float64Array;
@@ -24,10 +23,6 @@ impl RabitqSearchQuery {
 }
 
 impl SearchQuery for RabitqSearchQuery {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn index_kind(&self) -> &str {
         "rabitq"
     }
@@ -58,14 +53,11 @@ impl Index for RabitqIndex {
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
     ) -> ILResult<SearchIndexEntries> {
-        let query = query
-            .as_any()
-            .downcast_ref::<RabitqSearchQuery>()
-            .ok_or_else(|| {
-                ILError::index(format!(
-                    "RaBitQ index does not support search query: {query:?}"
-                ))
-            })?;
+        let query = query.downcast_ref::<RabitqSearchQuery>().ok_or_else(|| {
+            ILError::index(format!(
+                "RaBitQ index does not support search query: {query:?}"
+            ))
+        })?;
 
         let score_higher_is_better = matches!(self.metric, RabitqMetric::InnerProduct);
 
