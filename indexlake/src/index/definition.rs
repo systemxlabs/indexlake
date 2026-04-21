@@ -43,8 +43,8 @@ impl IndexDefinition {
         Ok(key_fields)
     }
 
-    pub fn downcast_params<T: 'static>(&self) -> ILResult<&T> {
-        self.params.as_any().downcast_ref::<T>().ok_or_else(|| {
+    pub fn downcast_params<T: IndexParams>(&self) -> ILResult<&T> {
+        self.params.downcast_ref::<T>().ok_or_else(|| {
             ILError::internal(format!(
                 "Index params is not {}",
                 std::any::type_name::<T>()

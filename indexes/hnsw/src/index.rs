@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::array::Float64Array;
@@ -20,10 +19,6 @@ pub struct HnswSearchQuery {
 }
 
 impl SearchQuery for HnswSearchQuery {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn index_kind(&self) -> &str {
         "hnsw"
     }
@@ -57,14 +52,11 @@ impl Index for HnswIndex {
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
     ) -> ILResult<SearchIndexEntries> {
-        let query = query
-            .as_any()
-            .downcast_ref::<HnswSearchQuery>()
-            .ok_or_else(|| {
-                ILError::index(format!(
-                    "Hnsw index does not support search query: {query:?}"
-                ))
-            })?;
+        let query = query.downcast_ref::<HnswSearchQuery>().ok_or_else(|| {
+            ILError::index(format!(
+                "Hnsw index does not support search query: {query:?}"
+            ))
+        })?;
 
         let limit = std::cmp::min(query.limit, self.hnsw.len());
 

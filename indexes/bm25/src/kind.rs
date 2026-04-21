@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Field, FieldRef};
@@ -51,7 +50,7 @@ impl IndexKind for BM25IndexKind {
     }
 
     fn supports_search(&self, _: &IndexDefinition, query: &dyn SearchQuery) -> ILResult<bool> {
-        if query.as_any().downcast_ref::<BM25SearchQuery>().is_some() {
+        if query.downcast_ref::<BM25SearchQuery>().is_some() {
             Ok(true)
         } else {
             Ok(false)
@@ -77,10 +76,6 @@ pub struct BM25IndexParams {
 }
 
 impl IndexParams for BM25IndexParams {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn encode(&self) -> ILResult<String> {
         serde_json::to_string(self).map_err(|e| ILError::index(e.to_string()))
     }

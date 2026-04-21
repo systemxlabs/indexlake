@@ -95,16 +95,32 @@ pub enum FilterSupport {
     Inexact,
 }
 
-pub trait SearchQuery: Debug + Send + Sync {
-    fn as_any(&self) -> &dyn Any;
-
+pub trait SearchQuery: Debug + Send + Sync + Any {
     fn index_kind(&self) -> &str;
 
     fn limit(&self) -> Option<usize>;
 }
 
-pub trait IndexParams: Debug + Send + Sync {
-    fn as_any(&self) -> &dyn Any;
+impl dyn SearchQuery {
+    pub fn is<T: SearchQuery>(&self) -> bool {
+        (self as &dyn Any).is::<T>()
+    }
 
+    pub fn downcast_ref<T: SearchQuery>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref::<T>()
+    }
+}
+
+pub trait IndexParams: Debug + Send + Sync + Any {
     fn encode(&self) -> ILResult<String>;
+}
+
+impl dyn IndexParams {
+    pub fn is<T: IndexParams>(&self) -> bool {
+        (self as &dyn Any).is::<T>()
+    }
+
+    pub fn downcast_ref<T: IndexParams>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref::<T>()
+    }
 }

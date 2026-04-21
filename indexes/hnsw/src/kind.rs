@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Field, FieldRef};
@@ -61,7 +60,7 @@ impl IndexKind for HnswIndexKind {
         _index_def: &IndexDefinition,
         query: &dyn SearchQuery,
     ) -> ILResult<bool> {
-        let Some(_query) = query.as_any().downcast_ref::<HnswSearchQuery>() else {
+        let Some(_query) = query.downcast_ref::<HnswSearchQuery>() else {
             return Ok(false);
         };
         Ok(true)
@@ -90,10 +89,6 @@ pub struct HnswIndexParams {
 }
 
 impl IndexParams for HnswIndexParams {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn encode(&self) -> ILResult<String> {
         let json = serde_json::to_string(self)
             .map_err(|e| ILError::index(format!("Failed to encode HnswIndexParams: {e}")))?;
