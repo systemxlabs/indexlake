@@ -41,7 +41,7 @@ indexlake-storage-fs = { path = "storages/fs", version = "0.4.0" }
 indexlake-storage-s3 = { path = "storages/s3", version = "0.4.0" }
 
 arrow = "57"
-arrow-schema = "57"
+arrow-schema = "58"
 async-trait = "0.1"
 bb8 = "0.9"
 bb8-postgres = "0.9"
