@@ -2238,7 +2238,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "smallvec",
- "space",
+ "space 0.17.0",
 ]
 
 [[package]]
@@ -2742,7 +2742,7 @@ dependencies = [
  "rand_pcg",
  "serde",
  "serde_json",
- "space",
+ "space 0.19.0",
  "uuid",
 ]
 
@@ -3455,6 +3455,15 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "serde",
+]
+
+[[package]]
+name = "pgat"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4869dd82b796b9550e24016b4695f63fc5ecf903cae9078e109831532120e48"
+dependencies = [
+ "doc-comment",
 ]
 
 [[package]]
@@ -4482,6 +4491,17 @@ checksum = "c5ab9701ae895386d13db622abf411989deff7109b13b46b6173bb4ce5c1d123"
 dependencies = [
  "doc-comment",
  "num-traits",
+]
+
+[[package]]
+name = "space"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7324caaf44e7e7bf7465364048c12a50b169b0e4f86821ea37277dc98eb3c4fe"
+dependencies = [
+ "doc-comment",
+ "num-traits",
+ "pgat",
 ]
 
 [[package]]
