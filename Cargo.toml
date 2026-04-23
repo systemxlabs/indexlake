@@ -53,7 +53,7 @@ datafusion = { version = "52", default-features = false, features = ["sql"] }
 datafusion-catalog = "52"
 datafusion-common = "52"
 datafusion-execution = "52"
-datafusion-expr = "52"
+datafusion-expr = "53"
 datafusion-optimizer = "52"
 datafusion-physical-expr = "52"
 datafusion-physical-plan = "52"
