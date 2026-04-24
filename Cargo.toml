@@ -90,3 +90,4 @@ thiserror = "2.0"
 tokio = "1"
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["serde"] }
+object_store = "0.13"
