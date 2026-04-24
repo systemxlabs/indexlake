@@ -22,7 +22,7 @@ datafusion = { workspace = true, features = ["parquet"] }
 futures = { workspace = true }
 geo = { workspace = true }
 geozero = { workspace = true }
-object_store = { version = "0.12", features = ["aws"] }
+object_store = { workspace = true, features = ["aws"] }
 opendal = { workspace = true }
 rand = { workspace = true }
 url = "2"
