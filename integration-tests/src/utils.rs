@@ -84,6 +84,12 @@ pub async fn table_search(table: &Table, search: TableSearch) -> ILResult<String
 pub async fn datafusion_insert(ctx: &SessionContext, sql: &str) -> String {
     datafusion_exec_and_sort(ctx, sql, None).await
 }
+pub async fn datafusion_update(ctx: &SessionContext, sql: &str) -> String {
+    datafusion_exec_and_sort(ctx, sql, None).await
+}
+pub async fn datafusion_delete(ctx: &SessionContext, sql: &str) -> String {
+    datafusion_exec_and_sort(ctx, sql, None).await
+}
 
 pub async fn datafusion_scan(ctx: &SessionContext, sql: &str) -> String {
     datafusion_exec_and_sort(ctx, sql, Some(INTERNAL_ROW_ID_FIELD_NAME)).await

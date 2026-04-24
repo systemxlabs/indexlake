@@ -24,7 +24,7 @@ pub struct IndexLakeInsertExec {
     pub input: Arc<dyn ExecutionPlan>,
     pub insert_op: InsertOp,
     pub bypass_insert_threshold: usize,
-    cache: PlanProperties,
+    cache: Arc<PlanProperties>,
 }
 
 impl IndexLakeInsertExec {
@@ -43,12 +43,12 @@ impl IndexLakeInsertExec {
             }
         }
 
-        let cache = PlanProperties::new(
+        let cache = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(make_count_schema()),
             Partitioning::UnknownPartitioning(1),
             input.pipeline_behavior(),
             input.boundedness(),
-        );
+        ));
 
         Ok(Self {
             lazy_table,
@@ -69,7 +69,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
     }
 

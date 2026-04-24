@@ -33,7 +33,7 @@ pub struct IndexLakeScanExec {
     pub filters: Vec<Expr>,
     pub batch_size: usize,
     pub limit: Option<usize>,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl IndexLakeScanExec {
@@ -56,12 +56,12 @@ impl IndexLakeScanExec {
             )));
         }
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
-        let properties = PlanProperties::new(
+        let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(projected_schema),
             Partitioning::UnknownPartitioning(partition_count),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
         Ok(Self {
             lazy_table,
             output_schema,
@@ -101,7 +101,7 @@ impl ExecutionPlan for IndexLakeScanExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 

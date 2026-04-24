@@ -16,7 +16,7 @@ use crate::{LazyTable, make_count_schema, make_result_batch};
 pub struct IndexLakeDeleteExec {
     pub lazy_table: LazyTable,
     pub condition: indexlake::expr::Expr,
-    cache: PlanProperties,
+    cache: Arc<PlanProperties>,
 }
 
 impl IndexLakeDeleteExec {
@@ -24,12 +24,12 @@ impl IndexLakeDeleteExec {
         lazy_table: LazyTable,
         condition: indexlake::expr::Expr,
     ) -> Result<Self, DataFusionError> {
-        let cache = PlanProperties::new(
+        let cache = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(make_count_schema()),
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             lazy_table,
@@ -48,7 +48,7 @@ impl ExecutionPlan for IndexLakeDeleteExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
     }
 
