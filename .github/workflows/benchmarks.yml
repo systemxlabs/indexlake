@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Resolve PR ref and inputs
         id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner;
@@ -44,13 +44,14 @@ jobs:
             const prNumber = isDispatch ? Number(core.getInput('pr_number')) : context.payload.issue.number;
 
             const allowed = {
-              all: ["indexlake", "indexlake_btree", "indexlake_bm25", "indexlake_hnsw", "indexlake_rabitq", "indexlake_rstar"],
+              all: ["indexlake", "indexlake_btree", "indexlake_bm25", "indexlake_hnsw", "indexlake_rabitq", "indexlake_rstar", "indexlake_vs_datafusion"],
               indexlake: ["indexlake"],
               indexlake_btree: ["indexlake_btree"],
               indexlake_bm25: ["indexlake_bm25"],
               indexlake_hnsw: ["indexlake_hnsw"],
               indexlake_rabitq: ["indexlake_rabitq"],
               indexlake_rstar: ["indexlake_rstar"],
+              indexlake_vs_datafusion: ["indexlake_vs_datafusion"],
             };
 
             let benchKey = "all";
@@ -102,11 +103,6 @@ jobs:
             core.setOutput('head_ref', pr.data.head.ref);
             core.setOutput('bench_bins', JSON.stringify(bins));
 
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.resolve.outputs.head_sha }}
-          fetch-depth: 1
-
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -114,26 +110,34 @@ jobs:
           workspaces: |
             .
 
-      - name: Run benchmark (release)
+      # ===== Run benchmark on PR branch =====
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.resolve.outputs.head_sha }}
+          fetch-depth: 1
+          path: pr-branch
+
+      - name: Run benchmark on PR branch (release)
         shell: bash
         env:
           BENCH_BINS: ${{ steps.resolve.outputs.bench_bins }}
         run: |
           set -euo pipefail
-          mapfile -t BINS < <(python - << 'PY'
+          mapfile -t BINS < <(python3 - << 'PY'
           import json, os
           for b in json.loads(os.environ["BENCH_BINS"]):
               print(b)
           PY
           )
 
-          rm -f bench_filtered_all.txt
-          touch bench_filtered_all.txt
+          cd pr-branch
+          rm -f ../bench_output_pr_*.txt
 
           for b in "${BINS[@]}"; do
-            echo "running ${b} ..."
+            echo "[PR Branch] running ${b} ..."
             set +e
-            cargo run -p indexlake-benchmarks --bin "${b}" --release 2>&1 | tee "bench_output_${b}.txt"
+            cargo run -p indexlake-benchmarks --bin "${b}" --release 2>&1 | tee "../bench_output_pr_${b}.txt"
             rc=${PIPESTATUS[0]}
             set -e
             if [ "${rc}" -ne 0 ]; then
@@ -141,29 +145,83 @@ jobs:
             fi
           done
 
-      - name: Upload benchmark output
-        uses: actions/upload-artifact@v4
+      # ===== Run benchmark on main branch =====
+      - name: Checkout main branch
+        uses: actions/checkout@v6
         with:
-          name: bench-output
-          path: bench_output_*.txt
+          ref: main
+          fetch-depth: 1
+          path: main-branch
 
-      - name: Extract benchmark lines
+      - name: Run benchmark on main branch (release)
         shell: bash
+        env:
+          BENCH_BINS: ${{ steps.resolve.outputs.bench_bins }}
         run: |
           set -euo pipefail
-          for f in bench_output_*.txt; do
-            b="${f#bench_output_}"
-            b="${b%.txt}"
-            if grep -E '^benchmark:' "$f" >/dev/null 2>&1; then
-              # Prefix with benchmark name for readability in the PR comment.
-              grep -E '^benchmark:' "$f" | sed "s/^benchmark:/benchmark:[$b]/" >> bench_filtered_all.txt
-            else
-              echo "benchmark:[$b] (no benchmark: lines found)" >> bench_filtered_all.txt
+          mapfile -t BINS < <(python3 - << 'PY'
+          import json, os
+          for b in json.loads(os.environ["BENCH_BINS"]):
+              print(b)
+          PY
+          )
+
+          cd main-branch
+          rm -f ../bench_output_main_*.txt
+
+          for b in "${BINS[@]}"; do
+            echo "[Main Branch] running ${b} ..."
+            set +e
+            cargo run -p indexlake-benchmarks --bin "${b}" --release 2>&1 | tee "../bench_output_main_${b}.txt"
+            rc=${PIPESTATUS[0]}
+            set -e
+            if [ "${rc}" -ne 0 ]; then
+              exit "${rc}"
             fi
           done
 
-      - name: Comment results on PR
-        uses: actions/github-script@v7
+      - name: Upload benchmark outputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-output
+          path: |
+            bench_output_pr_*.txt
+            bench_output_main_*.txt
+
+      # ===== Extract benchmark results =====
+      - name: Extract PR branch benchmark results
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f bench_pr_output.txt
+          for f in bench_output_pr_*.txt; do
+            [ -f "$f" ] || continue
+            if grep -E '^benchmark:' "$f" >/dev/null 2>&1; then
+              grep -E '^benchmark:' "$f" >> bench_pr_output.txt
+            fi
+          done
+
+      - name: Extract main branch benchmark results
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f bench_main_output.txt
+          for f in bench_output_main_*.txt; do
+            [ -f "$f" ] || continue
+            if grep -E '^benchmark:' "$f" >/dev/null 2>&1; then
+              grep -E '^benchmark:' "$f" >> bench_main_output.txt
+            fi
+          done
+
+      - name: Get main branch SHA
+        id: main_sha
+        shell: bash
+        run: |
+          cd main-branch
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Comment benchmark results on PR
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -171,31 +229,41 @@ jobs:
             const repo = context.repo.repo;
             const prNumber = Number('${{ steps.resolve.outputs.pr_number }}');
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-            const sha = '${{ steps.resolve.outputs.head_sha }}';
+            const prSha = '${{ steps.resolve.outputs.head_sha }}';
+            const mainSha = '${{ steps.main_sha.outputs.sha }}';
 
-            let output = fs.readFileSync('bench_filtered_all.txt', 'utf8');
-            // Avoid breaking markdown code fences if output ever contains them.
-            output = output.replaceAll('```', '``\\`');
+            let prOutput = '';
+            let mainOutput = '';
 
-            // GitHub comment body limit is ~65536 chars; keep margin for headers.
-            const maxLen = 60000;
-            let truncated = false;
-            if (output.length > maxLen) {
-              output = output.slice(0, maxLen) + "\n\n...(truncated, see artifact `bench-output` for full output)\n";
-              truncated = true;
+            try {
+              prOutput = fs.readFileSync('bench_pr_output.txt', 'utf8').trimEnd();
+            } catch (e) {
+              prOutput = '(no benchmark results)';
             }
+
+            try {
+              mainOutput = fs.readFileSync('bench_main_output.txt', 'utf8').trimEnd();
+            } catch (e) {
+              mainOutput = '(no benchmark results)';
+            }
+
+            // Avoid breaking markdown code fences if output ever contains them.
+            prOutput = prOutput.replaceAll('```', '``\`');
+            mainOutput = mainOutput.replaceAll('```', '``\`');
 
             const body = [
               "### Benchmarks",
               "",
               `- workflow run: ${runUrl}`,
-              `- ref: \`${sha}\``,
-              truncated ? "- note: output truncated due to comment size limits" : "",
-              output.trim().length === 0 ? "- note: empty benchmark output" : "",
-              "",
+              `- pr ref: \`${prSha}\``,
               "```text",
-              output.trimEnd(),
+              prOutput,
               "```",
-            ].filter(Boolean).join("\n");
+              "",
+              `- main ref: \`${mainSha}\``,
+              "```text",
+              mainOutput,
+              "```",
+            ].join("\n");
 
             await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });

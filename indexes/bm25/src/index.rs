@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::array::Float64Array;
@@ -19,10 +18,6 @@ pub struct BM25SearchQuery {
 }
 
 impl SearchQuery for BM25SearchQuery {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn index_kind(&self) -> &str {
         "bm25"
     }
@@ -47,14 +42,10 @@ impl Index for BM25Index {
         dynamic_fields: &[String],
     ) -> ILResult<SearchIndexEntries> {
         let query = query
-            .as_any()
             .downcast_ref::<BM25SearchQuery>()
             .ok_or(ILError::index("Invalid query type"))?;
         let query_embedding = self.embedder.embed(&query.query);
-        let mut matches = self.scorer.matches(&query_embedding)?;
-        if let Some(limit) = query.limit {
-            matches.truncate(limit);
-        }
+        let matches = self.scorer.matches(&query_embedding, query.limit)?;
 
         let mut row_ids = Vec::with_capacity(matches.len());
         let mut scores = Vec::with_capacity(matches.len());

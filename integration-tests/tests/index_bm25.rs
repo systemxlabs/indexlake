@@ -165,5 +165,25 @@ async fn create_bm25_index(
 +--------+--------------------------------------------------------------------------------------+--------------------+"#,
     );
 
+    let search_without_row_id = TableSearch {
+        query: Arc::new(BM25SearchQuery {
+            query: "pink".to_string(),
+            limit: Some(2),
+        }),
+        projection: Some(vec![1]),
+        dynamic_fields: vec![],
+    };
+    let table_str = table_search(&table, search_without_row_id).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+--------+
+| title  |
++--------+
+| title3 |
+| title1 |
++--------+"#
+    );
+
     Ok(())
 }

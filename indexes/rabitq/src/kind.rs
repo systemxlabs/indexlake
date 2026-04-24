@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Field, FieldRef};
@@ -31,10 +30,6 @@ fn default_total_bits() -> usize {
 }
 
 impl IndexParams for RabitqIndexParams {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn encode(&self) -> ILResult<String> {
         serde_json::to_string(self)
             .map_err(|e| ILError::index(format!("Failed to encode RabitqIndexParams: {e}")))
@@ -92,7 +87,7 @@ impl IndexKind for RabitqIndexKind {
         _index_def: &IndexDefinition,
         query: &dyn SearchQuery,
     ) -> ILResult<bool> {
-        Ok(query.as_any().downcast_ref::<RabitqSearchQuery>().is_some())
+        Ok(query.downcast_ref::<RabitqSearchQuery>().is_some())
     }
 
     fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {

@@ -8,8 +8,8 @@ use futures::TryStreamExt;
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord, Row,
-    rows_to_record_batch,
+    CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord,
+    InlineIndexRecord, Row, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
 use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
@@ -120,24 +120,30 @@ pub(crate) async fn process_search(
     let data_file_records = catalog_helper.get_data_files(&table.table_id).await?;
 
     let index_id = index_def.index_id;
+    let index_file_records = catalog_helper
+        .get_index_files_by_index_id(&index_id)
+        .await?;
+    let index_file_records: HashMap<Uuid, IndexFileRecord> = index_file_records
+        .into_iter()
+        .map(|record| (record.data_file_id, record))
+        .collect();
 
     let mut handles = Vec::new();
     for data_file_record in data_file_records.iter() {
         let data_file_id = data_file_record.data_file_id;
+        let index_file_record =
+            index_file_records
+                .get(&data_file_id)
+                .cloned()
+                .ok_or(ILError::index(format!(
+                    "Index file not found for index {index_id} and data file {data_file_id}"
+                )))?;
         let storage = table.storage.clone();
-        let catalog_helper = catalog_helper.clone();
         let index_kind = index_kind.clone();
         let index_def = index_def.clone();
         let search_query = search.query.clone();
         let dynamic_fields = search.dynamic_fields.clone();
         let handle = tokio::spawn(async move {
-            let index_file_record = catalog_helper
-                .get_index_file_by_index_id_and_data_file_id(&index_id, &data_file_id)
-                .await?
-                .ok_or(ILError::index(format!(
-                    "Index file not found for index {index_id} and data file {data_file_id}"
-                )))?;
-
             let search_entries = search_index_file(
                 storage.as_ref(),
                 index_kind.as_ref(),
@@ -170,18 +176,30 @@ pub(crate) async fn process_search(
         search.query.limit(),
     )?;
 
-    let inline_batch = read_inline_rows(
+    // Determine if user explicitly requested _row_id in their projection
+    let user_wants_row_id = search
+        .projection
+        .as_ref()
+        .map(|p| p.contains(&0))
+        .unwrap_or(true); // None means all columns, which includes _row_id
+
+    // Build internal projection that always includes _row_id for internal processing
+    // (sort_batches and gather_dynamic_columns_from_batch need _row_id at position 0)
+    let internal_projection = if user_wants_row_id {
+        search.projection.clone()
+    } else {
+        search.projection.as_ref().map(|p| {
+            let mut proj = vec![0];
+            proj.extend(p.iter());
+            proj
+        })
+    };
+
+    let (inline_batch, data_file_batches) = read_rows(
         &catalog_helper,
         table,
         &merged_entries.row_score_locations,
-        search.projection.clone(),
-    )
-    .await?;
-
-    let data_file_batches = read_data_file_rows(
-        table,
-        &merged_entries.row_score_locations,
-        search.projection.clone(),
+        internal_projection,
         &data_file_records,
     )
     .await?;
@@ -195,6 +213,13 @@ pub(crate) async fn process_search(
     let dynamic_columns =
         gather_dynamic_columns_from_batch(&sorted_batch, &merged_entries.dynamic_lookups)?;
     let final_batch = append_dynamic_columns_to_record_batch(&sorted_batch, &dynamic_columns)?;
+
+    // Remove internal _row_id column from final output only if user didn't request it
+    let final_batch = if user_wants_row_id {
+        final_batch
+    } else {
+        remove_row_id_column(&final_batch)?
+    };
 
     Ok(Box::pin(futures::stream::iter(vec![Ok(final_batch)])))
 }
@@ -444,80 +469,121 @@ fn append_dynamic_columns_to_record_batch(
     Ok(RecordBatch::try_new(schema, arrays)?)
 }
 
-async fn read_inline_rows(
+fn remove_row_id_column(batch: &RecordBatch) -> ILResult<RecordBatch> {
+    let schema = batch.schema();
+    let row_id_idx = schema.index_of(INTERNAL_ROW_ID_FIELD_NAME)?;
+    let mut fields = Vec::with_capacity(batch.num_columns() - 1);
+    let mut columns = Vec::with_capacity(batch.num_columns() - 1);
+    for (i, field) in schema.fields().iter().enumerate() {
+        if i != row_id_idx {
+            fields.push(field.clone());
+            columns.push(batch.column(i).clone());
+        }
+    }
+    let new_schema = Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()));
+    RecordBatch::try_new(new_schema, columns)
+        .map_err(|e| ILError::internal(format!("Failed to remove row id column: {}", e)))
+}
+
+async fn read_rows(
     catalog_helper: &CatalogHelper,
     table: &Table,
     row_id_score_locations: &[(RowScore, RowLocation)],
     projection: Option<Vec<usize>>,
-) -> ILResult<RecordBatch> {
-    let inline_row_ids = row_id_score_locations
+    data_file_records: &[DataFileRecord],
+) -> ILResult<(RecordBatch, Vec<RecordBatch>)> {
+    // Collect inline row ids
+    let inline_row_ids: Vec<_> = row_id_score_locations
         .iter()
         .filter(|(_, location)| matches!(location, RowLocation::Inline))
         .map(|(row, _)| row.row_id)
-        .collect::<Vec<_>>();
+        .collect();
 
+    // Collect data file row ids grouped by data_file_id
+    let mut data_file_row_ids: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for (row, location) in row_id_score_locations {
+        if let RowLocation::DataFile(data_file_id) = location {
+            data_file_row_ids
+                .entry(*data_file_id)
+                .or_default()
+                .push(row.row_id);
+        }
+    }
+
+    // Use the provided projection directly (caller ensures _row_id is included if needed)
     let projected_schema = Arc::new(project_schema(
         &table.table_schema.arrow_schema,
         projection.as_ref(),
     )?);
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
 
-    let row_stream = catalog_helper
-        .scan_inline_rows(
-            &table.table_id,
-            &catalog_schema,
-            Some(&inline_row_ids),
-            &[],
-            None,
-        )
-        .await?;
-    let rows: Vec<Row> = row_stream.try_collect::<Vec<_>>().await?;
-    let batch = rows_to_record_batch(&projected_schema, &rows)?;
-
-    Ok(batch)
-}
-
-async fn read_data_file_rows(
-    table: &Table,
-    row_id_score_locations: &[(RowScore, RowLocation)],
-    projection: Option<Vec<usize>>,
-    data_file_records: &[DataFileRecord],
-) -> ILResult<Vec<RecordBatch>> {
-    let mut data_file_row_ids = HashMap::new();
-    for (row, location) in row_id_score_locations {
-        match location {
-            RowLocation::Inline => {}
-            RowLocation::DataFile(data_file_id) => {
-                data_file_row_ids
-                    .entry(*data_file_id)
-                    .or_insert(Vec::new())
-                    .push(row.row_id);
-            }
+    // Create inline rows reading task
+    let inline_task = async {
+        if inline_row_ids.is_empty() {
+            return rows_to_record_batch(&projected_schema, &[]);
         }
+        let row_stream = catalog_helper
+            .scan_inline_rows(
+                &table.table_id,
+                &catalog_schema,
+                Some(&inline_row_ids),
+                &[],
+                None,
+            )
+            .await?;
+        let rows: Vec<Row> = row_stream.try_collect::<Vec<_>>().await?;
+        let batch = rows_to_record_batch(&projected_schema, &rows)?;
+        Ok::<_, ILError>(batch)
+    };
+
+    // Create data file reading tasks - parallelized
+    let data_file_tasks: Vec<_> = data_file_row_ids
+        .into_iter()
+        .map(|(data_file_id, row_ids)| {
+            let table = table.clone();
+            let projection = projection.clone();
+            let data_file_records = data_file_records.to_vec();
+
+            tokio::spawn(async move {
+                let data_file_record = data_file_records
+                    .iter()
+                    .find(|record| record.data_file_id == data_file_id)
+                    .ok_or_else(|| {
+                        ILError::index(format!(
+                            "Data file record not found for data file id {data_file_id}"
+                        ))
+                    })?;
+
+                let stream = read_data_file_by_record(
+                    table.storage.as_ref(),
+                    &table.table_schema,
+                    data_file_record,
+                    projection,
+                    vec![row_ids_in_list_expr(row_ids)],
+                    1024,
+                )
+                .await?;
+
+                let batches: Vec<RecordBatch> = stream.try_collect::<Vec<_>>().await?;
+                Ok::<_, ILError>(batches)
+            })
+        })
+        .collect();
+
+    // Execute inline task and all data file tasks concurrently
+    let (inline_result, data_file_results) =
+        tokio::join!(inline_task, futures::future::join_all(data_file_tasks));
+
+    let inline_batch = inline_result?;
+
+    // Collect all data file batches
+    let mut all_data_file_batches = Vec::new();
+    for result in data_file_results {
+        let batches = result.map_err(|e| ILError::internal(format!("Task join error: {e}")))??;
+        all_data_file_batches.extend(batches);
     }
 
-    let mut all_batches = Vec::new();
-    for (data_file_id, row_ids) in data_file_row_ids {
-        let data_file_record = data_file_records
-            .iter()
-            .find(|record| record.data_file_id == data_file_id)
-            .ok_or(ILError::index(format!(
-                "Data file record not found for data file id {data_file_id}"
-            )))?;
-        let stream = read_data_file_by_record(
-            table.storage.as_ref(),
-            &table.table_schema,
-            data_file_record,
-            projection.clone(),
-            vec![row_ids_in_list_expr(row_ids)],
-            1024,
-        )
-        .await?;
-        let batches: Vec<RecordBatch> = stream.try_collect::<Vec<_>>().await?;
-        all_batches.extend(batches);
-    }
-
-    Ok(all_batches)
+    Ok((inline_batch, all_data_file_batches))
 }
 
 fn sort_batches(

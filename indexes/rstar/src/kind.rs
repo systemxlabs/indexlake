@@ -151,10 +151,6 @@ impl WkbDialect {
 }
 
 impl IndexParams for RStarIndexParams {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn encode(&self) -> ILResult<String> {
         serde_json::to_string(self)
             .map_err(|e| ILError::index(format!("Failed to serialize RStarIndexParams: {e}")))

@@ -18,10 +18,14 @@ indexlake-index-rstar = { workspace = true }
 indexlake-integration-tests = { workspace = true }
 
 arrow = { workspace = true }
+datafusion = { workspace = true, features = ["parquet"] }
 futures = { workspace = true }
 geo = { workspace = true }
 geozero = { workspace = true }
+object_store = { version = "0.12", features = ["aws"] }
+opendal = { workspace = true }
 rand = { workspace = true }
+url = "2"
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4"] }
 
