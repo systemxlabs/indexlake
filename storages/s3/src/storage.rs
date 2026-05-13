@@ -112,10 +112,13 @@ impl Storage for S3Storage {
         } else {
             format!("{relative_path}/")
         };
-        op.remove_all(&relative_path).await.map_err(|e| {
-            ILError::storage(format!(
-                "Failed to remove directory {relative_path}, e: {e}"
-            ))
-        })
+        op.delete_with(&relative_path)
+            .recursive(true)
+            .await
+            .map_err(|e| {
+                ILError::storage(format!(
+                    "Failed to remove directory {relative_path}, e: {e}"
+                ))
+            })
     }
 }
