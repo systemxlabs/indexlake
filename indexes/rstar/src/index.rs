@@ -105,7 +105,7 @@ fn rtree_intersects(
     };
     let aabb = AABB::from_corners([aabb.min_x(), aabb.min_y()], [aabb.max_x(), aabb.max_y()]);
 
-    let selection = rtree.locate_in_envelope_intersecting(&aabb);
+    let selection = rtree.locate_in_envelope_intersecting(aabb);
     let row_ids = selection
         .into_iter()
         .map(|object| object.row_id)
