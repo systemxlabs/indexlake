@@ -12,7 +12,7 @@ impl bm25::Tokenizer for JiebaTokenizer {
         JIEBA
             .cut_for_search(text, true)
             .into_iter()
-            .map(|s| s.to_string())
+            .map(|token| token.word.to_string())
             .collect()
     }
 }
