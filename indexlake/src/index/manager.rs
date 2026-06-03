@@ -37,7 +37,7 @@ impl IndexManager {
         self.kinds.get(kind)
     }
 
-    pub fn index_ids(&self) -> Vec<Uuid> {
+    pub(crate) fn index_ids(&self) -> Vec<Uuid> {
         self.indexes.iter().map(|index| index.index_id).collect()
     }
 
