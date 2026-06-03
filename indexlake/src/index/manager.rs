@@ -37,7 +37,7 @@ impl IndexManager {
         self.kinds.get(kind)
     }
 
-    pub(crate) fn index_ids(&self) -> Vec<Uuid> {
+    pub fn index_ids(&self) -> Vec<Uuid> {
         self.indexes.iter().map(|index| index.index_id).collect()
     }
 
@@ -46,6 +46,35 @@ impl IndexManager {
         self.indexes
             .iter()
             .any(|def| def.key_columns.contains(&field_id_str))
+    }
+
+    pub(crate) fn index_ids_by_field_ids(&self, field_ids: &[String]) -> Vec<Uuid> {
+        self.indexes
+            .iter()
+            .filter(|index_def| {
+                field_ids
+                    .iter()
+                    .any(|field_id| index_def.key_columns.contains(field_id))
+            })
+            .map(|index_def| index_def.index_id)
+            .collect()
+    }
+
+    pub(crate) fn new_index_builders_by_ids(
+        &self,
+        index_ids: &[Uuid],
+    ) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
+        self.indexes
+            .iter()
+            .filter(|index_def| index_ids.contains(&index_def.index_id))
+            .map(|index_def| {
+                let index_kind = self
+                    .kinds
+                    .get(&index_def.kind)
+                    .expect("Index kind not found");
+                index_kind.builder(index_def)
+            })
+            .collect()
     }
 
     pub(crate) fn supports_filter(&self, filter: &Expr) -> ILResult<FilterSupport> {
