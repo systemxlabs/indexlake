@@ -308,11 +308,58 @@ pub(crate) async fn rebuild_inline_indexes(
     Ok(())
 }
 
+pub(crate) async fn rebuild_inline_indexes_by_ids(
+    tx_helper: &mut TransactionHelper,
+    table_id: &Uuid,
+    table_schema: &TableSchemaRef,
+    index_manager: &IndexManager,
+    index_ids: &[Uuid],
+) -> ILResult<()> {
+    let inline_index_records =
+        build_inline_indexes_by_ids(tx_helper, table_id, table_schema, index_manager, index_ids)
+            .await?;
+
+    // delete old inline index records for specified index_ids only
+    tx_helper.delete_inline_indexes(index_ids).await?;
+
+    // insert inline index records
+    tx_helper
+        .insert_inline_indexes(&inline_index_records)
+        .await?;
+
+    Ok(())
+}
+
 pub(crate) async fn build_all_inline_indexes(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
+) -> ILResult<Vec<InlineIndexRecord>> {
+    build_inline_indexes_with_builder_factory(tx_helper, table_id, table_schema, || {
+        index_manager.new_index_builders()
+    })
+    .await
+}
+
+pub(crate) async fn build_inline_indexes_by_ids(
+    tx_helper: &mut TransactionHelper,
+    table_id: &Uuid,
+    table_schema: &TableSchemaRef,
+    index_manager: &IndexManager,
+    index_ids: &[Uuid],
+) -> ILResult<Vec<InlineIndexRecord>> {
+    build_inline_indexes_with_builder_factory(tx_helper, table_id, table_schema, || {
+        index_manager.new_index_builders_by_ids(index_ids)
+    })
+    .await
+}
+
+async fn build_inline_indexes_with_builder_factory(
+    tx_helper: &mut TransactionHelper,
+    table_id: &Uuid,
+    table_schema: &TableSchemaRef,
+    mut new_index_builders: impl FnMut() -> ILResult<Vec<Box<dyn IndexBuilder>>>,
 ) -> ILResult<Vec<InlineIndexRecord>> {
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
@@ -321,9 +368,9 @@ pub(crate) async fn build_all_inline_indexes(
     let mut chunk_stream = row_stream.chunks(100);
 
     let mut inline_index_records = Vec::new();
-
-    let mut index_builders = index_manager.new_index_builders()?;
+    let mut index_builders = new_index_builders()?;
     let mut counter = 0;
+
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
         counter += rows.len();
@@ -333,37 +380,35 @@ pub(crate) async fn build_all_inline_indexes(
         }
 
         if counter >= 1000 {
-            for index_builder in index_builders.iter_mut() {
-                if index_builder.is_empty() {
-                    continue;
-                }
-                let mut index_data = Vec::new();
-                index_builder.write_bytes(&mut index_data)?;
-                inline_index_records.push(InlineIndexRecord {
-                    index_id: index_builder.index_def().index_id,
-                    index_data,
-                });
-            }
+            flush_index_builders(&mut index_builders, &mut inline_index_records)?;
             counter = 0;
-            index_builders = index_manager.new_index_builders()?;
+            index_builders = new_index_builders()?;
         }
     }
     drop(chunk_stream);
 
     // build inline index records for left rows
     if counter > 0 {
-        for index_builder in index_builders.iter_mut() {
-            if index_builder.is_empty() {
-                continue;
-            }
-            let mut index_data = Vec::new();
-            index_builder.write_bytes(&mut index_data)?;
-            inline_index_records.push(InlineIndexRecord {
-                index_id: index_builder.index_def().index_id,
-                index_data,
-            });
-        }
+        flush_index_builders(&mut index_builders, &mut inline_index_records)?;
     }
 
     Ok(inline_index_records)
+}
+
+fn flush_index_builders(
+    index_builders: &mut [Box<dyn IndexBuilder>],
+    inline_index_records: &mut Vec<InlineIndexRecord>,
+) -> ILResult<()> {
+    for index_builder in index_builders.iter_mut() {
+        if index_builder.is_empty() {
+            continue;
+        }
+        let mut index_data = Vec::new();
+        index_builder.write_bytes(&mut index_data)?;
+        inline_index_records.push(InlineIndexRecord {
+            index_id: index_builder.index_def().index_id,
+            index_data,
+        });
+    }
+    Ok(())
 }
