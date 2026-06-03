@@ -51,13 +51,21 @@ pub(crate) async fn process_update_by_condition(
 
     // TODO this could be optimized into update_inline_rows function
     if inline_update_count != 0 {
-        rebuild_inline_indexes(
-            tx_helper,
-            &table.table_id,
-            &table.table_schema,
-            &table.index_manager,
-        )
-        .await?;
+        let touches_index = update.set_map.keys().any(|field_id| {
+            Uuid::parse_str(field_id)
+                .ok()
+                .map(|id| table.index_manager.any_index_contains_field(&id))
+                .unwrap_or(false)
+        });
+        if touches_index {
+            rebuild_inline_indexes(
+                tx_helper,
+                &table.table_id,
+                &table.table_schema,
+                &table.index_manager,
+            )
+            .await?;
+        }
     }
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
