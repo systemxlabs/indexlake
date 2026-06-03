@@ -108,6 +108,30 @@ pub(crate) async fn process_insert_into_inline_rows_with_tx(
     Ok(())
 }
 
+/// Insert inline rows without building inline indexes.
+/// Used by update path where index rebuild is handled separately.
+pub(crate) async fn insert_inline_rows_only_with_tx(
+    tx_helper: &mut TransactionHelper,
+    table: &Table,
+    batches: &[RecordBatch],
+) -> ILResult<()> {
+    if batches.is_empty() {
+        return Ok(());
+    }
+
+    let inline_field_names = batches[0]
+        .schema()
+        .fields()
+        .iter()
+        .map(|field| field.name().clone())
+        .collect::<Vec<_>>();
+    tx_helper
+        .insert_inline_rows(&table.table_id, &inline_field_names, batches)
+        .await?;
+
+    Ok(())
+}
+
 pub(crate) async fn process_bypass_insert(
     table: &Table,
     batch_stream: RecordBatchStream,
