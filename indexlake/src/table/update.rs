@@ -10,8 +10,7 @@ use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_r
 use crate::expr::Expr;
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{
-    Table, TableSchemaRef, insert_inline_rows_only_with_tx,
-    process_insert_into_inline_rows_with_tx, rebuild_inline_indexes_by_ids,
+    Table, TableSchemaRef, process_insert_into_inline_rows_with_tx, rebuild_inline_indexes,
 };
 use crate::utils::{extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids};
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -50,23 +49,15 @@ pub(crate) async fn process_update_by_condition(
 ) -> ILResult<usize> {
     let inline_update_count = update_inline_rows(tx_helper, table, &update).await?;
 
-    // Phase 1 optimization: only rebuild indexes affected by the update
+    // TODO this could be optimized into update_inline_rows function
     if inline_update_count != 0 {
-        let updated_field_ids: Vec<String> = update.set_map.keys().cloned().collect();
-        let affected_index_ids = table
-            .index_manager
-            .index_ids_by_field_ids(&updated_field_ids);
-
-        if !affected_index_ids.is_empty() {
-            rebuild_inline_indexes_by_ids(
-                tx_helper,
-                &table.table_id,
-                &table.table_schema,
-                &table.index_manager,
-                &affected_index_ids,
-            )
-            .await?;
-        }
+        rebuild_inline_indexes(
+            tx_helper,
+            &table.table_id,
+            &table.table_schema,
+            &table.index_manager,
+        )
+        .await?;
     }
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
@@ -138,7 +129,7 @@ pub(crate) async fn update_inline_rows(
         tx_helper
             .delete_inline_rows(&table.table_id, &[], Some(&updated_row_ids))
             .await?;
-        insert_inline_rows_only_with_tx(tx_helper, table, &updated_batches).await?;
+        process_insert_into_inline_rows_with_tx(tx_helper, table, &updated_batches).await?;
         Ok(updated_row_ids.len())
     }
 }
