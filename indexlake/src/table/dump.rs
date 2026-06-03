@@ -341,58 +341,8 @@ pub(crate) async fn build_all_inline_indexes(
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
 ) -> ILResult<Vec<InlineIndexRecord>> {
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
-    let row_stream = tx_helper
-        .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
-        .await?;
-    let mut chunk_stream = row_stream.chunks(100);
-
-    let mut inline_index_records = Vec::new();
-
-    let mut index_builders = index_manager.new_index_builders()?;
-    let mut counter = 0;
-    while let Some(row_chunk) = chunk_stream.next().await {
-        let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
-        counter += rows.len();
-        let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
-        for index_builder in index_builders.iter_mut() {
-            index_builder.append(&record_batch)?;
-        }
-
-        if counter >= 1000 {
-            for index_builder in index_builders.iter_mut() {
-                if index_builder.is_empty() {
-                    continue;
-                }
-                let mut index_data = Vec::new();
-                index_builder.write_bytes(&mut index_data)?;
-                inline_index_records.push(InlineIndexRecord {
-                    index_id: index_builder.index_def().index_id,
-                    index_data,
-                });
-            }
-            counter = 0;
-            index_builders = index_manager.new_index_builders()?;
-        }
-    }
-    drop(chunk_stream);
-
-    // build inline index records for left rows
-    if counter > 0 {
-        for index_builder in index_builders.iter_mut() {
-            if index_builder.is_empty() {
-                continue;
-            }
-            let mut index_data = Vec::new();
-            index_builder.write_bytes(&mut index_data)?;
-            inline_index_records.push(InlineIndexRecord {
-                index_id: index_builder.index_def().index_id,
-                index_data,
-            });
-        }
-    }
-
-    Ok(inline_index_records)
+    let index_builders = index_manager.new_index_builders()?;
+    build_inline_indexes_with_builders(tx_helper, table_id, table_schema, index_builders).await
 }
 
 pub(crate) async fn build_inline_indexes_by_ids(
@@ -402,6 +352,16 @@ pub(crate) async fn build_inline_indexes_by_ids(
     index_manager: &IndexManager,
     index_ids: &[Uuid],
 ) -> ILResult<Vec<InlineIndexRecord>> {
+    let index_builders = index_manager.new_index_builders_by_ids(index_ids)?;
+    build_inline_indexes_with_builders(tx_helper, table_id, table_schema, index_builders).await
+}
+
+async fn build_inline_indexes_with_builders(
+    tx_helper: &mut TransactionHelper,
+    table_id: &Uuid,
+    table_schema: &TableSchemaRef,
+    mut index_builders: Vec<Box<dyn IndexBuilder>>,
+) -> ILResult<Vec<InlineIndexRecord>> {
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
         .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
@@ -409,9 +369,8 @@ pub(crate) async fn build_inline_indexes_by_ids(
     let mut chunk_stream = row_stream.chunks(100);
 
     let mut inline_index_records = Vec::new();
-
-    let mut index_builders = index_manager.new_index_builders_by_ids(index_ids)?;
     let mut counter = 0;
+
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
         counter += rows.len();
@@ -421,37 +380,34 @@ pub(crate) async fn build_inline_indexes_by_ids(
         }
 
         if counter >= 1000 {
-            for index_builder in index_builders.iter_mut() {
-                if index_builder.is_empty() {
-                    continue;
-                }
-                let mut index_data = Vec::new();
-                index_builder.write_bytes(&mut index_data)?;
-                inline_index_records.push(InlineIndexRecord {
-                    index_id: index_builder.index_def().index_id,
-                    index_data,
-                });
-            }
+            flush_index_builders(&mut index_builders, &mut inline_index_records)?;
             counter = 0;
-            index_builders = index_manager.new_index_builders_by_ids(index_ids)?;
         }
     }
     drop(chunk_stream);
 
     // build inline index records for left rows
     if counter > 0 {
-        for index_builder in index_builders.iter_mut() {
-            if index_builder.is_empty() {
-                continue;
-            }
-            let mut index_data = Vec::new();
-            index_builder.write_bytes(&mut index_data)?;
-            inline_index_records.push(InlineIndexRecord {
-                index_id: index_builder.index_def().index_id,
-                index_data,
-            });
-        }
+        flush_index_builders(&mut index_builders, &mut inline_index_records)?;
     }
 
     Ok(inline_index_records)
+}
+
+fn flush_index_builders(
+    index_builders: &mut [Box<dyn IndexBuilder>],
+    inline_index_records: &mut Vec<InlineIndexRecord>,
+) -> ILResult<()> {
+    for index_builder in index_builders.iter_mut() {
+        if index_builder.is_empty() {
+            continue;
+        }
+        let mut index_data = Vec::new();
+        index_builder.write_bytes(&mut index_data)?;
+        inline_index_records.push(InlineIndexRecord {
+            index_id: index_builder.index_def().index_id,
+            index_data,
+        });
+    }
+    Ok(())
 }
