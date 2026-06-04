@@ -1,13 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use arrow::array::{RecordBatch, RecordBatchOptions};
+use arrow::array::{Array, ArrayRef, RecordBatch, RecordBatchOptions};
+use arrow::datatypes::Schema;
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::catalog::{CatalogSchema, DataFileRecord, TransactionHelper, rows_to_record_batch};
-use crate::expr::Expr;
+use crate::catalog::{
+    CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
+    rows_to_record_batch,
+};
+use crate::expr::{Expr, visited_columns};
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{
     Table, TableSchemaRef, process_insert_into_inline_rows_with_tx, rebuild_inline_indexes,
@@ -103,43 +107,99 @@ pub(crate) async fn update_inline_rows(
     table: &Table,
     update: &TableUpdate,
 ) -> ILResult<usize> {
-    if tx_helper
-        .catalog
-        .supports_filter(&update.condition, &table.table_schema.arrow_schema)?
-    {
-        tx_helper
-            .update_inline_rows(&table.table_id, &update.set_map, &update.condition)
-            .await
-    } else {
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table.table_schema.arrow_schema)?);
-        let row_stream = tx_helper
-            .scan_inline_rows(&table.table_id, &catalog_schema, &[], None, None)
-            .await?;
-        let mut chunk_stream = row_stream.chunks(100);
-        let mut updated_row_ids = Vec::new();
-        let mut updated_batches = Vec::new();
-        while let Some(row_chunk) = chunk_stream.next().await {
-            let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
-            let record_batch = rows_to_record_batch(&table.table_schema.arrow_schema, &rows)?;
-            let bool_array = update.condition.condition_eval(&record_batch)?;
-            for (i, v) in bool_array.iter().enumerate() {
-                if let Some(v) = v
-                    && v
-                {
-                    updated_row_ids.push(rows[i].uuid(0)?.expect("row_id is not null"));
-                }
-            }
-            let filtered_batch = arrow::compute::filter_record_batch(&record_batch, &bool_array)?;
-            let updated_batch = update_record_batch(&filtered_batch, &update.set_map)?;
-            updated_batches.push(updated_batch);
-        }
-        drop(chunk_stream);
-        tx_helper
-            .delete_inline_rows(&table.table_id, &[], Some(&updated_row_ids))
-            .await?;
-        process_insert_into_inline_rows_with_tx(tx_helper, table, &updated_batches).await?;
-        Ok(updated_row_ids.len())
+    // 1. Build projected schema: only scan columns needed for condition eval,
+    //    update expression eval, and update targets.
+    let mut projection_columns = HashSet::new();
+    projection_columns.insert(INTERNAL_ROW_ID_FIELD_NAME.to_string());
+    projection_columns.extend(visited_columns(&update.condition));
+    for expr in update.set_map.values() {
+        projection_columns.extend(visited_columns(expr));
     }
+    for col_name in update.set_map.keys() {
+        projection_columns.insert(col_name.clone());
+    }
+
+    let projected_fields: Vec<arrow::datatypes::Field> = table
+        .table_schema
+        .arrow_schema
+        .fields()
+        .iter()
+        .filter(|f| projection_columns.contains(f.name()))
+        .map(|f| (**f).clone())
+        .collect();
+    let projected_arrow_schema = Arc::new(Schema::new(projected_fields));
+    let projected_catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_arrow_schema)?);
+
+    // 2. Scan with projected schema
+    let row_stream = tx_helper
+        .scan_inline_rows(&table.table_id, &projected_catalog_schema, &[], None, None)
+        .await?;
+    let mut chunk_stream = row_stream.chunks(100);
+    let mut matched_batches = Vec::new();
+    while let Some(row_chunk) = chunk_stream.next().await {
+        let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        let record_batch = rows_to_record_batch(&projected_arrow_schema, &rows)?;
+        let bool_array = update.condition.condition_eval(&record_batch)?;
+        if bool_array.true_count() > 0 {
+            let filtered_batch = arrow::compute::filter_record_batch(&record_batch, &bool_array)?;
+            matched_batches.push(filtered_batch);
+        }
+    }
+    drop(chunk_stream);
+
+    if matched_batches.is_empty() {
+        return Ok(0);
+    }
+
+    // 3. Evaluate updated values in Arrow
+    let mut updated_batches = Vec::new();
+    for batch in &matched_batches {
+        updated_batches.push(update_record_batch(batch, &update.set_map)?);
+    }
+
+    // 4. Extract row_ids and updated column arrays
+    let mut all_row_ids = Vec::new();
+    let mut column_arrays: HashMap<&str, Vec<ArrayRef>> = HashMap::new();
+    for batch in &updated_batches {
+        let row_id_idx = batch.schema().index_of(INTERNAL_ROW_ID_FIELD_NAME)?;
+        let row_id_array = batch.column(row_id_idx);
+        let fixed_array = row_id_array
+            .as_any()
+            .downcast_ref::<arrow::array::FixedSizeBinaryArray>()
+            .ok_or_else(|| ILError::internal("Expected FixedSizeBinary row_id column"))?;
+        for i in 0..fixed_array.len() {
+            all_row_ids.push(Uuid::from_slice(fixed_array.value(i))?);
+        }
+        for col_name in update.set_map.keys() {
+            let idx = batch.schema().index_of(col_name)?;
+            column_arrays
+                .entry(col_name.as_str())
+                .or_default()
+                .push(batch.column(idx).clone());
+        }
+    }
+
+    // 5. Concatenate column arrays per column
+    let column_names: Vec<String> = update.set_map.keys().cloned().collect();
+    let mut concatenated_arrays = Vec::new();
+    for col_name in &column_names {
+        let arrays = column_arrays
+            .get(col_name.as_str())
+            .ok_or_else(|| ILError::internal(format!("Missing updated column: {col_name}")))?;
+        let array_refs: Vec<&dyn Array> = arrays.iter().map(|a| a.as_ref()).collect();
+        let concatenated = arrow::compute::concat(&array_refs)?;
+        concatenated_arrays.push(concatenated);
+    }
+
+    // 6. Write back via row_id-targeted UPDATE
+    tx_helper
+        .update_inline_rows_by_row_ids(
+            &table.table_id,
+            &all_row_ids,
+            &column_names,
+            &concatenated_arrays,
+        )
+        .await
 }
 
 pub(crate) async fn update_data_file_rows_by_matched_rows(
