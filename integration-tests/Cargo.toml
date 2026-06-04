@@ -12,6 +12,7 @@ publish = false
 indexlake = { workspace = true }
 indexlake-catalog-postgres = { workspace = true }
 indexlake-catalog-sqlite = { workspace = true }
+indexlake-index-btree = { workspace = true }
 indexlake-storage-fs = { workspace = true }
 indexlake-storage-s3 = { workspace = true }
 
