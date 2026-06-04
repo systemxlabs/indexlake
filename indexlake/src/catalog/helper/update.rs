@@ -1,8 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use arrow::array::ArrayRef;
 use uuid::Uuid;
 
-use crate::catalog::{RowValidity, TransactionHelper, inline_row_table_name};
+use crate::catalog::{
+    INTERNAL_ROW_ID_FIELD_NAME, RowValidity, Scalar, TransactionHelper, inline_row_table_name,
+};
 use crate::expr::Expr;
 use crate::{ILError, ILResult};
 
@@ -72,6 +75,38 @@ impl TransactionHelper {
                 self.catalog.unparse_expr(condition)?
             ))
             .await
+    }
+
+    pub(crate) async fn update_inline_rows_by_row_ids(
+        &mut self,
+        table_id: &Uuid,
+        row_ids: &[Uuid],
+        column_names: &[String],
+        column_arrays: &[ArrayRef],
+    ) -> ILResult<usize> {
+        let mut total_updated = 0;
+        for (i, row_id) in row_ids.iter().enumerate() {
+            let mut set_strs = Vec::new();
+            for (name, array) in column_names.iter().zip(column_arrays.iter()) {
+                let scalar = Scalar::try_from_array(array.as_ref(), i)?;
+                set_strs.push(format!(
+                    "{} = {}",
+                    self.catalog.sql_identifier(name),
+                    scalar.to_sql(self.catalog.as_ref())?
+                ));
+            }
+            total_updated += self
+                .transaction
+                .execute(&format!(
+                    "UPDATE {} SET {} WHERE {} = {}",
+                    inline_row_table_name(table_id),
+                    set_strs.join(", "),
+                    INTERNAL_ROW_ID_FIELD_NAME,
+                    self.catalog.sql_uuid_literal(row_id)
+                ))
+                .await?;
+        }
+        Ok(total_updated)
     }
 
     pub(crate) async fn update_data_file_validity(
