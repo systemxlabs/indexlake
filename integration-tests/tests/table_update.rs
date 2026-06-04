@@ -10,6 +10,7 @@ use indexlake::storage::{DataFileFormat, Storage};
 use indexlake::table::{
     IndexCreation, TableConfig, TableCreation, TableInsertion, TableScan, TableUpdate,
 };
+use indexlake_index_btree::{BTreeIndexKind, BTreeIndexParams};
 use indexlake_integration_tests::data::{
     prepare_simple_testing_table, prepare_simple_vector_table,
 };
@@ -19,7 +20,6 @@ use indexlake_integration_tests::utils::{
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite, init_env_logger, storage_fs, storage_s3,
 };
-use indexlake_index_btree::{BTreeIndexKind, BTreeIndexParams};
 use std::collections::HashMap;
 use std::sync::Arc;
 
