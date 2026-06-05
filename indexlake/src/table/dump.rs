@@ -301,10 +301,7 @@ pub(crate) async fn rebuild_inline_indexes(
         .await?;
 
     // delete old inline index records
-    let ids_to_delete = index_ids.map_or_else(
-        || index_manager.index_ids(),
-        |ids| ids.to_vec(),
-    );
+    let ids_to_delete = index_ids.map_or_else(|| index_manager.index_ids(), |ids| ids.to_vec());
     tx_helper.delete_inline_indexes(&ids_to_delete).await?;
 
     // insert inline index records
