@@ -333,17 +333,7 @@ pub(crate) async fn build_all_inline_indexes(
         }
 
         if counter >= 1000 {
-            for index_builder in index_builders.iter_mut() {
-                if index_builder.is_empty() {
-                    continue;
-                }
-                let mut index_data = Vec::new();
-                index_builder.write_bytes(&mut index_data)?;
-                inline_index_records.push(InlineIndexRecord {
-                    index_id: index_builder.index_def().index_id,
-                    index_data,
-                });
-            }
+            flush_index_builders(&mut index_builders, &mut inline_index_records)?;
             counter = 0;
             index_builders = index_manager.new_index_builders()?;
         }
@@ -352,18 +342,26 @@ pub(crate) async fn build_all_inline_indexes(
 
     // build inline index records for left rows
     if counter > 0 {
-        for index_builder in index_builders.iter_mut() {
-            if index_builder.is_empty() {
-                continue;
-            }
-            let mut index_data = Vec::new();
-            index_builder.write_bytes(&mut index_data)?;
-            inline_index_records.push(InlineIndexRecord {
-                index_id: index_builder.index_def().index_id,
-                index_data,
-            });
-        }
+        flush_index_builders(&mut index_builders, &mut inline_index_records)?;
     }
 
     Ok(inline_index_records)
+}
+
+fn flush_index_builders(
+    index_builders: &mut [Box<dyn IndexBuilder>],
+    inline_index_records: &mut Vec<InlineIndexRecord>,
+) -> ILResult<()> {
+    for index_builder in index_builders.iter_mut() {
+        if index_builder.is_empty() {
+            continue;
+        }
+        let mut index_data = Vec::new();
+        index_builder.write_bytes(&mut index_data)?;
+        inline_index_records.push(InlineIndexRecord {
+            index_id: index_builder.index_def().index_id,
+            index_data,
+        });
+    }
+    Ok(())
 }
