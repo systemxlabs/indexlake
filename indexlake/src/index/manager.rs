@@ -94,9 +94,7 @@ impl IndexManager {
     ) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
         self.indexes
             .iter()
-            .filter(|index_def| {
-                index_ids.is_none_or(|ids| ids.contains(&index_def.index_id))
-            })
+            .filter(|index_def| index_ids.is_none_or(|ids| ids.contains(&index_def.index_id)))
             .map(|index_def| {
                 let index_kind = self
                     .kinds
