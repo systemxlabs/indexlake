@@ -222,6 +222,7 @@ impl DumpTask {
             &self.table_id,
             &self.table_schema,
             &self.index_manager,
+            None,
         )
         .await?;
 
@@ -291,41 +292,20 @@ pub(crate) async fn rebuild_inline_indexes(
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
+    index_ids: Option<&[Uuid]>,
 ) -> ILResult<()> {
     let inline_index_records =
         full_build_inline_index_records(tx_helper, table_id, table_schema, || {
-            index_manager.new_index_builders(None)
+            index_manager.new_index_builders(index_ids)
         })
         .await?;
 
     // delete old inline index records
-    tx_helper
-        .delete_inline_indexes(&index_manager.index_ids())
-        .await?;
-
-    // insert inline index records
-    tx_helper
-        .insert_inline_indexes(&inline_index_records)
-        .await?;
-
-    Ok(())
-}
-
-pub(crate) async fn rebuild_inline_indexes_by_ids(
-    tx_helper: &mut TransactionHelper,
-    table_id: &Uuid,
-    table_schema: &TableSchemaRef,
-    index_manager: &IndexManager,
-    index_ids: &[Uuid],
-) -> ILResult<()> {
-    let inline_index_records =
-        full_build_inline_index_records(tx_helper, table_id, table_schema, || {
-            index_manager.new_index_builders(Some(index_ids))
-        })
-        .await?;
-
-    // delete old inline index records for specified index_ids only
-    tx_helper.delete_inline_indexes(index_ids).await?;
+    let ids_to_delete = index_ids.map_or_else(
+        || index_manager.index_ids(),
+        |ids| ids.to_vec(),
+    );
+    tx_helper.delete_inline_indexes(&ids_to_delete).await?;
 
     // insert inline index records
     tx_helper

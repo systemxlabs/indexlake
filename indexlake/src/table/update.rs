@@ -14,7 +14,7 @@ use crate::catalog::{
 use crate::expr::{Expr, merge_filters, split_conjunction_filters, visited_columns};
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{
-    Table, TableSchemaRef, process_insert_into_inline_rows_with_tx, rebuild_inline_indexes_by_ids,
+    Table, TableSchemaRef, process_insert_into_inline_rows_with_tx, rebuild_inline_indexes,
 };
 use crate::utils::{extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids};
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -61,12 +61,12 @@ pub(crate) async fn process_update_by_condition(
             .index_ids_by_field_ids(&updated_field_ids);
 
         if !affected_index_ids.is_empty() {
-            rebuild_inline_indexes_by_ids(
+            rebuild_inline_indexes(
                 tx_helper,
                 &table.table_id,
                 &table.table_schema,
                 &table.index_manager,
-                &affected_index_ids,
+                Some(&affected_index_ids),
             )
             .await?;
         }
