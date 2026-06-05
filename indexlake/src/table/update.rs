@@ -11,7 +11,7 @@ use crate::catalog::{
     CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
     rows_to_record_batch,
 };
-use crate::expr::{Expr, visited_columns};
+use crate::expr::{Expr, merge_filters, split_conjunction_filters, visited_columns};
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{
     Table, TableSchemaRef, process_insert_into_inline_rows_with_tx, rebuild_inline_indexes,
@@ -130,19 +130,45 @@ pub(crate) async fn update_inline_rows(
     let projected_arrow_schema = Arc::new(Schema::new(projected_fields));
     let projected_catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_arrow_schema)?);
 
-    // 2. Scan with projected schema
+    // 2. Scan with projected schema and push down supported filters to catalog
+    let filters = split_conjunction_filters(vec![update.condition.clone()]);
+    let mut db_filters = Vec::new();
+    let mut arrow_filters = Vec::new();
+    for filter in filters {
+        if tx_helper
+            .catalog
+            .supports_filter(&filter, &table.table_schema.arrow_schema)?
+        {
+            db_filters.push(filter);
+        } else {
+            arrow_filters.push(filter);
+        }
+    }
+    let arrow_filter = merge_filters(arrow_filters);
+
     let row_stream = tx_helper
-        .scan_inline_rows(&table.table_id, &projected_catalog_schema, &[], None, None)
+        .scan_inline_rows(
+            &table.table_id,
+            &projected_catalog_schema,
+            &db_filters,
+            None,
+            None,
+        )
         .await?;
     let mut chunk_stream = row_stream.chunks(100);
     let mut matched_batches = Vec::new();
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
         let record_batch = rows_to_record_batch(&projected_arrow_schema, &rows)?;
-        let bool_array = update.condition.condition_eval(&record_batch)?;
-        if bool_array.true_count() > 0 {
-            let filtered_batch = arrow::compute::filter_record_batch(&record_batch, &bool_array)?;
-            matched_batches.push(filtered_batch);
+        if let Some(arrow_filter) = &arrow_filter {
+            let bool_array = arrow_filter.condition_eval(&record_batch)?;
+            if bool_array.true_count() > 0 {
+                let filtered_batch =
+                    arrow::compute::filter_record_batch(&record_batch, &bool_array)?;
+                matched_batches.push(filtered_batch);
+            }
+        } else {
+            matched_batches.push(record_batch);
         }
     }
     drop(chunk_stream);
