@@ -133,7 +133,7 @@ impl DumpTask {
                 self.table_config.preferred_data_file_format,
             );
 
-            let mut index_builders = self.index_manager.new_index_builders()?;
+            let mut index_builders = self.index_manager.new_index_builders(None)?;
 
             let row_ids = match self.table_config.preferred_data_file_format {
                 DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
@@ -336,8 +336,8 @@ pub(crate) async fn build_all_inline_indexes(
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
 ) -> ILResult<Vec<InlineIndexRecord>> {
-    build_inline_indexes_with_builder_factory(tx_helper, table_id, table_schema, || {
-        index_manager.new_index_builders()
+    full_build_inline_index_records(tx_helper, table_id, table_schema, || {
+        index_manager.new_index_builders(None)
     })
     .await
 }
@@ -349,13 +349,13 @@ pub(crate) async fn build_inline_indexes_by_ids(
     index_manager: &IndexManager,
     index_ids: &[Uuid],
 ) -> ILResult<Vec<InlineIndexRecord>> {
-    build_inline_indexes_with_builder_factory(tx_helper, table_id, table_schema, || {
-        index_manager.new_index_builders_by_ids(index_ids)
+    full_build_inline_index_records(tx_helper, table_id, table_schema, || {
+        index_manager.new_index_builders(Some(index_ids))
     })
     .await
 }
 
-async fn build_inline_indexes_with_builder_factory(
+async fn full_build_inline_index_records(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
     table_schema: &TableSchemaRef,

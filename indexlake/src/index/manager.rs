@@ -60,23 +60,6 @@ impl IndexManager {
             .collect()
     }
 
-    pub(crate) fn new_index_builders_by_ids(
-        &self,
-        index_ids: &[Uuid],
-    ) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
-        self.indexes
-            .iter()
-            .filter(|index_def| index_ids.contains(&index_def.index_id))
-            .map(|index_def| {
-                let index_kind = self
-                    .kinds
-                    .get(&index_def.kind)
-                    .expect("Index kind not found");
-                index_kind.builder(index_def)
-            })
-            .collect()
-    }
-
     pub(crate) fn supports_filter(&self, filter: &Expr) -> ILResult<FilterSupport> {
         let mut supports = FilterSupport::Unsupported;
         for index_def in &self.indexes {
@@ -105,9 +88,15 @@ impl IndexManager {
         })
     }
 
-    pub(crate) fn new_index_builders(&self) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
+    pub(crate) fn new_index_builders(
+        &self,
+        index_ids: Option<&[Uuid]>,
+    ) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
         self.indexes
             .iter()
+            .filter(|index_def| {
+                index_ids.is_none_or(|ids| ids.contains(&index_def.index_id))
+            })
             .map(|index_def| {
                 let index_kind = self
                     .kinds
