@@ -133,7 +133,7 @@ impl DumpTask {
                 self.table_config.preferred_data_file_format,
             );
 
-            let mut index_builders = self.index_manager.new_index_builders()?;
+            let mut index_builders = self.index_manager.new_index_builders(None)?;
 
             let row_ids = match self.table_config.preferred_data_file_format {
                 DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
@@ -222,6 +222,7 @@ impl DumpTask {
             &self.table_id,
             &self.table_schema,
             &self.index_manager,
+            None,
         )
         .await?;
 
@@ -291,14 +292,17 @@ pub(crate) async fn rebuild_inline_indexes(
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
+    index_ids: Option<&[Uuid]>,
 ) -> ILResult<()> {
     let inline_index_records =
-        build_all_inline_indexes(tx_helper, table_id, table_schema, index_manager).await?;
+        full_build_inline_index_records(tx_helper, table_id, table_schema, || {
+            index_manager.new_index_builders(index_ids)
+        })
+        .await?;
 
     // delete old inline index records
-    tx_helper
-        .delete_inline_indexes(&index_manager.index_ids())
-        .await?;
+    let ids_to_delete = index_ids.map_or_else(|| index_manager.index_ids(), |ids| ids.to_vec());
+    tx_helper.delete_inline_indexes(&ids_to_delete).await?;
 
     // insert inline index records
     tx_helper
@@ -308,11 +312,11 @@ pub(crate) async fn rebuild_inline_indexes(
     Ok(())
 }
 
-pub(crate) async fn build_all_inline_indexes(
+async fn full_build_inline_index_records(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
-    index_manager: &IndexManager,
+    mut new_index_builders: impl FnMut() -> ILResult<Vec<Box<dyn IndexBuilder>>>,
 ) -> ILResult<Vec<InlineIndexRecord>> {
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
@@ -321,8 +325,7 @@ pub(crate) async fn build_all_inline_indexes(
     let mut chunk_stream = row_stream.chunks(100);
 
     let mut inline_index_records = Vec::new();
-
-    let mut index_builders = index_manager.new_index_builders()?;
+    let mut index_builders = new_index_builders()?;
     let mut counter = 0;
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
@@ -335,7 +338,7 @@ pub(crate) async fn build_all_inline_indexes(
         if counter >= 1000 {
             flush_index_builders(&mut index_builders, &mut inline_index_records)?;
             counter = 0;
-            index_builders = index_manager.new_index_builders()?;
+            index_builders = new_index_builders()?;
         }
     }
     drop(chunk_stream);

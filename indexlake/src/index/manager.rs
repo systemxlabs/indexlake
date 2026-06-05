@@ -48,6 +48,18 @@ impl IndexManager {
             .any(|def| def.key_columns.contains(&field_id_str))
     }
 
+    pub(crate) fn index_ids_by_field_ids(&self, field_ids: &[String]) -> Vec<Uuid> {
+        self.indexes
+            .iter()
+            .filter(|index_def| {
+                field_ids
+                    .iter()
+                    .any(|field_id| index_def.key_columns.contains(field_id))
+            })
+            .map(|index_def| index_def.index_id)
+            .collect()
+    }
+
     pub(crate) fn supports_filter(&self, filter: &Expr) -> ILResult<FilterSupport> {
         let mut supports = FilterSupport::Unsupported;
         for index_def in &self.indexes {
@@ -76,9 +88,13 @@ impl IndexManager {
         })
     }
 
-    pub(crate) fn new_index_builders(&self) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
+    pub(crate) fn new_index_builders(
+        &self,
+        index_ids: Option<&[Uuid]>,
+    ) -> ILResult<Vec<Box<dyn IndexBuilder>>> {
         self.indexes
             .iter()
+            .filter(|index_def| index_ids.is_none_or(|ids| ids.contains(&index_def.index_id)))
             .map(|index_def| {
                 let index_kind = self
                     .kinds

@@ -51,7 +51,7 @@ pub(crate) async fn process_insert_into_inline_rows_without_tx(
         return Ok(());
     }
 
-    let index_builders = table.index_manager.new_index_builders()?;
+    let index_builders = table.index_manager.new_index_builders(None)?;
     let inline_index_records = build_inline_indexes(batches, index_builders)?;
 
     // insert inline rows
@@ -86,7 +86,7 @@ pub(crate) async fn process_insert_into_inline_rows_with_tx(
         return Ok(());
     }
 
-    let index_builders = table.index_manager.new_index_builders()?;
+    let index_builders = table.index_manager.new_index_builders(None)?;
     let inline_index_records = build_inline_indexes(batches, index_builders)?;
 
     // insert inline rows
@@ -253,7 +253,7 @@ async fn create_new_parquet_writer(
         table.config.parquet_row_group_size,
         table.config.preferred_data_file_format,
     )?;
-    let index_builders = table.index_manager.new_index_builders()?;
+    let index_builders = table.index_manager.new_index_builders(None)?;
 
     Ok((data_file_id, relative_path, arrow_writer, index_builders))
 }

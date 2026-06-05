@@ -130,7 +130,7 @@ async fn merge_data_files(table: &Table, valid_row_threshold: usize) -> ILResult
             .map(|i| &matched_data_files[*i])
             .collect::<Vec<_>>();
 
-        let mut index_builders = table.index_manager.new_index_builders()?;
+        let mut index_builders = table.index_manager.new_index_builders(None)?;
 
         let data_file_id = Uuid::now_v7();
         let relative_path = DataFileRecord::build_relative_path(

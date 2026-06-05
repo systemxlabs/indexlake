@@ -214,7 +214,7 @@ async fn rewrite_data_files_add_column(
                 table.config.parquet_row_group_size,
                 table.config.preferred_data_file_format,
             )?;
-            let mut index_builders = table.index_manager.new_index_builders()?;
+            let mut index_builders = table.index_manager.new_index_builders(None)?;
 
             let mut stream = read_data_file_by_record(
                 table.storage.as_ref(),

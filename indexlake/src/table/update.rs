@@ -55,18 +55,18 @@ pub(crate) async fn process_update_by_condition(
 
     // TODO this could be optimized into update_inline_rows function
     if inline_update_count != 0 {
-        let touches_index = update.set_map.keys().any(|field_id| {
-            Uuid::parse_str(field_id)
-                .ok()
-                .map(|id| table.index_manager.any_index_contains_field(&id))
-                .unwrap_or(false)
-        });
-        if touches_index {
+        let updated_field_ids: Vec<String> = update.set_map.keys().cloned().collect();
+        let affected_index_ids = table
+            .index_manager
+            .index_ids_by_field_ids(&updated_field_ids);
+
+        if !affected_index_ids.is_empty() {
             rebuild_inline_indexes(
                 tx_helper,
                 &table.table_id,
                 &table.table_schema,
                 &table.index_manager,
+                Some(&affected_index_ids),
             )
             .await?;
         }
