@@ -292,8 +292,13 @@ pub(crate) async fn rebuild_inline_indexes(
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
 ) -> ILResult<()> {
-    let inline_index_records =
-        build_all_inline_indexes(tx_helper, table_id, table_schema, index_manager).await?;
+    let inline_index_records = full_build_inline_index_records(
+        tx_helper,
+        table_id,
+        table_schema,
+        || index_manager.new_index_builders(None),
+    )
+    .await?;
 
     // delete old inline index records
     tx_helper
@@ -315,9 +320,13 @@ pub(crate) async fn rebuild_inline_indexes_by_ids(
     index_manager: &IndexManager,
     index_ids: &[Uuid],
 ) -> ILResult<()> {
-    let inline_index_records =
-        build_inline_indexes_by_ids(tx_helper, table_id, table_schema, index_manager, index_ids)
-            .await?;
+    let inline_index_records = full_build_inline_index_records(
+        tx_helper,
+        table_id,
+        table_schema,
+        || index_manager.new_index_builders(Some(index_ids)),
+    )
+    .await?;
 
     // delete old inline index records for specified index_ids only
     tx_helper.delete_inline_indexes(index_ids).await?;
@@ -328,31 +337,6 @@ pub(crate) async fn rebuild_inline_indexes_by_ids(
         .await?;
 
     Ok(())
-}
-
-pub(crate) async fn build_all_inline_indexes(
-    tx_helper: &mut TransactionHelper,
-    table_id: &Uuid,
-    table_schema: &TableSchemaRef,
-    index_manager: &IndexManager,
-) -> ILResult<Vec<InlineIndexRecord>> {
-    full_build_inline_index_records(tx_helper, table_id, table_schema, || {
-        index_manager.new_index_builders(None)
-    })
-    .await
-}
-
-pub(crate) async fn build_inline_indexes_by_ids(
-    tx_helper: &mut TransactionHelper,
-    table_id: &Uuid,
-    table_schema: &TableSchemaRef,
-    index_manager: &IndexManager,
-    index_ids: &[Uuid],
-) -> ILResult<Vec<InlineIndexRecord>> {
-    full_build_inline_index_records(tx_helper, table_id, table_schema, || {
-        index_manager.new_index_builders(Some(index_ids))
-    })
-    .await
 }
 
 async fn full_build_inline_index_records(
