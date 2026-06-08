@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord,
-    InlineIndexRecord, Row, rows_to_record_batch,
+    InlineIndexRecord, InlineIndexSnapshot, Row, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
 use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
@@ -231,8 +231,10 @@ async fn search_inline_rows(
     inline_index_records: Vec<InlineIndexRecord>,
 ) -> ILResult<SearchIndexEntries> {
     let mut index_builder = index_kind.builder(index_def)?;
+    let mut snapshot = InlineIndexSnapshot::new(index_def.index_id);
 
-    for record in inline_index_records {
+    for record in &inline_index_records {
+        snapshot.apply_delta(record);
         if let Some(ref index_data) = record.index_data {
             index_builder.read_bytes(index_data)?;
         }
@@ -244,7 +246,30 @@ async fn search_inline_rows(
         .search(search.query.as_ref(), &search.dynamic_fields)
         .await?;
 
-    Ok(search_index_entries)
+    // apply snapshot: filter out deleted row_ids
+    let active_row_ids = snapshot.filter_row_ids(&search_index_entries.row_ids);
+    let mut active_scores = Vec::with_capacity(active_row_ids.len());
+
+    // build a map from row_id to position
+    let row_id_to_pos: HashMap<Uuid, usize> = search_index_entries
+        .row_ids
+        .iter()
+        .enumerate()
+        .map(|(pos, row_id)| (*row_id, pos))
+        .collect();
+
+    for row_id in &active_row_ids {
+        if let Some(pos) = row_id_to_pos.get(row_id) {
+            active_scores.push(search_index_entries.scores[*pos]);
+        }
+    }
+
+    Ok(SearchIndexEntries {
+        row_ids: active_row_ids,
+        scores: active_scores,
+        score_higher_is_better: search_index_entries.score_higher_is_better,
+        dynamic_columns: search_index_entries.dynamic_columns,
+    })
 }
 
 async fn search_index_file(

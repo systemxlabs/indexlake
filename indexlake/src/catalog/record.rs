@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -565,6 +565,48 @@ impl InlineIndexRecord {
             row_ids,
             index_data,
         })
+    }
+}
+
+/// Snapshot of inline index deltas for a single index.
+/// Tracks active row_ids by applying add/delete deltas in order.
+#[derive(Debug, Clone)]
+pub(crate) struct InlineIndexSnapshot {
+    pub(crate) index_id: Uuid,
+    pub(crate) active_row_ids: HashSet<Uuid>,
+}
+
+impl InlineIndexSnapshot {
+    pub(crate) fn new(index_id: Uuid) -> Self {
+        Self {
+            index_id,
+            active_row_ids: HashSet::new(),
+        }
+    }
+
+    pub(crate) fn apply_delta(&mut self, record: &InlineIndexRecord) {
+        match record.op {
+            InlineIndexOp::Add => {
+                self.active_row_ids.extend(record.row_ids.iter().copied());
+            }
+            InlineIndexOp::Delete => {
+                for row_id in &record.row_ids {
+                    self.active_row_ids.remove(row_id);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn is_active(&self, row_id: &Uuid) -> bool {
+        self.active_row_ids.contains(row_id)
+    }
+
+    pub(crate) fn filter_row_ids(&self, row_ids: &[Uuid]) -> Vec<Uuid> {
+        row_ids
+            .iter()
+            .filter(|id| self.active_row_ids.contains(id))
+            .copied()
+            .collect()
     }
 }
 

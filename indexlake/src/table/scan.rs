@@ -13,10 +13,10 @@ use uuid::Uuid;
 
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-    rows_to_record_batch,
+    InlineIndexSnapshot, rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
-use crate::index::{FilterSupport, IndexManager};
+use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
 use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
@@ -440,16 +440,20 @@ async fn index_scan_inline_rows(
             .push(record);
     }
 
-    // append index builders
+    // build snapshots and append index builders
+    let mut snapshots: HashMap<Uuid, InlineIndexSnapshot> = HashMap::new();
     for (_index_name, builder) in index_builder_map.iter_mut() {
-        let index_def = builder.index_def();
+        let index_id = builder.index_def().index_id;
 
-        if let Some(records) = inline_index_records_map.get(&index_def.index_id) {
+        if let Some(records) = inline_index_records_map.get(&index_id) {
+            let mut snapshot = InlineIndexSnapshot::new(index_id);
             for record in records {
+                snapshot.apply_delta(record);
                 if let Some(ref index_data) = record.index_data {
                     builder.read_bytes(index_data)?;
                 }
             }
+            snapshots.insert(index_id, snapshot);
         }
     }
 
@@ -468,7 +472,17 @@ async fn index_scan_inline_rows(
             .collect::<Vec<_>>();
 
         let filter_index_entries = index.filter(&filters).await?;
-        filter_index_entries_list.push(filter_index_entries);
+
+        // apply snapshot: filter out deleted row_ids
+        let index_def = index_builder.index_def();
+        if let Some(snapshot) = snapshots.get(&index_def.index_id) {
+            let active_row_ids = snapshot.filter_row_ids(&filter_index_entries.row_ids);
+            filter_index_entries_list.push(FilterIndexEntries {
+                row_ids: active_row_ids,
+            });
+        } else {
+            filter_index_entries_list.push(filter_index_entries);
+        }
     }
 
     let mut intersected_row_ids = filter_index_entries_list[0]
