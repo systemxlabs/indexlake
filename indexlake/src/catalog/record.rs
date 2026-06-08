@@ -613,15 +613,6 @@ impl InlineIndexSnapshot {
             None => false,
         }
     }
-
-    /// Filter row_ids, keeping only those that are live at the given created_at
-    pub(crate) fn filter_row_ids_at(&self, row_ids: &[Uuid], created_at: i64) -> Vec<Uuid> {
-        row_ids
-            .iter()
-            .filter(|id| self.is_live_at(id, created_at))
-            .copied()
-            .collect()
-    }
 }
 
 #[cfg(test)]

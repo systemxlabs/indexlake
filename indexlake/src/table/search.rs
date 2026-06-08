@@ -239,7 +239,7 @@ async fn search_inline_rows(
     // Search each add delta independently, then filter by snapshot
     let mut all_row_ids = Vec::new();
     let mut all_scores = Vec::new();
-    let mut all_dynamic_columns: Vec<Vec<DynamicColumn>> = Vec::new();
+    let mut all_dynamic_column_groups: Vec<Vec<DynamicColumn>> = Vec::new();
     let mut score_higher_is_better = false;
 
     for record in &inline_index_records {
@@ -254,34 +254,69 @@ async fn search_inline_rows(
         builder.read_bytes(index_data)?;
         let index = builder.build()?;
 
-        // Search without limit; limit will be applied globally after merge
+        // Search each delta independently
+        // TODO: per-delta search uses the query's user limit internally.
+        // When user limit is small and a delta has many stale rows, live rows
+        // may be missed. Proper fix requires separating candidate limit from
+        // user limit in the search interface (see PR discussion).
         let entries = index
             .search(search.query.as_ref(), &search.dynamic_fields)
             .await?;
         score_higher_is_better = entries.score_higher_is_better;
 
         // Only keep row_ids where this delta is the latest add and not deleted
+        let mut kept_positions = Vec::new();
         for (i, row_id) in entries.row_ids.iter().enumerate() {
             if snapshot.is_live_at(row_id, record.created_at) {
                 all_row_ids.push(*row_id);
                 all_scores.push(entries.scores[i]);
+                kept_positions.push(i as u32);
             }
         }
 
-        // Store dynamic columns for later filtering
+        // Filter dynamic columns for this delta
         if !entries.dynamic_columns.is_empty() {
-            all_dynamic_columns.push(entries.dynamic_columns);
+            if kept_positions.is_empty() {
+                // All rows filtered out: create empty dynamic columns with same structure
+                let empty_dynamic_columns: Vec<DynamicColumn> = entries
+                    .dynamic_columns
+                    .into_iter()
+                    .map(|col| {
+                        let empty_array = arrow::array::new_null_array(col.field.data_type(), 0);
+                        DynamicColumn {
+                            field: col.field,
+                            values: empty_array,
+                        }
+                    })
+                    .collect();
+                all_dynamic_column_groups.push(empty_dynamic_columns);
+            } else {
+                let indices = arrow::array::UInt32Array::from(kept_positions);
+                let filtered_dynamic_columns: Vec<DynamicColumn> = entries
+                    .dynamic_columns
+                    .into_iter()
+                    .map(|col| {
+                        let filtered_values =
+                            arrow::compute::take(col.values.as_ref(), &indices, None)?;
+                        Ok(DynamicColumn {
+                            field: col.field,
+                            values: filtered_values,
+                        })
+                    })
+                    .collect::<arrow::error::Result<Vec<_>>>()
+                    .map_err(|e| {
+                        ILError::internal(format!("Failed to filter dynamic columns: {e}"))
+                    })?;
+                all_dynamic_column_groups.push(filtered_dynamic_columns);
+            }
         }
     }
 
-    // Merge dynamic columns: filter to only include rows we kept
-    // For simplicity, we assume all deltas have the same dynamic column structure
-    let merged_dynamic_columns = if all_dynamic_columns.is_empty() {
+    // Merge dynamic columns from all deltas
+    let merged_dynamic_columns = if all_dynamic_column_groups.is_empty() {
         Vec::new()
     } else {
-        // This is a simplified merge; full implementation would track per-delta positions
-        // For now, return empty since we don't have per-delta position mapping
-        Vec::new()
+        concat_dynamic_columns(&all_dynamic_column_groups)?
     };
 
     Ok(SearchIndexEntries {
