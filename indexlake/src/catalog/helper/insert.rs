@@ -4,8 +4,8 @@ use arrow::array::{Int64Array, LargeBinaryArray, RecordBatch, StringArray};
 use uuid::Uuid;
 
 use crate::catalog::{
-    DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
-    TaskRecord, TransactionHelper, inline_row_table_name,
+    DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexOp, InlineIndexRecord,
+    TableRecord, TaskRecord, TransactionHelper, inline_row_table_name,
 };
 use crate::utils::build_row_id_array;
 use crate::{ILError, ILResult};
@@ -167,30 +167,27 @@ impl TransactionHelper {
             return Ok(());
         }
         for record in inline_indexes {
-            match record.op.as_str() {
-                "add" => {
+            match record.op {
+                InlineIndexOp::Add => {
                     if record.index_data.is_none() {
                         return Err(ILError::invalid_input(
                             "add delta must have index_data".to_string(),
                         ));
                     }
                 }
-                "delete" => {
+                InlineIndexOp::Delete => {
                     if record.index_data.is_some() {
                         return Err(ILError::invalid_input(
                             "delete delta must not have index_data".to_string(),
                         ));
                     }
                 }
-                _ => {
-                    return Err(ILError::invalid_input(format!("invalid op: {}", record.op)));
-                }
             }
         }
         let index_id_arr = build_row_id_array(inline_indexes.iter().map(|r| r.index_id))?;
         let created_at_arr =
             Int64Array::from_iter_values(inline_indexes.iter().map(|r| r.created_at));
-        let op_arr = StringArray::from_iter_values(inline_indexes.iter().map(|r| &r.op));
+        let op_arr = StringArray::from_iter_values(inline_indexes.iter().map(|r| r.op.as_str()));
         let row_ids_arr =
             LargeBinaryArray::from_iter_values(inline_indexes.iter().map(|r| r.row_ids.as_slice()));
         let index_data_arr = LargeBinaryArray::from(

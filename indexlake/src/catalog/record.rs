@@ -494,10 +494,37 @@ impl IndexFileRecord {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InlineIndexOp {
+    Add,
+    Delete,
+}
+
+impl InlineIndexOp {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            InlineIndexOp::Add => "add",
+            InlineIndexOp::Delete => "delete",
+        }
+    }
+}
+
+impl TryFrom<&str> for InlineIndexOp {
+    type Error = ILError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "add" => Ok(InlineIndexOp::Add),
+            "delete" => Ok(InlineIndexOp::Delete),
+            _ => Err(ILError::invalid_input(format!("invalid op: {value}"))),
+        }
+    }
+}
+
 pub(crate) struct InlineIndexRecord {
     pub(crate) index_id: Uuid,
     pub(crate) created_at: i64,
-    pub(crate) op: String,
+    pub(crate) op: InlineIndexOp,
     pub(crate) row_ids: Vec<u8>,
     pub(crate) index_data: Option<Vec<u8>>,
 }
@@ -526,7 +553,8 @@ impl InlineIndexRecord {
     pub(crate) fn from_row(mut row: Row) -> ILResult<Self> {
         let index_id = row.uuid(0)?.expect("index_id is not null");
         let created_at = row.int64(1)?.expect("created_at is not null");
-        let op = row.utf8_owned(2)?.expect("op is not null");
+        let op_str = row.utf8(2)?.expect("op is not null");
+        let op = InlineIndexOp::try_from(op_str.as_str())?;
         let row_ids = row.binary_owned(3)?.expect("row_ids is not null");
         let index_data = row.binary_owned(4)?;
         Ok(Self {

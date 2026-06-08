@@ -11,7 +11,7 @@ use crate::utils::timestamp_ms_from_now;
 
 use crate::catalog::{
     CatalogDataType, CatalogSchema, Column, FieldRecord, IndexFileRecord, IndexRecord,
-    InlineIndexRecord, TableRecord, TransactionHelper, rows_to_record_batch,
+    InlineIndexOp, InlineIndexRecord, TableRecord, TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::Expr;
 use crate::index::{IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams};
@@ -387,7 +387,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
             inline_index_records.push(InlineIndexRecord {
                 index_id: index_builder.index_def().index_id,
                 created_at: next_created_at,
-                op: "add".to_string(),
+                op: InlineIndexOp::Add,
                 row_ids: serialize_row_ids(&all_row_ids),
                 index_data: Some(index_data),
             });
@@ -406,7 +406,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
         inline_index_records.push(InlineIndexRecord {
             index_id: index_builder.index_def().index_id,
             created_at: next_created_at,
-            op: "add".to_string(),
+            op: InlineIndexOp::Add,
             row_ids: serialize_row_ids(&all_row_ids),
             index_data: Some(index_data),
         });

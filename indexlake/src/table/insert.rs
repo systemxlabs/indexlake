@@ -9,7 +9,8 @@ use parquet::arrow::AsyncArrowWriter;
 use uuid::Uuid;
 
 use crate::catalog::{
-    Catalog, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity, TransactionHelper,
+    Catalog, DataFileRecord, IndexFileRecord, InlineIndexOp, InlineIndexRecord, RowValidity,
+    TransactionHelper,
 };
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, OutputFile, build_parquet_writer};
@@ -174,7 +175,7 @@ pub(crate) fn build_inline_indexes(
         inline_index_records.push(InlineIndexRecord {
             index_id: builder.index_def().index_id,
             created_at: next_created_at,
-            op: "add".to_string(),
+            op: InlineIndexOp::Add,
             row_ids: all_row_ids
                 .iter()
                 .flat_map(|id| id.as_bytes().to_vec())
