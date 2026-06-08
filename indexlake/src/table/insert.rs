@@ -165,7 +165,7 @@ pub(crate) fn build_inline_indexes(
     }
 
     let mut inline_index_records = Vec::new();
-    let mut next_created_at = timestamp_ms_from_now(Duration::ZERO);
+    let next_created_at = timestamp_ms_from_now(Duration::ZERO);
     for builder in index_builders.iter_mut() {
         if builder.is_empty() {
             continue;
@@ -182,7 +182,6 @@ pub(crate) fn build_inline_indexes(
                 .collect(),
             index_data: Some(index_data),
         });
-        next_created_at += 1;
     }
     Ok(inline_index_records)
 }

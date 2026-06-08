@@ -394,7 +394,6 @@ fn flush_index_builders(
                 .collect(),
             index_data: Some(index_data),
         });
-        *next_created_at += 1;
     }
     Ok(())
 }
