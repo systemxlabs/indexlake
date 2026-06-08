@@ -231,7 +231,7 @@ async fn search_inline_rows(
     inline_index_records: Vec<InlineIndexRecord>,
 ) -> ILResult<SearchIndexEntries> {
     let mut index_builder = index_kind.builder(index_def)?;
-    let mut snapshot = InlineIndexSnapshot::new(index_def.index_id);
+    let mut snapshot = InlineIndexSnapshot::new();
 
     for record in &inline_index_records {
         snapshot.apply_delta(record);
@@ -258,17 +258,35 @@ async fn search_inline_rows(
         .map(|(pos, row_id)| (*row_id, pos))
         .collect();
 
+    // collect positions of active rows in original order
+    let mut active_positions = Vec::with_capacity(active_row_ids.len());
     for row_id in &active_row_ids {
         if let Some(pos) = row_id_to_pos.get(row_id) {
             active_scores.push(search_index_entries.scores[*pos]);
+            active_positions.push(*pos as u32);
         }
     }
+
+    // filter dynamic_columns to only include active rows
+    let indices = arrow::array::UInt32Array::from(active_positions);
+    let active_dynamic_columns: Vec<DynamicColumn> = search_index_entries
+        .dynamic_columns
+        .into_iter()
+        .map(|col| {
+            let filtered_values = arrow::compute::take(col.values.as_ref(), &indices, None)?;
+            Ok(DynamicColumn {
+                field: col.field,
+                values: filtered_values,
+            })
+        })
+        .collect::<arrow::error::Result<Vec<_>>>()
+        .map_err(|e| ILError::internal(format!("Failed to filter dynamic columns: {e}")))?;
 
     Ok(SearchIndexEntries {
         row_ids: active_row_ids,
         scores: active_scores,
         score_higher_is_better: search_index_entries.score_higher_is_better,
-        dynamic_columns: search_index_entries.dynamic_columns,
+        dynamic_columns: active_dynamic_columns,
     })
 }
 

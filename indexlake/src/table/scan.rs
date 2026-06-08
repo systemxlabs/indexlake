@@ -446,7 +446,7 @@ async fn index_scan_inline_rows(
         let index_id = builder.index_def().index_id;
 
         if let Some(records) = inline_index_records_map.get(&index_id) {
-            let mut snapshot = InlineIndexSnapshot::new(index_id);
+            let mut snapshot = InlineIndexSnapshot::new();
             for record in records {
                 snapshot.apply_delta(record);
                 if let Some(ref index_data) = record.index_data {

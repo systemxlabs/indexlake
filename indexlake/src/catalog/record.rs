@@ -572,14 +572,12 @@ impl InlineIndexRecord {
 /// Tracks active row_ids by applying add/delete deltas in order.
 #[derive(Debug, Clone)]
 pub(crate) struct InlineIndexSnapshot {
-    pub(crate) index_id: Uuid,
     pub(crate) active_row_ids: HashSet<Uuid>,
 }
 
 impl InlineIndexSnapshot {
-    pub(crate) fn new(index_id: Uuid) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            index_id,
             active_row_ids: HashSet::new(),
         }
     }
@@ -595,10 +593,6 @@ impl InlineIndexSnapshot {
                 }
             }
         }
-    }
-
-    pub(crate) fn is_active(&self, row_id: &Uuid) -> bool {
-        self.active_row_ids.contains(row_id)
     }
 
     pub(crate) fn filter_row_ids(&self, row_ids: &[Uuid]) -> Vec<Uuid> {
