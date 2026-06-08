@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
@@ -8,12 +9,13 @@ use parquet::arrow::AsyncArrowWriter;
 use uuid::Uuid;
 
 use crate::catalog::{
-    Catalog, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity, TransactionHelper,
+    Catalog, DataFileRecord, IndexFileRecord, InlineIndexOp, InlineIndexRecord, RowValidity,
+    TransactionHelper,
 };
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, OutputFile, build_parquet_writer};
 use crate::table::Table;
-use crate::utils::{rewrite_batch_schema, serialize_array};
+use crate::utils::{rewrite_batch_schema, serialize_array, timestamp_ms_from_now};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, With)]
@@ -143,6 +145,13 @@ pub(crate) fn build_inline_indexes(
         }
     }
 
+    // collect row_ids from all batches
+    let mut all_row_ids: Vec<Uuid> = Vec::new();
+    for batch in batches {
+        let row_ids = crate::utils::extract_row_ids_from_record_batch(batch)?;
+        all_row_ids.extend(row_ids);
+    }
+
     let mut inline_index_records = Vec::new();
     for builder in index_builders.iter_mut() {
         if builder.is_empty() {
@@ -152,7 +161,10 @@ pub(crate) fn build_inline_indexes(
         builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
             index_id: builder.index_def().index_id,
-            index_data,
+            created_at: timestamp_ms_from_now(Duration::ZERO),
+            op: InlineIndexOp::Add,
+            row_ids: all_row_ids.clone(),
+            index_data: Some(index_data),
         });
     }
     Ok(inline_index_records)

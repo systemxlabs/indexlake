@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use arrow::array::{LargeBinaryArray, RecordBatch};
+use arrow::array::{Int64Array, LargeBinaryArray, RecordBatch, StringArray};
 use uuid::Uuid;
 
 use crate::catalog::{
-    DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
-    TaskRecord, TransactionHelper, inline_row_table_name,
+    DataFileRecord, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexOp, InlineIndexRecord,
+    TableRecord, TaskRecord, TransactionHelper, inline_row_table_name,
 };
 use crate::utils::build_row_id_array;
 use crate::{ILError, ILResult};
@@ -166,19 +166,62 @@ impl TransactionHelper {
         if inline_indexes.is_empty() {
             return Ok(());
         }
+        for record in inline_indexes {
+            match record.op {
+                InlineIndexOp::Add => {
+                    if record.index_data.is_none() {
+                        return Err(ILError::invalid_input(
+                            "add delta must have index_data".to_string(),
+                        ));
+                    }
+                }
+                InlineIndexOp::Delete => {
+                    if record.index_data.is_some() {
+                        return Err(ILError::invalid_input(
+                            "delete delta must not have index_data".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
         let index_id_arr = build_row_id_array(inline_indexes.iter().map(|r| r.index_id))?;
-        let index_data_arr =
-            LargeBinaryArray::from_iter_values(inline_indexes.iter().map(|r| &r.index_data));
+        let created_at_arr =
+            Int64Array::from_iter_values(inline_indexes.iter().map(|r| r.created_at));
+        let op_arr = StringArray::from_iter_values(inline_indexes.iter().map(|r| r.op.as_str()));
+        let row_ids_bytes: Vec<Vec<u8>> = inline_indexes
+            .iter()
+            .map(|r| crate::utils::serialize_row_ids(&r.row_ids))
+            .collect();
+        let row_ids_arr =
+            LargeBinaryArray::from_iter_values(row_ids_bytes.iter().map(|b| b.as_slice()));
+        let index_data_arr = LargeBinaryArray::from(
+            inline_indexes
+                .iter()
+                .map(|r| r.index_data.as_deref())
+                .collect::<Vec<_>>(),
+        );
 
         let batch = RecordBatch::try_new(
             InlineIndexRecord::arrow_schema(),
-            vec![Arc::new(index_id_arr), Arc::new(index_data_arr)],
+            vec![
+                Arc::new(index_id_arr),
+                Arc::new(created_at_arr),
+                Arc::new(op_arr),
+                Arc::new(row_ids_arr),
+                Arc::new(index_data_arr),
+            ],
         )?;
 
         self.transaction
             .insert_rows(
                 "indexlake_inline_index",
-                &["index_id".to_string(), "index_data".to_string()],
+                &[
+                    "index_id".to_string(),
+                    "created_at".to_string(),
+                    "op".to_string(),
+                    "row_ids".to_string(),
+                    "index_data".to_string(),
+                ],
                 &[batch],
             )
             .await?;

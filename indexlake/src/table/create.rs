@@ -1,14 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use arrow::datatypes::SchemaRef;
 use arrow_schema::Schema;
 use futures::StreamExt;
 use uuid::Uuid;
 
+use crate::utils::timestamp_ms_from_now;
+
 use crate::catalog::{
-    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
-    TransactionHelper, rows_to_record_batch,
+    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexOp, InlineIndexRecord,
+    TableRecord, TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::Expr;
 use crate::index::{IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams};
@@ -329,8 +332,14 @@ pub(crate) async fn build_inline_indexes_for_one_index(
 
     let mut index_builder = index_kind.builder(index_def)?;
     let mut counter = 0;
+    let mut all_row_ids: Vec<Uuid> = Vec::new();
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        for row in &rows {
+            if let Some(row_id) = row.get_row_id()? {
+                all_row_ids.push(row_id);
+            }
+        }
         counter += rows.len();
         let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         index_builder.append(&record_batch)?;
@@ -340,9 +349,14 @@ pub(crate) async fn build_inline_indexes_for_one_index(
             index_builder.write_bytes(&mut index_data)?;
             inline_index_records.push(InlineIndexRecord {
                 index_id: index_builder.index_def().index_id,
-                index_data,
+                created_at: timestamp_ms_from_now(Duration::ZERO),
+                op: InlineIndexOp::Add,
+                row_ids: all_row_ids.clone(),
+                index_data: Some(index_data),
             });
+            tokio::time::sleep(Duration::from_millis(1)).await;
             counter = 0;
+            all_row_ids.clear();
             index_builder = index_kind.builder(index_def)?;
         }
     }
@@ -354,7 +368,10 @@ pub(crate) async fn build_inline_indexes_for_one_index(
         index_builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
             index_id: index_builder.index_def().index_id,
-            index_data,
+            created_at: timestamp_ms_from_now(Duration::ZERO),
+            op: InlineIndexOp::Add,
+            row_ids: all_row_ids.clone(),
+            index_data: Some(index_data),
         });
     }
 

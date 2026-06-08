@@ -7,13 +7,14 @@ use uuid::Uuid;
 
 use crate::catalog::{
     Catalog, CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME,
-    IndexFileRecord, InlineIndexRecord, RowStream, RowValidity, TransactionHelper,
+    IndexFileRecord, InlineIndexOp, InlineIndexRecord, RowStream, RowValidity, TransactionHelper,
     rows_to_record_batch,
 };
 use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
 use crate::table::{Table, TableConfig, TableSchemaRef, insert_task};
+use crate::utils::timestamp_ms_from_now;
 use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
@@ -327,8 +328,15 @@ async fn full_build_inline_index_records(
     let mut inline_index_records = Vec::new();
     let mut index_builders = new_index_builders()?;
     let mut counter = 0;
+    let mut all_row_ids: Vec<Uuid> = Vec::new();
+
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        for row in &rows {
+            if let Some(row_id) = row.get_row_id()? {
+                all_row_ids.push(row_id);
+            }
+        }
         counter += rows.len();
         let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         for index_builder in index_builders.iter_mut() {
@@ -336,8 +344,11 @@ async fn full_build_inline_index_records(
         }
 
         if counter >= 1000 {
-            flush_index_builders(&mut index_builders, &mut inline_index_records)?;
+            flush_index_builders(&mut index_builders, &mut inline_index_records, &all_row_ids)
+                .await?;
+            tokio::time::sleep(Duration::from_millis(1)).await;
             counter = 0;
+            all_row_ids.clear();
             index_builders = new_index_builders()?;
         }
     }
@@ -345,15 +356,16 @@ async fn full_build_inline_index_records(
 
     // build inline index records for left rows
     if counter > 0 {
-        flush_index_builders(&mut index_builders, &mut inline_index_records)?;
+        flush_index_builders(&mut index_builders, &mut inline_index_records, &all_row_ids).await?;
     }
 
     Ok(inline_index_records)
 }
 
-fn flush_index_builders(
+async fn flush_index_builders(
     index_builders: &mut [Box<dyn IndexBuilder>],
     inline_index_records: &mut Vec<InlineIndexRecord>,
+    row_ids: &[Uuid],
 ) -> ILResult<()> {
     for index_builder in index_builders.iter_mut() {
         if index_builder.is_empty() {
@@ -361,9 +373,13 @@ fn flush_index_builders(
         }
         let mut index_data = Vec::new();
         index_builder.write_bytes(&mut index_data)?;
+        let index_id = index_builder.index_def().index_id;
         inline_index_records.push(InlineIndexRecord {
-            index_id: index_builder.index_def().index_id,
-            index_data,
+            index_id,
+            created_at: timestamp_ms_from_now(Duration::ZERO),
+            op: InlineIndexOp::Add,
+            row_ids: row_ids.to_vec(),
+            index_data: Some(index_data),
         });
     }
     Ok(())
