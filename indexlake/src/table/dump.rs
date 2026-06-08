@@ -329,7 +329,6 @@ async fn full_build_inline_index_records(
     let mut index_builders = new_index_builders()?;
     let mut counter = 0;
     let mut all_row_ids: Vec<Uuid> = Vec::new();
-    let mut next_created_at = timestamp_ms_from_now(Duration::ZERO);
 
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
@@ -349,8 +348,9 @@ async fn full_build_inline_index_records(
                 &mut index_builders,
                 &mut inline_index_records,
                 &all_row_ids,
-                &mut next_created_at,
-            )?;
+            )
+            .await?;
+            tokio::time::sleep(Duration::from_millis(1)).await;
             counter = 0;
             all_row_ids.clear();
             index_builders = new_index_builders()?;
@@ -364,18 +364,17 @@ async fn full_build_inline_index_records(
             &mut index_builders,
             &mut inline_index_records,
             &all_row_ids,
-            &mut next_created_at,
-        )?;
+        )
+        .await?;
     }
 
     Ok(inline_index_records)
 }
 
-fn flush_index_builders(
+async fn flush_index_builders(
     index_builders: &mut [Box<dyn IndexBuilder>],
     inline_index_records: &mut Vec<InlineIndexRecord>,
     row_ids: &[Uuid],
-    next_created_at: &mut i64,
 ) -> ILResult<()> {
     for index_builder in index_builders.iter_mut() {
         if index_builder.is_empty() {
@@ -386,7 +385,7 @@ fn flush_index_builders(
         let index_id = index_builder.index_def().index_id;
         inline_index_records.push(InlineIndexRecord {
             index_id,
-            created_at: *next_created_at,
+            created_at: timestamp_ms_from_now(Duration::ZERO),
             op: InlineIndexOp::Add,
             row_ids: row_ids
                 .iter()
@@ -394,7 +393,6 @@ fn flush_index_builders(
                 .collect(),
             index_data: Some(index_data),
         });
-        *next_created_at += 1;
     }
     Ok(())
 }

@@ -364,7 +364,8 @@ pub(crate) async fn build_inline_indexes_for_one_index(
                 row_ids: serialize_row_ids(&all_row_ids),
                 index_data: Some(index_data),
             });
-            next_created_at += 1;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            next_created_at = timestamp_ms_from_now(Duration::ZERO);
             counter = 0;
             all_row_ids.clear();
             index_builder = index_kind.builder(index_def)?;
