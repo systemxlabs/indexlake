@@ -525,7 +525,7 @@ pub(crate) struct InlineIndexRecord {
     pub(crate) index_id: Uuid,
     pub(crate) created_at: i64,
     pub(crate) op: InlineIndexOp,
-    pub(crate) row_ids: Vec<u8>,
+    pub(crate) row_ids: Vec<Uuid>,
     pub(crate) index_data: Option<Vec<u8>>,
 }
 
@@ -550,12 +550,35 @@ impl InlineIndexRecord {
         ]))
     }
 
+    pub(crate) fn serialize_row_ids(row_ids: &[Uuid]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(row_ids.len() * 16);
+        for row_id in row_ids {
+            buf.extend_from_slice(row_id.as_bytes());
+        }
+        buf
+    }
+
+    pub(crate) fn deserialize_row_ids(bytes: &[u8]) -> ILResult<Vec<Uuid>> {
+        if bytes.len() % 16 != 0 {
+            return Err(ILError::internal(format!(
+                "row_ids bytes length {} is not a multiple of 16",
+                bytes.len()
+            )));
+        }
+        let mut row_ids = Vec::with_capacity(bytes.len() / 16);
+        for chunk in bytes.chunks_exact(16) {
+            row_ids.push(Uuid::from_slice(chunk)?);
+        }
+        Ok(row_ids)
+    }
+
     pub(crate) fn from_row(mut row: Row) -> ILResult<Self> {
         let index_id = row.uuid(0)?.expect("index_id is not null");
         let created_at = row.int64(1)?.expect("created_at is not null");
         let op_str = row.utf8(2)?.expect("op is not null");
         let op = InlineIndexOp::try_from(op_str.as_str())?;
-        let row_ids = row.binary_owned(3)?.expect("row_ids is not null");
+        let row_ids_bytes = row.binary_owned(3)?.expect("row_ids is not null");
+        let row_ids = Self::deserialize_row_ids(&row_ids_bytes)?;
         let index_data = row.binary_owned(4)?;
         Ok(Self {
             index_id,

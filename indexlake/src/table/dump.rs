@@ -378,10 +378,7 @@ async fn flush_index_builders(
             index_id,
             created_at: timestamp_ms_from_now(Duration::ZERO),
             op: InlineIndexOp::Add,
-            row_ids: row_ids
-                .iter()
-                .flat_map(|id| id.as_bytes().to_vec())
-                .collect(),
+            row_ids: row_ids.to_vec(),
             index_data: Some(index_data),
         });
     }

@@ -175,10 +175,7 @@ pub(crate) fn build_inline_indexes(
             index_id: builder.index_def().index_id,
             created_at: timestamp_ms_from_now(Duration::ZERO),
             op: InlineIndexOp::Add,
-            row_ids: all_row_ids
-                .iter()
-                .flat_map(|id| id.as_bytes().to_vec())
-                .collect(),
+            row_ids: all_row_ids.clone(),
             index_data: Some(index_data),
         });
     }

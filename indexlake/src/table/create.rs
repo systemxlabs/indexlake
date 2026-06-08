@@ -315,14 +315,6 @@ pub(crate) async fn process_create_index(
     Ok(index_id)
 }
 
-fn serialize_row_ids(row_ids: &[Uuid]) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(row_ids.len() * 16);
-    for row_id in row_ids {
-        buf.extend_from_slice(row_id.as_bytes());
-    }
-    buf
-}
-
 pub(crate) async fn build_inline_indexes_for_one_index(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
@@ -359,7 +351,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
                 index_id: index_builder.index_def().index_id,
                 created_at: timestamp_ms_from_now(Duration::ZERO),
                 op: InlineIndexOp::Add,
-                row_ids: serialize_row_ids(&all_row_ids),
+                row_ids: all_row_ids.clone(),
                 index_data: Some(index_data),
             });
             tokio::time::sleep(Duration::from_millis(1)).await;
@@ -378,7 +370,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
             index_id: index_builder.index_def().index_id,
             created_at: timestamp_ms_from_now(Duration::ZERO),
             op: InlineIndexOp::Add,
-            row_ids: serialize_row_ids(&all_row_ids),
+            row_ids: all_row_ids.clone(),
             index_data: Some(index_data),
         });
     }

@@ -188,8 +188,12 @@ impl TransactionHelper {
         let created_at_arr =
             Int64Array::from_iter_values(inline_indexes.iter().map(|r| r.created_at));
         let op_arr = StringArray::from_iter_values(inline_indexes.iter().map(|r| r.op.as_str()));
+        let row_ids_bytes: Vec<Vec<u8>> = inline_indexes
+            .iter()
+            .map(|r| InlineIndexRecord::serialize_row_ids(&r.row_ids))
+            .collect();
         let row_ids_arr =
-            LargeBinaryArray::from_iter_values(inline_indexes.iter().map(|r| r.row_ids.as_slice()));
+            LargeBinaryArray::from_iter_values(row_ids_bytes.iter().map(|b| b.as_slice()));
         let index_data_arr = LargeBinaryArray::from(
             inline_indexes
                 .iter()
