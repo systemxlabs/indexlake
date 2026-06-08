@@ -148,20 +148,8 @@ pub(crate) fn build_inline_indexes(
     // collect row_ids from all batches
     let mut all_row_ids: Vec<Uuid> = Vec::new();
     for batch in batches {
-        let row_id_col = batch
-            .column_by_name("_indexlake_row_id")
-            .ok_or_else(|| ILError::internal("_indexlake_row_id column not found".to_string()))?;
-        let fixed_array = row_id_col
-            .as_any()
-            .downcast_ref::<arrow::array::FixedSizeBinaryArray>()
-            .ok_or_else(|| {
-                ILError::internal("_indexlake_row_id is not FixedSizeBinary".to_string())
-            })?;
-        for i in 0..fixed_array.len() {
-            if let Some(bytes) = fixed_array.value(i).into() {
-                all_row_ids.push(Uuid::from_slice(bytes)?);
-            }
-        }
+        let row_ids = crate::utils::extract_row_ids_from_record_batch(batch)?;
+        all_row_ids.extend(row_ids);
     }
 
     let mut inline_index_records = Vec::new();

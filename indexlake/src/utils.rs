@@ -222,3 +222,25 @@ pub fn timestamp_ms_from_now(duration: Duration) -> i64 {
         .expect("Time went backwards")
         .as_millis() as i64
 }
+
+pub fn serialize_row_ids(row_ids: &[Uuid]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(row_ids.len() * 16);
+    for row_id in row_ids {
+        buf.extend_from_slice(row_id.as_bytes());
+    }
+    buf
+}
+
+pub fn deserialize_row_ids(bytes: &[u8]) -> ILResult<Vec<Uuid>> {
+    if bytes.len() % 16 != 0 {
+        return Err(ILError::internal(format!(
+            "row_ids bytes length {} is not a multiple of 16",
+            bytes.len()
+        )));
+    }
+    let mut row_ids = Vec::with_capacity(bytes.len() / 16);
+    for chunk in bytes.chunks_exact(16) {
+        row_ids.push(Uuid::from_slice(chunk)?);
+    }
+    Ok(row_ids)
+}

@@ -190,7 +190,7 @@ impl TransactionHelper {
         let op_arr = StringArray::from_iter_values(inline_indexes.iter().map(|r| r.op.as_str()));
         let row_ids_bytes: Vec<Vec<u8>> = inline_indexes
             .iter()
-            .map(|r| InlineIndexRecord::serialize_row_ids(&r.row_ids))
+            .map(|r| crate::utils::serialize_row_ids(&r.row_ids))
             .collect();
         let row_ids_arr =
             LargeBinaryArray::from_iter_values(row_ids_bytes.iter().map(|b| b.as_slice()));
