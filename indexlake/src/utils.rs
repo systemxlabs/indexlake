@@ -232,7 +232,7 @@ pub fn serialize_row_ids(row_ids: &[Uuid]) -> Vec<u8> {
 }
 
 pub fn deserialize_row_ids(bytes: &[u8]) -> ILResult<Vec<Uuid>> {
-    if bytes.len() % 16 != 0 {
+    if !bytes.len().is_multiple_of(16) {
         return Err(ILError::internal(format!(
             "row_ids bytes length {} is not a multiple of 16",
             bytes.len()
