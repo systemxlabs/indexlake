@@ -344,12 +344,8 @@ async fn full_build_inline_index_records(
         }
 
         if counter >= 1000 {
-            flush_index_builders(
-                &mut index_builders,
-                &mut inline_index_records,
-                &all_row_ids,
-            )
-            .await?;
+            flush_index_builders(&mut index_builders, &mut inline_index_records, &all_row_ids)
+                .await?;
             tokio::time::sleep(Duration::from_millis(1)).await;
             counter = 0;
             all_row_ids.clear();
@@ -360,12 +356,7 @@ async fn full_build_inline_index_records(
 
     // build inline index records for left rows
     if counter > 0 {
-        flush_index_builders(
-            &mut index_builders,
-            &mut inline_index_records,
-            &all_row_ids,
-        )
-        .await?;
+        flush_index_builders(&mut index_builders, &mut inline_index_records, &all_row_ids).await?;
     }
 
     Ok(inline_index_records)
