@@ -496,29 +496,44 @@ impl IndexFileRecord {
 
 pub(crate) struct InlineIndexRecord {
     pub(crate) index_id: Uuid,
-    pub(crate) index_data: Vec<u8>,
+    pub(crate) created_at: i64,
+    pub(crate) op: String,
+    pub(crate) row_ids: Vec<u8>,
+    pub(crate) index_data: Option<Vec<u8>>,
 }
 
 impl InlineIndexRecord {
     pub(crate) fn catalog_schema() -> CatalogSchema {
         CatalogSchema::new(vec![
             Column::new("index_id", CatalogDataType::Uuid, false),
-            Column::new("index_data", CatalogDataType::Binary, false),
+            Column::new("created_at", CatalogDataType::Int64, false),
+            Column::new("op", CatalogDataType::Utf8, false),
+            Column::new("row_ids", CatalogDataType::Binary, false),
+            Column::new("index_data", CatalogDataType::Binary, true),
         ])
     }
 
     pub(crate) fn arrow_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("index_id", DataType::FixedSizeBinary(16), false),
-            Field::new("index_id", DataType::LargeBinary, false),
+            Field::new("created_at", DataType::Int64, false),
+            Field::new("op", DataType::Utf8, false),
+            Field::new("row_ids", DataType::LargeBinary, false),
+            Field::new("index_data", DataType::LargeBinary, true),
         ]))
     }
 
     pub(crate) fn from_row(mut row: Row) -> ILResult<Self> {
         let index_id = row.uuid(0)?.expect("index_id is not null");
-        let index_data = row.binary_owned(1)?.expect("index_data is not null");
+        let created_at = row.int64(1)?.expect("created_at is not null");
+        let op = row.utf8_owned(2)?.expect("op is not null");
+        let row_ids = row.binary_owned(3)?.expect("row_ids is not null");
+        let index_data = row.binary_owned(4)?;
         Ok(Self {
             index_id,
+            created_at,
+            op,
+            row_ids,
             index_data,
         })
     }

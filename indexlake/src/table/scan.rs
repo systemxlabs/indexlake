@@ -446,7 +446,9 @@ async fn index_scan_inline_rows(
 
         if let Some(records) = inline_index_records_map.get(&index_def.index_id) {
             for record in records {
-                builder.read_bytes(&record.index_data)?;
+                if let Some(ref index_data) = record.index_data {
+                    builder.read_bytes(index_data)?;
+                }
             }
         }
     }

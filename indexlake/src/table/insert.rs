@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
@@ -13,7 +14,7 @@ use crate::catalog::{
 use crate::index::IndexBuilder;
 use crate::storage::{DataFileFormat, OutputFile, build_parquet_writer};
 use crate::table::Table;
-use crate::utils::{rewrite_batch_schema, serialize_array};
+use crate::utils::{rewrite_batch_schema, serialize_array, timestamp_ms_from_now};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, With)]
@@ -143,7 +144,25 @@ pub(crate) fn build_inline_indexes(
         }
     }
 
+    // collect row_ids from all batches
+    let mut all_row_ids: Vec<Uuid> = Vec::new();
+    for batch in batches {
+        let row_id_col = batch
+            .column_by_name("_indexlake_row_id")
+            .ok_or_else(|| ILError::internal("_indexlake_row_id column not found".to_string()))?;
+        let fixed_array = row_id_col
+            .as_any()
+            .downcast_ref::<arrow::array::FixedSizeBinaryArray>()
+            .ok_or_else(|| ILError::internal("_indexlake_row_id is not FixedSizeBinary".to_string()))?;
+        for i in 0..fixed_array.len() {
+            if let Some(bytes) = fixed_array.value(i).into() {
+                all_row_ids.push(Uuid::from_slice(bytes)?);
+            }
+        }
+    }
+
     let mut inline_index_records = Vec::new();
+    let mut next_created_at = timestamp_ms_from_now(Duration::ZERO);
     for builder in index_builders.iter_mut() {
         if builder.is_empty() {
             continue;
@@ -152,8 +171,12 @@ pub(crate) fn build_inline_indexes(
         builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
             index_id: builder.index_def().index_id,
-            index_data,
+            created_at: next_created_at,
+            op: "add".to_string(),
+            row_ids: all_row_ids.iter().flat_map(|id| id.as_bytes().to_vec()).collect(),
+            index_data: Some(index_data),
         });
+        next_created_at += 1;
     }
     Ok(inline_index_records)
 }

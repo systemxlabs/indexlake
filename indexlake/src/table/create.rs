@@ -1,14 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use arrow::datatypes::SchemaRef;
 use arrow_schema::Schema;
 use futures::StreamExt;
 use uuid::Uuid;
 
+use crate::utils::timestamp_ms_from_now;
+
 use crate::catalog::{
-    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, TableRecord,
-    TransactionHelper, rows_to_record_batch,
+    CatalogDataType, CatalogSchema, Column, FieldRecord, IndexFileRecord, IndexRecord,
+    InlineIndexRecord, TableRecord, TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::Expr;
 use crate::index::{IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams};
@@ -312,6 +315,40 @@ pub(crate) async fn process_create_index(
     Ok(index_id)
 }
 
+fn serialize_row_ids(row_ids: &[Uuid]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(row_ids.len() * 16);
+    for row_id in row_ids {
+        buf.extend_from_slice(row_id.as_bytes());
+    }
+    buf
+}
+
+async fn get_next_inline_index_created_at(
+    tx_helper: &mut TransactionHelper,
+    index_id: &Uuid,
+) -> ILResult<i64> {
+    let schema = Arc::new(CatalogSchema::new(vec![Column::new(
+        "max_created_at",
+        CatalogDataType::Int64,
+        true,
+    )]));
+    let row = tx_helper
+        .query_single(
+            &format!(
+                "SELECT MAX(created_at) AS max_created_at FROM indexlake_inline_index WHERE index_id = {}",
+                tx_helper.catalog.sql_uuid_literal(index_id)
+            ),
+            schema,
+        )
+        .await?;
+    let max_created_at = match row {
+        Some(row) => row.int64(0)?.unwrap_or(0),
+        None => 0,
+    };
+    let now_ms = timestamp_ms_from_now(Duration::ZERO);
+    Ok(std::cmp::max(now_ms, max_created_at + 1))
+}
+
 pub(crate) async fn build_inline_indexes_for_one_index(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
@@ -319,6 +356,9 @@ pub(crate) async fn build_inline_indexes_for_one_index(
     index_kind: &Arc<dyn IndexKind>,
     index_def: &IndexDefinitionRef,
 ) -> ILResult<Vec<InlineIndexRecord>> {
+    let mut next_created_at =
+        get_next_inline_index_created_at(tx_helper, &index_def.index_id).await?;
+
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
         .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
@@ -329,8 +369,14 @@ pub(crate) async fn build_inline_indexes_for_one_index(
 
     let mut index_builder = index_kind.builder(index_def)?;
     let mut counter = 0;
+    let mut all_row_ids: Vec<Uuid> = Vec::new();
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        for row in &rows {
+            if let Some(row_id) = row.get_row_id()? {
+                all_row_ids.push(row_id);
+            }
+        }
         counter += rows.len();
         let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         index_builder.append(&record_batch)?;
@@ -340,9 +386,14 @@ pub(crate) async fn build_inline_indexes_for_one_index(
             index_builder.write_bytes(&mut index_data)?;
             inline_index_records.push(InlineIndexRecord {
                 index_id: index_builder.index_def().index_id,
-                index_data,
+                created_at: next_created_at,
+                op: "add".to_string(),
+                row_ids: serialize_row_ids(&all_row_ids),
+                index_data: Some(index_data),
             });
+            next_created_at += 1;
             counter = 0;
+            all_row_ids.clear();
             index_builder = index_kind.builder(index_def)?;
         }
     }
@@ -354,7 +405,10 @@ pub(crate) async fn build_inline_indexes_for_one_index(
         index_builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
             index_id: index_builder.index_def().index_id,
-            index_data,
+            created_at: next_created_at,
+            op: "add".to_string(),
+            row_ids: serialize_row_ids(&all_row_ids),
+            index_data: Some(index_data),
         });
     }
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,7 @@ use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
 use crate::table::{Table, TableConfig, TableSchemaRef, insert_task};
+use crate::utils::timestamp_ms_from_now;
 use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
@@ -327,8 +329,16 @@ async fn full_build_inline_index_records(
     let mut inline_index_records = Vec::new();
     let mut index_builders = new_index_builders()?;
     let mut counter = 0;
+    let mut all_row_ids: Vec<Uuid> = Vec::new();
+    let mut next_created_at_per_index: HashMap<Uuid, i64> = HashMap::new();
+
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        for row in &rows {
+            if let Some(row_id) = row.get_row_id()? {
+                all_row_ids.push(row_id);
+            }
+        }
         counter += rows.len();
         let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         for index_builder in index_builders.iter_mut() {
@@ -336,8 +346,15 @@ async fn full_build_inline_index_records(
         }
 
         if counter >= 1000 {
-            flush_index_builders(&mut index_builders, &mut inline_index_records)?;
+            flush_index_builders(
+                &mut index_builders,
+                &mut inline_index_records,
+                &all_row_ids,
+                &mut next_created_at_per_index,
+            )
+            .await?;
             counter = 0;
+            all_row_ids.clear();
             index_builders = new_index_builders()?;
         }
     }
@@ -345,15 +362,23 @@ async fn full_build_inline_index_records(
 
     // build inline index records for left rows
     if counter > 0 {
-        flush_index_builders(&mut index_builders, &mut inline_index_records)?;
+        flush_index_builders(
+            &mut index_builders,
+            &mut inline_index_records,
+            &all_row_ids,
+            &mut next_created_at_per_index,
+        )
+        .await?;
     }
 
     Ok(inline_index_records)
 }
 
-fn flush_index_builders(
+async fn flush_index_builders(
     index_builders: &mut [Box<dyn IndexBuilder>],
     inline_index_records: &mut Vec<InlineIndexRecord>,
+    row_ids: &[Uuid],
+    next_created_at_per_index: &mut HashMap<Uuid, i64>,
 ) -> ILResult<()> {
     for index_builder in index_builders.iter_mut() {
         if index_builder.is_empty() {
@@ -361,10 +386,19 @@ fn flush_index_builders(
         }
         let mut index_data = Vec::new();
         index_builder.write_bytes(&mut index_data)?;
-        inline_index_records.push(InlineIndexRecord {
-            index_id: index_builder.index_def().index_id,
-            index_data,
+        let index_id = index_builder.index_def().index_id;
+        let next_created_at = *next_created_at_per_index.entry(index_id).or_insert_with(|| {
+            let now_ms = timestamp_ms_from_now(Duration::ZERO);
+            std::cmp::max(now_ms, 1)
         });
+        inline_index_records.push(InlineIndexRecord {
+            index_id,
+            created_at: next_created_at,
+            op: "add".to_string(),
+            row_ids: row_ids.iter().flat_map(|id| id.as_bytes().to_vec()).collect(),
+            index_data: Some(index_data),
+        });
+        next_created_at_per_index.insert(index_id, next_created_at + 1);
     }
     Ok(())
 }

@@ -59,5 +59,9 @@ CREATE TABLE IF NOT EXISTS indexlake_index_file (
 
 CREATE TABLE IF NOT EXISTS indexlake_inline_index (
     index_id UUID NOT NULL,
-    index_data BYTEA NOT NULL
+    created_at BIGINT NOT NULL,
+    op VARCHAR NOT NULL,
+    row_ids BYTEA NOT NULL,
+    index_data BYTEA,
+    UNIQUE (index_id, created_at)
 );
