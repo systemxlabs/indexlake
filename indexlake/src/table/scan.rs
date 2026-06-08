@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
-    InlineIndexSnapshot, rows_to_record_batch,
+    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexOp,
+    InlineIndexRecord, InlineIndexSnapshot, rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
 use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
@@ -430,7 +430,7 @@ async fn index_scan_inline_rows(
         index_ids.push(index_def.index_id);
     }
 
-    // read inline index records
+    // read inline index records ordered by created_at
     let inline_index_records = catalog_helper.get_inline_indexes(&index_ids).await?;
     let mut inline_index_records_map: HashMap<Uuid, Vec<InlineIndexRecord>> = HashMap::new();
     for record in inline_index_records {
@@ -440,49 +440,73 @@ async fn index_scan_inline_rows(
             .push(record);
     }
 
-    // build snapshots and append index builders
+    // build snapshots per index
     let mut snapshots: HashMap<Uuid, InlineIndexSnapshot> = HashMap::new();
-    for (_index_name, builder) in index_builder_map.iter_mut() {
-        let index_id = builder.index_def().index_id;
-
-        if let Some(records) = inline_index_records_map.get(&index_id) {
-            let mut snapshot = InlineIndexSnapshot::new();
-            for record in records {
-                snapshot.apply_delta(record);
-                if let Some(ref index_data) = record.index_data {
-                    builder.read_bytes(index_data)?;
-                }
-            }
-            snapshots.insert(index_id, snapshot);
+    for (index_id, records) in &inline_index_records_map {
+        let mut snapshot = InlineIndexSnapshot::new();
+        for record in records {
+            snapshot.apply_delta(record);
         }
+        snapshots.insert(*index_id, snapshot);
     }
 
-    // filter row ids by indexes
-    let mut filter_index_entries_list = Vec::new();
+    // filter row ids by indexes, per add delta
+    let mut filter_index_entries_list: Vec<FilterIndexEntries> = Vec::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
-        let index_builder = index_builder_map.get_mut(index_name).ok_or_else(|| {
-            ILError::internal(format!("Index builder not found for index {index_name}"))
-        })?;
-
-        let index = index_builder.build()?;
+        let index_def = table
+            .index_manager
+            .get_index(index_name)
+            .ok_or_else(|| ILError::internal(format!("Index {index_name} not found")))?;
+        let kind = &index_def.kind;
+        let index_kind = table
+            .index_manager
+            .get_index_kind(kind)
+            .ok_or_else(|| ILError::internal(format!("Index kind {kind} not registered")))?;
 
         let filters = filter_indices
             .iter()
             .map(|idx| scan.filters[*idx].clone())
             .collect::<Vec<_>>();
 
-        let filter_index_entries = index.filter(&filters).await?;
+        let mut all_valid_row_ids = HashSet::new();
 
-        // apply snapshot: filter out deleted row_ids
-        let index_def = index_builder.index_def();
-        if let Some(snapshot) = snapshots.get(&index_def.index_id) {
-            let active_row_ids = snapshot.filter_row_ids(&filter_index_entries.row_ids);
+        let Some(records) = inline_index_records_map.get(&index_def.index_id) else {
+            // No inline index records for this index, return empty set
             filter_index_entries_list.push(FilterIndexEntries {
-                row_ids: active_row_ids,
+                row_ids: Vec::new(),
             });
-        } else {
-            filter_index_entries_list.push(filter_index_entries);
+            continue;
+        };
+
+        let snapshot = snapshots.get(&index_def.index_id).ok_or_else(|| {
+            ILError::internal(format!("Snapshot not found for index {index_name}"))
+        })?;
+
+        // For each add delta, build a mini-index and filter
+        for record in records {
+            if record.op != InlineIndexOp::Add {
+                continue;
+            }
+            let Some(ref index_data) = record.index_data else {
+                continue;
+            };
+
+            let mut builder = index_kind.builder(index_def)?;
+            builder.read_bytes(index_data)?;
+            let index = builder.build()?;
+            let entries = index.filter(&filters).await?;
+
+            // Only keep row_ids where this delta is the latest add and not deleted
+            for row_id in entries.row_ids {
+                if snapshot.is_live_at(&row_id, record.created_at) {
+                    all_valid_row_ids.insert(row_id);
+                }
+            }
         }
+
+        filter_index_entries_list.push(FilterIndexEntries {
+            row_ids: all_valid_row_ids.into_iter().collect(),
+        });
     }
 
     let mut intersected_row_ids = filter_index_entries_list[0]

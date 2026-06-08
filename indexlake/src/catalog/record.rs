@@ -569,36 +569,56 @@ impl InlineIndexRecord {
 }
 
 /// Snapshot of inline index deltas for a single index.
-/// Tracks active row_ids by applying add/delete deltas in order.
+/// Tracks latest add created_at per row_id and deleted row_ids.
 #[derive(Debug, Clone)]
 pub(crate) struct InlineIndexSnapshot {
-    pub(crate) active_row_ids: HashSet<Uuid>,
+    /// row_id -> created_at of the latest add delta containing this row_id
+    pub(crate) latest_add: HashMap<Uuid, i64>,
+    /// Set of deleted row_ids
+    pub(crate) deleted: HashSet<Uuid>,
 }
 
 impl InlineIndexSnapshot {
     pub(crate) fn new() -> Self {
         Self {
-            active_row_ids: HashSet::new(),
+            latest_add: HashMap::new(),
+            deleted: HashSet::new(),
         }
     }
 
     pub(crate) fn apply_delta(&mut self, record: &InlineIndexRecord) {
         match record.op {
             InlineIndexOp::Add => {
-                self.active_row_ids.extend(record.row_ids.iter().copied());
+                for row_id in &record.row_ids {
+                    self.latest_add.insert(*row_id, record.created_at);
+                    self.deleted.remove(row_id);
+                }
             }
             InlineIndexOp::Delete => {
                 for row_id in &record.row_ids {
-                    self.active_row_ids.remove(row_id);
+                    self.latest_add.remove(row_id);
+                    self.deleted.insert(*row_id);
                 }
             }
         }
     }
 
-    pub(crate) fn filter_row_ids(&self, row_ids: &[Uuid]) -> Vec<Uuid> {
+    /// Check if a row_id is live at the given created_at (i.e., this delta is the latest add and not deleted)
+    pub(crate) fn is_live_at(&self, row_id: &Uuid, created_at: i64) -> bool {
+        if self.deleted.contains(row_id) {
+            return false;
+        }
+        match self.latest_add.get(row_id) {
+            Some(latest) => *latest == created_at,
+            None => false,
+        }
+    }
+
+    /// Filter row_ids, keeping only those that are live at the given created_at
+    pub(crate) fn filter_row_ids_at(&self, row_ids: &[Uuid], created_at: i64) -> Vec<Uuid> {
         row_ids
             .iter()
-            .filter(|id| self.active_row_ids.contains(id))
+            .filter(|id| self.is_live_at(id, created_at))
             .copied()
             .collect()
     }
