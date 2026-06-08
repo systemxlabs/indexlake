@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::utils::timestamp_ms_from_now;
 
 use crate::catalog::{
-    CatalogDataType, CatalogSchema, Column, FieldRecord, IndexFileRecord, IndexRecord,
-    InlineIndexOp, InlineIndexRecord, TableRecord, TransactionHelper, rows_to_record_batch,
+    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexOp, InlineIndexRecord,
+    TableRecord, TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::Expr;
 use crate::index::{IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams};
@@ -323,32 +323,6 @@ fn serialize_row_ids(row_ids: &[Uuid]) -> Vec<u8> {
     buf
 }
 
-async fn get_next_inline_index_created_at(
-    tx_helper: &mut TransactionHelper,
-    index_id: &Uuid,
-) -> ILResult<i64> {
-    let schema = Arc::new(CatalogSchema::new(vec![Column::new(
-        "max_created_at",
-        CatalogDataType::Int64,
-        true,
-    )]));
-    let row = tx_helper
-        .query_single(
-            &format!(
-                "SELECT MAX(created_at) AS max_created_at FROM indexlake_inline_index WHERE index_id = {}",
-                tx_helper.catalog.sql_uuid_literal(index_id)
-            ),
-            schema,
-        )
-        .await?;
-    let max_created_at = match row {
-        Some(row) => row.int64(0)?.unwrap_or(0),
-        None => 0,
-    };
-    let now_ms = timestamp_ms_from_now(Duration::ZERO);
-    Ok(std::cmp::max(now_ms, max_created_at + 1))
-}
-
 pub(crate) async fn build_inline_indexes_for_one_index(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
@@ -356,8 +330,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
     index_kind: &Arc<dyn IndexKind>,
     index_def: &IndexDefinitionRef,
 ) -> ILResult<Vec<InlineIndexRecord>> {
-    let mut next_created_at =
-        get_next_inline_index_created_at(tx_helper, &index_def.index_id).await?;
+    let mut next_created_at = timestamp_ms_from_now(Duration::ZERO);
 
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
