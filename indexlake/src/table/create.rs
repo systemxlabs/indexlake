@@ -330,7 +330,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
     index_kind: &Arc<dyn IndexKind>,
     index_def: &IndexDefinitionRef,
 ) -> ILResult<Vec<InlineIndexRecord>> {
-    let next_created_at = timestamp_ms_from_now(Duration::ZERO);
+    let mut next_created_at = timestamp_ms_from_now(Duration::ZERO);
 
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
@@ -364,6 +364,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
                 row_ids: serialize_row_ids(&all_row_ids),
                 index_data: Some(index_data),
             });
+            next_created_at += 1;
             counter = 0;
             all_row_ids.clear();
             index_builder = index_kind.builder(index_def)?;
