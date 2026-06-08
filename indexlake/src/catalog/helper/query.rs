@@ -621,6 +621,7 @@ impl CatalogHelper {
         Ok(inline_indexes)
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_max_inline_index_created_at(
         &self,
         index_id: &Uuid,
@@ -645,6 +646,7 @@ impl CatalogHelper {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_inline_index_deltas(
         &self,
         index_id: &Uuid,
