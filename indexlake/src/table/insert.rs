@@ -165,7 +165,6 @@ pub(crate) fn build_inline_indexes(
     }
 
     let mut inline_index_records = Vec::new();
-    let next_created_at = timestamp_ms_from_now(Duration::ZERO);
     for builder in index_builders.iter_mut() {
         if builder.is_empty() {
             continue;
@@ -174,7 +173,7 @@ pub(crate) fn build_inline_indexes(
         builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
             index_id: builder.index_def().index_id,
-            created_at: next_created_at,
+            created_at: timestamp_ms_from_now(Duration::ZERO),
             op: InlineIndexOp::Add,
             row_ids: all_row_ids
                 .iter()

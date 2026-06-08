@@ -330,8 +330,6 @@ pub(crate) async fn build_inline_indexes_for_one_index(
     index_kind: &Arc<dyn IndexKind>,
     index_def: &IndexDefinitionRef,
 ) -> ILResult<Vec<InlineIndexRecord>> {
-    let mut next_created_at = timestamp_ms_from_now(Duration::ZERO);
-
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
         .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
@@ -359,13 +357,12 @@ pub(crate) async fn build_inline_indexes_for_one_index(
             index_builder.write_bytes(&mut index_data)?;
             inline_index_records.push(InlineIndexRecord {
                 index_id: index_builder.index_def().index_id,
-                created_at: next_created_at,
+                created_at: timestamp_ms_from_now(Duration::ZERO),
                 op: InlineIndexOp::Add,
                 row_ids: serialize_row_ids(&all_row_ids),
                 index_data: Some(index_data),
             });
             tokio::time::sleep(Duration::from_millis(1)).await;
-            next_created_at = timestamp_ms_from_now(Duration::ZERO);
             counter = 0;
             all_row_ids.clear();
             index_builder = index_kind.builder(index_def)?;
@@ -379,7 +376,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
         index_builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
             index_id: index_builder.index_def().index_id,
-            created_at: next_created_at,
+                created_at: timestamp_ms_from_now(Duration::ZERO),
             op: InlineIndexOp::Add,
             row_ids: serialize_row_ids(&all_row_ids),
             index_data: Some(index_data),
