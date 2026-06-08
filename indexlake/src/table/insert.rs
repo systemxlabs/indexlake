@@ -153,7 +153,9 @@ pub(crate) fn build_inline_indexes(
         let fixed_array = row_id_col
             .as_any()
             .downcast_ref::<arrow::array::FixedSizeBinaryArray>()
-            .ok_or_else(|| ILError::internal("_indexlake_row_id is not FixedSizeBinary".to_string()))?;
+            .ok_or_else(|| {
+                ILError::internal("_indexlake_row_id is not FixedSizeBinary".to_string())
+            })?;
         for i in 0..fixed_array.len() {
             if let Some(bytes) = fixed_array.value(i).into() {
                 all_row_ids.push(Uuid::from_slice(bytes)?);
@@ -173,7 +175,10 @@ pub(crate) fn build_inline_indexes(
             index_id: builder.index_def().index_id,
             created_at: next_created_at,
             op: "add".to_string(),
-            row_ids: all_row_ids.iter().flat_map(|id| id.as_bytes().to_vec()).collect(),
+            row_ids: all_row_ids
+                .iter()
+                .flat_map(|id| id.as_bytes().to_vec())
+                .collect(),
             index_data: Some(index_data),
         });
         next_created_at += 1;

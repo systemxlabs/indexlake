@@ -387,15 +387,20 @@ async fn flush_index_builders(
         let mut index_data = Vec::new();
         index_builder.write_bytes(&mut index_data)?;
         let index_id = index_builder.index_def().index_id;
-        let next_created_at = *next_created_at_per_index.entry(index_id).or_insert_with(|| {
-            let now_ms = timestamp_ms_from_now(Duration::ZERO);
-            std::cmp::max(now_ms, 1)
-        });
+        let next_created_at = *next_created_at_per_index
+            .entry(index_id)
+            .or_insert_with(|| {
+                let now_ms = timestamp_ms_from_now(Duration::ZERO);
+                std::cmp::max(now_ms, 1)
+            });
         inline_index_records.push(InlineIndexRecord {
             index_id,
             created_at: next_created_at,
             op: "add".to_string(),
-            row_ids: row_ids.iter().flat_map(|id| id.as_bytes().to_vec()).collect(),
+            row_ids: row_ids
+                .iter()
+                .flat_map(|id| id.as_bytes().to_vec())
+                .collect(),
             index_data: Some(index_data),
         });
         next_created_at_per_index.insert(index_id, next_created_at + 1);

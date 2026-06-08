@@ -183,10 +183,7 @@ impl TransactionHelper {
                     }
                 }
                 _ => {
-                    return Err(ILError::invalid_input(format!(
-                        "invalid op: {}",
-                        record.op
-                    )));
+                    return Err(ILError::invalid_input(format!("invalid op: {}", record.op)));
                 }
             }
         }
