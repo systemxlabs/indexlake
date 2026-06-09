@@ -8,16 +8,19 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, TransactionHelper,
-    rows_to_record_batch,
+    CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, InlineIndexRecord, RowValidity,
+    TransactionHelper, rows_to_record_batch,
 };
-use crate::expr::{Expr, merge_filters, split_conjunction_filters, visited_columns};
+use crate::expr::{
+    Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters, visited_columns,
+};
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
-use crate::table::{
-    Table, TableSchemaRef, process_insert_into_inline_rows_with_tx, rebuild_inline_indexes,
+use crate::table::{IndexManager, Table, TableSchemaRef, process_insert_into_inline_rows_with_tx};
+use crate::utils::{
+    extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids, timestamp_ms_from_now,
 };
-use crate::utils::{extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids};
 use crate::{ILError, ILResult, RecordBatchStream};
+use std::time::Duration;
 
 #[derive(Debug)]
 pub struct TableUpdate {
@@ -51,9 +54,9 @@ pub(crate) async fn process_update_by_condition(
     update: TableUpdate,
     mut matched_data_file_rows: HashMap<Uuid, RecordBatchStream>,
 ) -> ILResult<usize> {
-    let inline_update_count = update_inline_rows(tx_helper, table, &update).await?;
+    let (inline_update_count, updated_row_ids) =
+        update_inline_rows(tx_helper, table, &update).await?;
 
-    // TODO this could be optimized into update_inline_rows function
     if inline_update_count != 0 {
         let updated_field_ids: Vec<String> = update.set_map.keys().cloned().collect();
         let affected_index_ids = table
@@ -61,14 +64,29 @@ pub(crate) async fn process_update_by_condition(
             .index_ids_by_field_ids(&updated_field_ids);
 
         if !affected_index_ids.is_empty() {
-            rebuild_inline_indexes(
+            // 1. Mark old row_ids as invalid in existing segments
+            let updated_row_ids_set: HashSet<Uuid> = updated_row_ids.into_iter().collect();
+            for index_id in &affected_index_ids {
+                tx_helper
+                    .invalidate_inline_index_rows(index_id, &updated_row_ids_set)
+                    .await?;
+            }
+
+            // 2. Build new index segments for updated rows
+            let inline_index_records = build_inline_indexes_for_updated_rows(
                 tx_helper,
                 &table.table_id,
                 &table.table_schema,
                 &table.index_manager,
-                Some(&affected_index_ids),
+                &updated_row_ids_set,
+                &affected_index_ids,
             )
             .await?;
+
+            // 3. Insert new segments
+            tx_helper
+                .insert_inline_indexes(&inline_index_records)
+                .await?;
         }
     }
 
@@ -106,7 +124,7 @@ pub(crate) async fn update_inline_rows(
     tx_helper: &mut TransactionHelper,
     table: &Table,
     update: &TableUpdate,
-) -> ILResult<usize> {
+) -> ILResult<(usize, Vec<Uuid>)> {
     // 1. Build projected schema: only scan columns needed for condition eval,
     //    update expression eval, and update targets.
     let mut projection_columns = HashSet::new();
@@ -174,7 +192,7 @@ pub(crate) async fn update_inline_rows(
     drop(chunk_stream);
 
     if matched_batches.is_empty() {
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
 
     // 3. Evaluate updated values in Arrow
@@ -218,14 +236,15 @@ pub(crate) async fn update_inline_rows(
     }
 
     // 6. Write back via row_id-targeted UPDATE
-    tx_helper
+    let count = tx_helper
         .update_inline_rows_by_row_ids(
             &table.table_id,
             &all_row_ids,
             &column_names,
             &concatenated_arrays,
         )
-        .await
+        .await?;
+    Ok((count, all_row_ids))
 }
 
 pub(crate) async fn update_data_file_rows_by_matched_rows(
@@ -383,4 +402,69 @@ fn update_record_batch(
         columns,
         &options,
     )?)
+}
+
+async fn build_inline_indexes_for_updated_rows(
+    tx_helper: &mut TransactionHelper,
+    table_id: &Uuid,
+    table_schema: &TableSchemaRef,
+    index_manager: &IndexManager,
+    updated_row_ids: &HashSet<Uuid>,
+    affected_index_ids: &[Uuid],
+) -> ILResult<Vec<InlineIndexRecord>> {
+    // Scan updated rows
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
+    let row_ids_vec: Vec<Uuid> = updated_row_ids.iter().copied().collect();
+    let row_id_filter = row_ids_in_list_expr(row_ids_vec);
+    let row_stream = tx_helper
+        .scan_inline_rows(
+            table_id,
+            &catalog_schema,
+            std::slice::from_ref(&row_id_filter),
+            None,
+            None,
+        )
+        .await?;
+
+    let mut all_rows = Vec::new();
+    let mut chunk_stream = row_stream.chunks(1000);
+    while let Some(row_chunk) = chunk_stream.next().await {
+        let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        all_rows.extend(rows);
+    }
+
+    if all_rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &all_rows)?;
+
+    // Build index segments for affected indices
+    let mut inline_index_records = Vec::new();
+    for (index_def, index_kind) in index_manager.iter_index_and_kind() {
+        if !affected_index_ids.contains(&index_def.index_id) {
+            continue;
+        }
+
+        let mut index_builder = index_kind.builder(index_def)?;
+        index_builder.append(&record_batch)?;
+
+        let mut index_data = Vec::new();
+        index_builder.write_bytes(&mut index_data)?;
+
+        let row_ids: Vec<Uuid> = all_rows
+            .iter()
+            .filter_map(|row| row.get_row_id().ok().flatten())
+            .collect();
+
+        inline_index_records.push(InlineIndexRecord {
+            index_id: index_def.index_id,
+            created_at: timestamp_ms_from_now(Duration::ZERO),
+            row_ids,
+            validity: RowValidity::new(all_rows.len()),
+            index_data,
+        });
+    }
+
+    Ok(inline_index_records)
 }

@@ -64,23 +64,32 @@ impl Index for RabitqIndex {
 
         let score_higher_is_better = matches!(self.metric, RabitqMetric::InnerProduct);
 
-        // Over-fetch to account for invalid rows
-        let fetch_limit = (query.limit * 2).max(query.limit);
-        let params = BruteForceSearchParams { top_k: fetch_limit };
-        let results = self
-            .inner
-            .search(&query.vector, params)
-            .map_err(|e| ILError::index(format!("RaBitQ brute force search failed: {e}")))?;
+        // Keep fetching until we get enough valid rows or exhaust the index
         let mut row_ids = Vec::new();
         let mut scores = Vec::new();
-        for r in results {
-            if validity.is_valid(r.id) {
-                row_ids.push(self.row_ids[r.id]);
-                scores.push(r.score as f64);
-                if row_ids.len() >= query.limit {
-                    break;
+        let mut fetch_limit = query.limit;
+        let total_vectors = self.row_ids.len();
+        let mut scanned_count = 0;
+        while row_ids.len() < query.limit && fetch_limit <= total_vectors {
+            let params = BruteForceSearchParams { top_k: fetch_limit };
+            let results = self
+                .inner
+                .search(&query.vector, params)
+                .map_err(|e| ILError::index(format!("RaBitQ brute force search failed: {e}")))?;
+            for r in &results[scanned_count..] {
+                if validity.is_valid(r.id) {
+                    row_ids.push(self.row_ids[r.id]);
+                    scores.push(r.score as f64);
+                    if row_ids.len() >= query.limit {
+                        break;
+                    }
                 }
             }
+            scanned_count = results.len();
+            if fetch_limit >= total_vectors {
+                break;
+            }
+            fetch_limit = (fetch_limit * 2).min(total_vectors);
         }
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());

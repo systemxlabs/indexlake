@@ -251,15 +251,35 @@ async fn search_inline_rows(
         score_higher_is_better = entries.score_higher_is_better;
 
         // Filter results by validity (for index implementations that don't filter internally)
+        let mut kept_positions = Vec::new();
         for (i, row_id) in entries.row_ids.iter().enumerate() {
             if let Some(pos) = record.row_ids.iter().position(|r| r == row_id)
                 && record.validity.is_valid(pos)
             {
                 all_row_ids.push(*row_id);
                 all_scores.push(entries.scores[i]);
+                kept_positions.push(i as u32);
             }
         }
-        all_dynamic_column_groups.push(entries.dynamic_columns);
+
+        // Filter dynamic columns for this delta
+        if !entries.dynamic_columns.is_empty() {
+            let indices = arrow::array::UInt32Array::from(kept_positions);
+            let filtered_dynamic_columns: Vec<DynamicColumn> = entries
+                .dynamic_columns
+                .into_iter()
+                .map(|col| {
+                    let filtered_values =
+                        arrow::compute::take(col.values.as_ref(), &indices, None)?;
+                    Ok(DynamicColumn {
+                        field: col.field,
+                        values: filtered_values,
+                    })
+                })
+                .collect::<arrow::error::Result<Vec<_>>>()
+                .map_err(|e| ILError::internal(format!("Failed to filter dynamic columns: {e}")))?;
+            all_dynamic_column_groups.push(filtered_dynamic_columns);
+        }
     }
 
     // Merge dynamic columns from all deltas
@@ -293,7 +313,7 @@ async fn search_index_file(
     let index = index_builder.build()?;
 
     // File-based index: all rows are valid
-    let validity = RowValidity::new(1); // Placeholder, actual size not needed for file index
+    let validity = RowValidity::all_valid();
     let search_index_entries = index
         .search(search_query, dynamic_fields, &validity)
         .await?;

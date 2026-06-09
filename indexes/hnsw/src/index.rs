@@ -61,19 +61,27 @@ impl Index for HnswIndex {
             ))
         })?;
 
-        // Over-fetch to account for invalid rows, then filter
-        let fetch_limit = (query.limit * 2).min(self.hnsw.len()).max(query.limit);
-        let neighbors = self.hnsw.knn(&query.vector, fetch_limit);
-        let mut row_ids = Vec::with_capacity(neighbors.len());
-        let mut scores = Vec::with_capacity(neighbors.len());
-        for neighbor in neighbors {
-            if validity.is_valid(neighbor.index) {
-                row_ids.push(self.row_ids[neighbor.index]);
-                scores.push(neighbor.distance as f64);
-                if row_ids.len() >= query.limit {
-                    break;
+        // Keep fetching until we get enough valid rows or exhaust the index
+        let mut row_ids = Vec::new();
+        let mut scores = Vec::new();
+        let mut fetch_limit = query.limit;
+        let mut scanned_count = 0;
+        while row_ids.len() < query.limit && fetch_limit <= self.hnsw.len() {
+            let neighbors = self.hnsw.knn(&query.vector, fetch_limit);
+            for neighbor in &neighbors[scanned_count..] {
+                if validity.is_valid(neighbor.index) {
+                    row_ids.push(self.row_ids[neighbor.index]);
+                    scores.push(neighbor.distance as f64);
+                    if row_ids.len() >= query.limit {
+                        break;
+                    }
                 }
             }
+            scanned_count = neighbors.len();
+            if fetch_limit >= self.hnsw.len() {
+                break;
+            }
+            fetch_limit = (fetch_limit * 2).min(self.hnsw.len());
         }
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
