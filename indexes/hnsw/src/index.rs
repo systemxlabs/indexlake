@@ -51,6 +51,7 @@ impl Index for HnswIndex {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         let query = query.downcast_ref::<HnswSearchQuery>().ok_or_else(|| {
             ILError::index(format!(
@@ -58,7 +59,8 @@ impl Index for HnswIndex {
             ))
         })?;
 
-        let limit = std::cmp::min(query.limit, self.hnsw.len());
+        let effective_limit = limit.or(Some(query.limit)).unwrap_or(self.hnsw.len());
+        let limit = std::cmp::min(effective_limit, self.hnsw.len());
 
         let neighbors = self.hnsw.knn(&query.vector, limit);
         let mut row_ids = Vec::with_capacity(neighbors.len());

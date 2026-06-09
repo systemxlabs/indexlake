@@ -40,12 +40,14 @@ impl Index for BM25Index {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         let query = query
             .downcast_ref::<BM25SearchQuery>()
             .ok_or(ILError::index("Invalid query type"))?;
         let query_embedding = self.embedder.embed(&query.query);
-        let matches = self.scorer.matches(&query_embedding, query.limit)?;
+        let effective_limit = limit.or(query.limit);
+        let matches = self.scorer.matches(&query_embedding, effective_limit)?;
 
         let mut row_ids = Vec::with_capacity(matches.len());
         let mut scores = Vec::with_capacity(matches.len());

@@ -52,6 +52,7 @@ impl Index for RabitqIndex {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         let query = query.downcast_ref::<RabitqSearchQuery>().ok_or_else(|| {
             ILError::index(format!(
@@ -61,7 +62,10 @@ impl Index for RabitqIndex {
 
         let score_higher_is_better = matches!(self.metric, RabitqMetric::InnerProduct);
 
-        let params = BruteForceSearchParams { top_k: query.limit };
+        let effective_limit = limit.or(query.limit).unwrap_or(usize::MAX);
+        let params = BruteForceSearchParams {
+            top_k: effective_limit,
+        };
         let results = self
             .inner
             .search(&query.vector, params)

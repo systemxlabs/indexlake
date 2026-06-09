@@ -254,13 +254,9 @@ async fn search_inline_rows(
         builder.read_bytes(index_data)?;
         let index = builder.build()?;
 
-        // Search each delta independently
-        // TODO: per-delta search uses the query's user limit internally.
-        // When user limit is small and a delta has many stale rows, live rows
-        // may be missed. Proper fix requires separating candidate limit from
-        // user limit in the search interface (see PR discussion).
+        // Search without user limit (None); limit applied globally after merge
         let entries = index
-            .search(search.query.as_ref(), &search.dynamic_fields)
+            .search(search.query.as_ref(), &search.dynamic_fields, None)
             .await?;
         score_higher_is_better = entries.score_higher_is_better;
 
@@ -342,7 +338,9 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search_query, dynamic_fields).await?;
+    let search_index_entries = index
+        .search(search_query, dynamic_fields, search_query.limit())
+        .await?;
 
     Ok(search_index_entries)
 }
