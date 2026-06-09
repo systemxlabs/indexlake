@@ -272,39 +272,21 @@ async fn search_inline_rows(
 
         // Filter dynamic columns for this delta
         if !entries.dynamic_columns.is_empty() {
-            if kept_positions.is_empty() {
-                // All rows filtered out: create empty dynamic columns with same structure
-                let empty_dynamic_columns: Vec<DynamicColumn> = entries
-                    .dynamic_columns
-                    .into_iter()
-                    .map(|col| {
-                        let empty_array = arrow::array::new_null_array(col.field.data_type(), 0);
-                        DynamicColumn {
-                            field: col.field,
-                            values: empty_array,
-                        }
+            let indices = arrow::array::UInt32Array::from(kept_positions);
+            let filtered_dynamic_columns: Vec<DynamicColumn> = entries
+                .dynamic_columns
+                .into_iter()
+                .map(|col| {
+                    let filtered_values =
+                        arrow::compute::take(col.values.as_ref(), &indices, None)?;
+                    Ok(DynamicColumn {
+                        field: col.field,
+                        values: filtered_values,
                     })
-                    .collect();
-                all_dynamic_column_groups.push(empty_dynamic_columns);
-            } else {
-                let indices = arrow::array::UInt32Array::from(kept_positions);
-                let filtered_dynamic_columns: Vec<DynamicColumn> = entries
-                    .dynamic_columns
-                    .into_iter()
-                    .map(|col| {
-                        let filtered_values =
-                            arrow::compute::take(col.values.as_ref(), &indices, None)?;
-                        Ok(DynamicColumn {
-                            field: col.field,
-                            values: filtered_values,
-                        })
-                    })
-                    .collect::<arrow::error::Result<Vec<_>>>()
-                    .map_err(|e| {
-                        ILError::internal(format!("Failed to filter dynamic columns: {e}"))
-                    })?;
-                all_dynamic_column_groups.push(filtered_dynamic_columns);
-            }
+                })
+                .collect::<arrow::error::Result<Vec<_>>>()
+                .map_err(|e| ILError::internal(format!("Failed to filter dynamic columns: {e}")))?;
+            all_dynamic_column_groups.push(filtered_dynamic_columns);
         }
     }
 
