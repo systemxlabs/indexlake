@@ -5,7 +5,8 @@ use arrow::datatypes::{DataType, Field};
 use bm25::Embedder;
 use indexlake::expr::Expr;
 use indexlake::index::{
-    DynamicColumn, FilterIndexEntries, Index, IndexDefinitionRef, SearchIndexEntries, SearchQuery,
+    DynamicColumn, FilterIndexEntries, Index, IndexDefinitionRef, RowValidity, SearchIndexEntries,
+    SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 
@@ -40,6 +41,7 @@ impl Index for BM25Index {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        _validity: &RowValidity,
     ) -> ILResult<SearchIndexEntries> {
         let query = query
             .downcast_ref::<BM25SearchQuery>()
@@ -50,6 +52,11 @@ impl Index for BM25Index {
         let mut row_ids = Vec::with_capacity(matches.len());
         let mut scores = Vec::with_capacity(matches.len());
         for doc in matches {
+            // doc.id corresponds to the position in the original index
+            // We need to find the row_id from the scorer's row_ids
+            // For now, we can't easily map doc.id to validity position
+            // because the scorer doesn't expose the mapping
+            // TODO: Pass validity to scorer.matches for internal filtering
             row_ids.push(doc.id);
             scores.push(doc.score as f64);
         }
