@@ -59,8 +59,7 @@ impl Index for HnswIndex {
             ))
         })?;
 
-        let effective_limit = limit.unwrap_or(self.hnsw.len());
-        let limit = std::cmp::min(effective_limit, self.hnsw.len());
+        let limit = limit.unwrap_or(self.hnsw.len()).min(self.hnsw.len());
 
         let neighbors = self.hnsw.knn(&query.vector, limit);
         let mut row_ids = Vec::with_capacity(neighbors.len());

@@ -62,9 +62,8 @@ impl Index for RabitqIndex {
 
         let score_higher_is_better = matches!(self.metric, RabitqMetric::InnerProduct);
 
-        let effective_limit = limit.unwrap_or(usize::MAX);
         let params = BruteForceSearchParams {
-            top_k: effective_limit,
+            top_k: limit.unwrap_or(usize::MAX),
         };
         let results = self
             .inner

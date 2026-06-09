@@ -412,21 +412,12 @@ async fn index_scan_inline_rows(
     index_filter_assignment: &HashMap<String, Vec<usize>>,
     non_index_filters: &[Expr],
 ) -> ILResult<RecordBatchStream> {
-    let mut index_builder_map = HashMap::new();
     let mut index_ids = Vec::new();
     for (index_name, _) in index_filter_assignment.iter() {
         let index_def = table
             .index_manager
             .get_index(index_name)
             .ok_or_else(|| ILError::internal(format!("Index {index_name} not found")))?;
-        let kind = &index_def.kind;
-        let index_kind = table
-            .index_manager
-            .get_index_kind(kind)
-            .ok_or_else(|| ILError::internal(format!("Index kind {kind} not registered")))?;
-
-        let index_builder = index_kind.builder(index_def)?;
-        index_builder_map.insert(index_name, index_builder);
         index_ids.push(index_def.index_id);
     }
 
