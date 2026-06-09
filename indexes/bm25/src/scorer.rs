@@ -293,10 +293,10 @@ impl ArrowScorer {
         let mut scores = Vec::new();
         for (doc_id, &score) in scores_by_doc_id.iter().enumerate() {
             if score > 0.0 {
-                if let Some(validity) = validity {
-                    if !validity.is_valid(doc_id) {
-                        continue;
-                    }
+                if let Some(validity) = validity
+                    && !validity.is_valid(doc_id)
+                {
+                    continue;
                 }
                 scores.push(ScoredDocument {
                     id: self.row_ids[doc_id],
