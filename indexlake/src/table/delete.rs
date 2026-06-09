@@ -25,9 +25,19 @@ pub(crate) async fn process_delete_by_condition(
     condition: &Expr,
     matched_data_file_row_ids: HashMap<Uuid, HashSet<Uuid>>,
 ) -> ILResult<usize> {
-    // Directly delete inline rows
-    let inline_delete_count =
+    // Directly delete inline rows and collect deleted row_ids
+    let (inline_delete_count, deleted_row_ids) =
         delete_inline_rows(tx_helper, &table.table_id, &table.table_schema, condition).await?;
+
+    // Invalidate deleted rows in all inline indexes
+    if !deleted_row_ids.is_empty() {
+        let deleted_row_ids_set: HashSet<Uuid> = deleted_row_ids.into_iter().collect();
+        for index_id in table.index_manager.index_ids() {
+            tx_helper
+                .invalidate_inline_index_rows(&index_id, &deleted_row_ids_set)
+                .await?;
+        }
+    }
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
@@ -74,39 +84,31 @@ pub(crate) async fn delete_inline_rows(
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
     condition: &Expr,
-) -> ILResult<usize> {
+) -> ILResult<(usize, Vec<Uuid>)> {
     // TODO improve performance through projection
-    if tx_helper
-        .catalog
-        .supports_filter(condition, &table_schema.arrow_schema)?
-    {
-        tx_helper
-            .delete_inline_rows(table_id, std::slice::from_ref(condition), None)
-            .await
-    } else {
-        let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
-        let row_stream = tx_helper
-            .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
-            .await?;
-        let mut chunk_stream = row_stream.chunks(100);
-        let mut matched_row_ids = Vec::new();
-        while let Some(row_chunk) = chunk_stream.next().await {
-            let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
-            let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
-            let bool_array = condition.condition_eval(&record_batch)?;
-            for (i, v) in bool_array.iter().enumerate() {
-                if let Some(v) = v
-                    && v
-                {
-                    matched_row_ids.push(rows[i].uuid(0)?.expect("row_id is not null"));
-                }
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
+    let row_stream = tx_helper
+        .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
+        .await?;
+    let mut chunk_stream = row_stream.chunks(100);
+    let mut matched_row_ids = Vec::new();
+    while let Some(row_chunk) = chunk_stream.next().await {
+        let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
+        let bool_array = condition.condition_eval(&record_batch)?;
+        for (i, v) in bool_array.iter().enumerate() {
+            if let Some(v) = v
+                && v
+            {
+                matched_row_ids.push(rows[i].uuid(0)?.expect("row_id is not null"));
             }
         }
-        drop(chunk_stream);
-        tx_helper
-            .delete_inline_rows(table_id, &[], Some(matched_row_ids.as_slice()))
-            .await
     }
+    drop(chunk_stream);
+    let count = tx_helper
+        .delete_inline_rows(table_id, &[], Some(matched_row_ids.as_slice()))
+        .await?;
+    Ok((count, matched_row_ids))
 }
 
 pub(crate) async fn delete_data_file_rows_by_condition(
@@ -140,13 +142,23 @@ pub(crate) async fn process_delete_by_row_id_condition(
     table: &Table,
     row_id_condition: &Expr,
 ) -> ILResult<usize> {
-    let inline_delete_count = delete_inline_rows(
+    let (inline_delete_count, deleted_row_ids) = delete_inline_rows(
         tx_helper,
         &table.table_id,
         &table.table_schema,
         row_id_condition,
     )
     .await?;
+
+    // Invalidate deleted rows in all inline indexes
+    if !deleted_row_ids.is_empty() {
+        let deleted_row_ids_set: HashSet<Uuid> = deleted_row_ids.into_iter().collect();
+        for index_id in table.index_manager.index_ids() {
+            tx_helper
+                .invalidate_inline_index_rows(&index_id, &deleted_row_ids_set)
+                .await?;
+        }
+    }
 
     let data_file_records = tx_helper.get_data_files(&table.table_id).await?;
 
