@@ -61,7 +61,9 @@ pub trait IndexBuilder: Debug + Send + Sync {
 #[async_trait::async_trait]
 pub trait Index: Debug + Send + Sync {
     /// Search the index.
-    /// `limit` overrides the query's limit when provided (for per-segment search).
+    /// `limit` is the effective candidate limit; `None` means unbounded.
+    /// Implementations must not fall back to `query.limit()` — the caller
+    /// decides whether to apply the user limit (global merge) or not (per-segment search).
     async fn search(
         &self,
         query: &dyn SearchQuery,
