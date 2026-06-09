@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexOp,
-    InlineIndexRecord, InlineIndexSnapshot, rows_to_record_batch,
+    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
+    rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
 use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
@@ -431,17 +431,7 @@ async fn index_scan_inline_rows(
             .push(record);
     }
 
-    // build snapshots per index
-    let mut snapshots: HashMap<Uuid, InlineIndexSnapshot> = HashMap::new();
-    for (index_id, records) in &inline_index_records_map {
-        let mut snapshot = InlineIndexSnapshot::new();
-        for record in records {
-            snapshot.apply_delta(record);
-        }
-        snapshots.insert(*index_id, snapshot);
-    }
-
-    // filter row ids by indexes, per add delta
+    // filter row ids by indexes, per segment
     let mut filter_index_entries_list: Vec<FilterIndexEntries> = Vec::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
         let index_def = table
@@ -469,28 +459,17 @@ async fn index_scan_inline_rows(
             continue;
         };
 
-        let snapshot = snapshots.get(&index_def.index_id).ok_or_else(|| {
-            ILError::internal(format!("Snapshot not found for index {index_name}"))
-        })?;
-
-        // For each add delta, build a mini-index and filter
+        // For each segment, build a mini-index and filter
         for record in records {
-            if record.op != InlineIndexOp::Add {
-                continue;
-            }
-            let Some(ref index_data) = record.index_data else {
-                continue;
-            };
-
             let mut builder = index_kind.builder(index_def)?;
-            builder.read_bytes(index_data)?;
+            builder.read_bytes(&record.index_data)?;
             let index = builder.build()?;
             let entries = index.filter(&filters).await?;
 
-            // Only keep row_ids where this delta is the latest add and not deleted
-            for row_id in entries.row_ids {
-                if snapshot.is_live_at(&row_id, record.created_at) {
-                    all_valid_row_ids.insert(row_id);
+            // Only keep row_ids that are still valid in this segment
+            for (i, row_id) in entries.row_ids.iter().enumerate() {
+                if record.validity.is_valid(i) {
+                    all_valid_row_ids.insert(*row_id);
                 }
             }
         }

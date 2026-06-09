@@ -51,7 +51,6 @@ impl Index for HnswIndex {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
-        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         let query = query.downcast_ref::<HnswSearchQuery>().ok_or_else(|| {
             ILError::index(format!(
@@ -59,7 +58,7 @@ impl Index for HnswIndex {
             ))
         })?;
 
-        let limit = limit.unwrap_or(self.hnsw.len()).min(self.hnsw.len());
+        let limit = query.limit.min(self.hnsw.len());
 
         let neighbors = self.hnsw.knn(&query.vector, limit);
         let mut row_ids = Vec::with_capacity(neighbors.len());

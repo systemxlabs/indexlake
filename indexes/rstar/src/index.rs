@@ -35,7 +35,6 @@ impl Index for RStarIndex {
         &self,
         _query: &dyn SearchQuery,
         _dynamic_fields: &[String],
-        _limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         Err(ILError::not_supported(
             "RStar index does not support search",

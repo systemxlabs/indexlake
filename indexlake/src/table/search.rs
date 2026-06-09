@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord,
-    InlineIndexOp, InlineIndexRecord, InlineIndexSnapshot, Row, rows_to_record_batch,
+    InlineIndexRecord, Row, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
 use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
@@ -230,40 +230,29 @@ async fn search_inline_rows(
     search: &TableSearch,
     inline_index_records: Vec<InlineIndexRecord>,
 ) -> ILResult<SearchIndexEntries> {
-    // Build snapshot from all deltas
-    let mut snapshot = InlineIndexSnapshot::new();
-    for record in &inline_index_records {
-        snapshot.apply_delta(record);
-    }
-
-    // Search each add delta independently, then filter by snapshot
+    // Build set of valid row_ids per segment
     let mut all_row_ids = Vec::new();
     let mut all_scores = Vec::new();
     let mut all_dynamic_column_groups: Vec<Vec<DynamicColumn>> = Vec::new();
     let mut score_higher_is_better = false;
 
     for record in &inline_index_records {
-        if record.op != InlineIndexOp::Add {
-            continue;
-        }
-        let Some(ref index_data) = record.index_data else {
-            continue;
-        };
-
         let mut builder = index_kind.builder(index_def)?;
-        builder.read_bytes(index_data)?;
+        builder.read_bytes(&record.index_data)?;
         let index = builder.build()?;
 
-        // Search without user limit (None); limit applied globally after merge
         let entries = index
-            .search(search.query.as_ref(), &search.dynamic_fields, None)
+            .search(search.query.as_ref(), &search.dynamic_fields)
             .await?;
         score_higher_is_better = entries.score_higher_is_better;
 
-        // Only keep row_ids where this delta is the latest add and not deleted
+        // Only keep row_ids that are valid in this segment
         let mut kept_positions = Vec::new();
         for (i, row_id) in entries.row_ids.iter().enumerate() {
-            if snapshot.is_live_at(row_id, record.created_at) {
+            // Find position of this row_id in the segment's row_ids
+            if let Some(pos) = record.row_ids.iter().position(|r| r == row_id)
+                && record.validity.is_valid(pos)
+            {
                 all_row_ids.push(*row_id);
                 all_scores.push(entries.scores[i]);
                 kept_positions.push(i as u32);
@@ -320,9 +309,7 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index
-        .search(search_query, dynamic_fields, search_query.limit())
-        .await?;
+    let search_index_entries = index.search(search_query, dynamic_fields).await?;
 
     Ok(search_index_entries)
 }

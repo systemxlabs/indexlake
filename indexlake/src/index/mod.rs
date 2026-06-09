@@ -61,14 +61,10 @@ pub trait IndexBuilder: Debug + Send + Sync {
 #[async_trait::async_trait]
 pub trait Index: Debug + Send + Sync {
     /// Search the index.
-    /// `limit` is the effective candidate limit; `None` means unbounded.
-    /// Implementations must not fall back to `query.limit()` — the caller
-    /// decides whether to apply the user limit (global merge) or not (per-segment search).
     async fn search(
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
-        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries>;
 
     async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries>;

@@ -369,6 +369,13 @@ impl RowValidity {
     pub fn bytes(&self) -> &[u8] {
         &self.validity
     }
+
+    pub fn is_valid(&self, row_idx: usize) -> bool {
+        assert!(row_idx < self.num_rows);
+        let byte_idx = row_idx / 8;
+        let bit_idx = row_idx % 8;
+        (self.validity[byte_idx] & (1 << bit_idx)) != 0
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -494,39 +501,12 @@ impl IndexFileRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum InlineIndexOp {
-    Add,
-    Delete,
-}
-
-impl InlineIndexOp {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            InlineIndexOp::Add => "add",
-            InlineIndexOp::Delete => "delete",
-        }
-    }
-}
-
-impl TryFrom<&str> for InlineIndexOp {
-    type Error = ILError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "add" => Ok(InlineIndexOp::Add),
-            "delete" => Ok(InlineIndexOp::Delete),
-            _ => Err(ILError::invalid_input(format!("invalid op: {value}"))),
-        }
-    }
-}
-
 pub(crate) struct InlineIndexRecord {
     pub(crate) index_id: Uuid,
     pub(crate) created_at: i64,
-    pub(crate) op: InlineIndexOp,
     pub(crate) row_ids: Vec<Uuid>,
-    pub(crate) index_data: Option<Vec<u8>>,
+    pub(crate) validity: RowValidity,
+    pub(crate) index_data: Vec<u8>,
 }
 
 impl InlineIndexRecord {
@@ -534,9 +514,9 @@ impl InlineIndexRecord {
         CatalogSchema::new(vec![
             Column::new("index_id", CatalogDataType::Uuid, false),
             Column::new("created_at", CatalogDataType::Int64, false),
-            Column::new("op", CatalogDataType::Utf8, false),
             Column::new("row_ids", CatalogDataType::Binary, false),
-            Column::new("index_data", CatalogDataType::Binary, true),
+            Column::new("validity", CatalogDataType::Binary, false),
+            Column::new("index_data", CatalogDataType::Binary, false),
         ])
     }
 
@@ -544,68 +524,27 @@ impl InlineIndexRecord {
         Arc::new(Schema::new(vec![
             Field::new("index_id", DataType::FixedSizeBinary(16), false),
             Field::new("created_at", DataType::Int64, false),
-            Field::new("op", DataType::Utf8, false),
             Field::new("row_ids", DataType::LargeBinary, false),
-            Field::new("index_data", DataType::LargeBinary, true),
+            Field::new("validity", DataType::LargeBinary, false),
+            Field::new("index_data", DataType::LargeBinary, false),
         ]))
     }
 
     pub(crate) fn from_row(mut row: Row) -> ILResult<Self> {
         let index_id = row.uuid(0)?.expect("index_id is not null");
         let created_at = row.int64(1)?.expect("created_at is not null");
-        let op_str = row.utf8(2)?.expect("op is not null");
-        let op = InlineIndexOp::try_from(op_str.as_str())?;
-        let row_ids_bytes = row.binary_owned(3)?.expect("row_ids is not null");
+        let row_ids_bytes = row.binary_owned(2)?.expect("row_ids is not null");
         let row_ids = crate::utils::deserialize_row_ids(&row_ids_bytes)?;
-        let index_data = row.binary_owned(4)?;
+        let validity_bytes = row.binary_owned(3)?.expect("validity is not null");
+        let validity = RowValidity::from(validity_bytes, row_ids.len());
+        let index_data = row.binary_owned(4)?.expect("index_data is not null");
         Ok(Self {
             index_id,
             created_at,
-            op,
             row_ids,
+            validity,
             index_data,
         })
-    }
-}
-
-/// Snapshot of inline index deltas for a single index.
-/// Tracks the latest add created_at per row_id.
-/// A row_id not present in latest_add is either deleted or never added.
-#[derive(Debug, Clone)]
-pub(crate) struct InlineIndexSnapshot {
-    /// row_id -> created_at of the latest add delta containing this row_id
-    pub(crate) latest_add: HashMap<Uuid, i64>,
-}
-
-impl InlineIndexSnapshot {
-    pub(crate) fn new() -> Self {
-        Self {
-            latest_add: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn apply_delta(&mut self, record: &InlineIndexRecord) {
-        match record.op {
-            InlineIndexOp::Add => {
-                for row_id in &record.row_ids {
-                    self.latest_add.insert(*row_id, record.created_at);
-                }
-            }
-            InlineIndexOp::Delete => {
-                for row_id in &record.row_ids {
-                    self.latest_add.remove(row_id);
-                }
-            }
-        }
-    }
-
-    /// Check if a row_id is live at the given created_at
-    /// (i.e., this delta is the latest add for the row)
-    pub(crate) fn is_live_at(&self, row_id: &Uuid, created_at: i64) -> bool {
-        match self.latest_add.get(row_id) {
-            Some(latest) => *latest == created_at,
-            None => false,
-        }
     }
 }
 
