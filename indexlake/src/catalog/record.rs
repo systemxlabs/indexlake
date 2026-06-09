@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -569,20 +569,18 @@ impl InlineIndexRecord {
 }
 
 /// Snapshot of inline index deltas for a single index.
-/// Tracks latest add created_at per row_id and deleted row_ids.
+/// Tracks the latest add created_at per row_id.
+/// A row_id not present in latest_add is either deleted or never added.
 #[derive(Debug, Clone)]
 pub(crate) struct InlineIndexSnapshot {
     /// row_id -> created_at of the latest add delta containing this row_id
     pub(crate) latest_add: HashMap<Uuid, i64>,
-    /// Set of deleted row_ids
-    pub(crate) deleted: HashSet<Uuid>,
 }
 
 impl InlineIndexSnapshot {
     pub(crate) fn new() -> Self {
         Self {
             latest_add: HashMap::new(),
-            deleted: HashSet::new(),
         }
     }
 
@@ -591,23 +589,19 @@ impl InlineIndexSnapshot {
             InlineIndexOp::Add => {
                 for row_id in &record.row_ids {
                     self.latest_add.insert(*row_id, record.created_at);
-                    self.deleted.remove(row_id);
                 }
             }
             InlineIndexOp::Delete => {
                 for row_id in &record.row_ids {
                     self.latest_add.remove(row_id);
-                    self.deleted.insert(*row_id);
                 }
             }
         }
     }
 
-    /// Check if a row_id is live at the given created_at (i.e., this delta is the latest add and not deleted)
+    /// Check if a row_id is live at the given created_at
+    /// (i.e., this delta is the latest add for the row)
     pub(crate) fn is_live_at(&self, row_id: &Uuid, created_at: i64) -> bool {
-        if self.deleted.contains(row_id) {
-            return false;
-        }
         match self.latest_add.get(row_id) {
             Some(latest) => *latest == created_at,
             None => false,
