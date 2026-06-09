@@ -67,8 +67,8 @@ impl Index for RabitqIndex {
         // Keep fetching until we get enough valid rows or exhaust the index
         let mut row_ids = Vec::new();
         let mut scores = Vec::new();
-        let mut fetch_limit = query.limit;
         let total_vectors = self.row_ids.len();
+        let mut fetch_limit = query.limit.min(total_vectors);
         let mut scanned_count = 0;
         while row_ids.len() < query.limit && fetch_limit <= total_vectors {
             let params = BruteForceSearchParams { top_k: fetch_limit };

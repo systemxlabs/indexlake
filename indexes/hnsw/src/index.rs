@@ -64,9 +64,10 @@ impl Index for HnswIndex {
         // Keep fetching until we get enough valid rows or exhaust the index
         let mut row_ids = Vec::new();
         let mut scores = Vec::new();
-        let mut fetch_limit = query.limit;
+        let total = self.hnsw.len();
+        let mut fetch_limit = query.limit.min(total);
         let mut scanned_count = 0;
-        while row_ids.len() < query.limit && fetch_limit <= self.hnsw.len() {
+        while row_ids.len() < query.limit && fetch_limit <= total {
             let neighbors = self.hnsw.knn(&query.vector, fetch_limit);
             for neighbor in &neighbors[scanned_count..] {
                 if validity.is_valid(neighbor.index) {
@@ -78,10 +79,10 @@ impl Index for HnswIndex {
                 }
             }
             scanned_count = neighbors.len();
-            if fetch_limit >= self.hnsw.len() {
+            if fetch_limit >= total {
                 break;
             }
-            fetch_limit = (fetch_limit * 2).min(self.hnsw.len());
+            fetch_limit = (fetch_limit * 2).min(total);
         }
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
