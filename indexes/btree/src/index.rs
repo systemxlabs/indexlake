@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
+use std::collections::HashMap;
+
 use indexlake::catalog::Scalar;
 use indexlake::expr::{BinaryOp, Expr};
 use indexlake::index::{FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery};
@@ -40,7 +42,8 @@ impl PartialOrd for OrderedScalar {
 #[derive(Debug)]
 pub struct BTreeIndex {
     btree: BTreeMap<OrderedScalar, Vec<Uuid>>,
-    pub row_ids: Vec<Uuid>,
+    pub row_count: usize,
+    pub row_id_to_pos: HashMap<Uuid, usize>,
 }
 
 impl Default for BTreeIndex {
@@ -53,12 +56,14 @@ impl BTreeIndex {
     pub fn new() -> Self {
         Self {
             btree: BTreeMap::new(),
-            row_ids: Vec::new(),
+            row_count: 0,
+            row_id_to_pos: HashMap::new(),
         }
     }
 
     pub fn insert(&mut self, key: OrderedScalar, row_id: Uuid) -> ILResult<()> {
-        self.row_ids.push(row_id);
+        self.row_id_to_pos.insert(row_id, self.row_count);
+        self.row_count += 1;
         self.btree.entry(key).or_default().push(row_id);
         Ok(())
     }
@@ -142,12 +147,11 @@ impl Index for BTreeIndex {
             result_row_ids.retain(|id| filter_row_ids.contains(id));
         }
 
-        // Filter by validity: map UUID to position and check validity
+        // Filter by validity using O(1) HashMap lookup
         result_row_ids.retain(|row_id| {
-            self.row_ids
-                .iter()
-                .position(|r| r == row_id)
-                .map(|pos| validity.is_valid(pos).unwrap_or(false))
+            self.row_id_to_pos
+                .get(row_id)
+                .map(|&pos| validity.is_valid(pos).unwrap_or(false))
                 .unwrap_or(false)
         });
 

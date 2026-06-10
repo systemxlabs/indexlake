@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use arrow::array::{Array, ArrayRef, AsArray, FixedSizeBinaryArray, Float64Builder, RecordBatch};
@@ -135,7 +136,8 @@ impl RStarIndexBuilder {
             .map(|batch| batch.num_rows())
             .sum();
         let mut rtree_objects = Vec::with_capacity(num_rows);
-        let mut row_ids = Vec::with_capacity(num_rows);
+        let mut row_count = 0;
+        let mut row_id_to_pos = HashMap::with_capacity(num_rows);
         for batch in self.index_batches.iter() {
             let row_id_array = batch.column(0).as_fixed_size_binary().clone();
             let xmin_array = batch.column(1).as_primitive::<Float64Type>().clone();
@@ -154,14 +156,16 @@ impl RStarIndexBuilder {
                     rtree_objects.push(object);
                 }
                 // Always track row_id for validity position mapping
-                row_ids.push(row_id);
+                row_id_to_pos.insert(row_id, row_count);
+                row_count += 1;
             }
         }
         let rtree = RTree::bulk_load(rtree_objects);
         Ok(RStarIndex {
             rtree,
             params: self.params.clone(),
-            row_ids,
+            row_count,
+            row_id_to_pos,
         })
     }
 }
