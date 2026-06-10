@@ -4,8 +4,8 @@ use arrow::array::ArrayRef;
 use uuid::Uuid;
 
 use crate::catalog::{
-    INTERNAL_ROW_ID_FIELD_NAME, InlineIndexRecord, RowValidity, Scalar, TransactionHelper,
-    inline_row_table_name,
+    CatalogDataType, CatalogSchema, Column, INTERNAL_ROW_ID_FIELD_NAME, RowValidity, Scalar,
+    TransactionHelper, inline_row_table_name,
 };
 use crate::expr::Expr;
 use crate::{ILError, ILResult};
@@ -170,13 +170,17 @@ impl TransactionHelper {
             return Ok(0);
         }
 
-        // Fetch all inline index records for this index
-        let schema = std::sync::Arc::new(InlineIndexRecord::catalog_schema());
+        // Fetch only the columns we need to invalidate rows
+        let schema = std::sync::Arc::new(CatalogSchema::new(vec![
+            Column::new("index_id", CatalogDataType::Uuid, false),
+            Column::new("created_at", CatalogDataType::Int64, false),
+            Column::new("row_ids", CatalogDataType::Binary, false),
+            Column::new("validity", CatalogDataType::Binary, false),
+        ]));
         let rows = self
             .query_rows(
                 &format!(
-                    "SELECT {} FROM indexlake_inline_index WHERE index_id = {} ORDER BY created_at ASC",
-                    schema.select_items(self.catalog.as_ref()).join(", "),
+                    "SELECT index_id, created_at, row_ids, validity FROM indexlake_inline_index WHERE index_id = {} ORDER BY created_at ASC",
                     self.catalog.sql_uuid_literal(index_id),
                 ),
                 schema,
@@ -185,12 +189,16 @@ impl TransactionHelper {
 
         let mut updated_count = 0;
 
-        for row in rows {
-            let record = InlineIndexRecord::from_row(row)?;
+        for mut row in rows {
+            let idx_id = row.uuid(0)?.expect("index_id is not null");
+            let idx_created_at = row.int64(1)?.expect("created_at is not null");
+            let row_ids_bytes = row.binary_owned(2)?.expect("row_ids is not null");
+            let row_ids = crate::utils::deserialize_row_ids(&row_ids_bytes)?;
+            let validity_bytes = row.binary_owned(3)?.expect("validity is not null");
+            let mut validity = RowValidity::from(validity_bytes, row_ids.len());
             let mut modified = false;
-            let mut validity = record.validity.clone();
 
-            for (i, row_id) in record.row_ids.iter().enumerate() {
+            for (i, row_id) in row_ids.iter().enumerate() {
                 if invalid_row_ids.contains(row_id) && validity.is_valid(i) {
                     validity.set(i, false);
                     modified = true;
@@ -204,8 +212,8 @@ impl TransactionHelper {
                     .execute(&format!(
                         "UPDATE indexlake_inline_index SET validity = {} WHERE index_id = {} AND created_at = {}",
                         self.catalog.sql_binary_literal(validity.bytes()),
-                        self.catalog.sql_uuid_literal(&record.index_id),
-                        record.created_at,
+                        self.catalog.sql_uuid_literal(&idx_id),
+                        idx_created_at,
                     ))
                     .await?;
                 updated_count += update_count;
