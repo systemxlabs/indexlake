@@ -603,7 +603,7 @@ impl CatalogHelper {
         let rows = self
             .query_rows(
                 &format!(
-                    "SELECT {} FROM indexlake_inline_index WHERE index_id IN ({})",
+                    "SELECT {} FROM indexlake_inline_index WHERE index_id IN ({}) ORDER BY created_at ASC",
                     schema.select_items(self.catalog.as_ref()).join(", "),
                     index_ids
                         .iter()

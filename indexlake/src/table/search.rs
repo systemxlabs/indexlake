@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord,
-    InlineIndexRecord, Row, rows_to_record_batch,
+    InlineIndexRecord, Row, RowValidity, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
 use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
@@ -143,6 +143,7 @@ pub(crate) async fn process_search(
         let index_def = index_def.clone();
         let search_query = search.query.clone();
         let dynamic_fields = search.dynamic_fields.clone();
+        let validity = data_file_record.validity.clone();
         let handle = tokio::spawn(async move {
             let search_entries = search_index_file(
                 storage.as_ref(),
@@ -151,6 +152,7 @@ pub(crate) async fn process_search(
                 search_query.as_ref(),
                 &index_file_record,
                 &dynamic_fields,
+                &validity,
             )
             .await?;
             Ok::<_, ILError>((data_file_id, search_entries))
@@ -230,19 +232,45 @@ async fn search_inline_rows(
     search: &TableSearch,
     inline_index_records: Vec<InlineIndexRecord>,
 ) -> ILResult<SearchIndexEntries> {
-    let mut index_builder = index_kind.builder(index_def)?;
+    // Build set of valid row_ids per segment
+    let mut all_row_ids = Vec::new();
+    let mut all_scores = Vec::new();
+    let mut all_dynamic_column_groups: Vec<Vec<DynamicColumn>> = Vec::new();
+    let mut score_higher_is_better = false;
 
-    for record in inline_index_records {
-        index_builder.read_bytes(&record.index_data)?;
+    for record in &inline_index_records {
+        let mut builder = index_kind.builder(index_def)?;
+        builder.read_bytes(&record.index_data)?;
+        let index = builder.build()?;
+
+        let entries = index
+            .search(
+                search.query.as_ref(),
+                &search.dynamic_fields,
+                &record.validity,
+            )
+            .await?;
+        score_higher_is_better = entries.score_higher_is_better;
+        all_row_ids.extend(entries.row_ids);
+        all_scores.extend(entries.scores);
+        if !entries.dynamic_columns.is_empty() {
+            all_dynamic_column_groups.push(entries.dynamic_columns);
+        }
     }
 
-    let index = index_builder.build()?;
+    // Merge dynamic columns from all deltas
+    let merged_dynamic_columns = if all_dynamic_column_groups.is_empty() {
+        Vec::new()
+    } else {
+        concat_dynamic_columns(&all_dynamic_column_groups)?
+    };
 
-    let search_index_entries = index
-        .search(search.query.as_ref(), &search.dynamic_fields)
-        .await?;
-
-    Ok(search_index_entries)
+    Ok(SearchIndexEntries {
+        row_ids: all_row_ids,
+        scores: all_scores,
+        score_higher_is_better,
+        dynamic_columns: merged_dynamic_columns,
+    })
 }
 
 async fn search_index_file(
@@ -252,6 +280,7 @@ async fn search_index_file(
     search_query: &dyn SearchQuery,
     index_file_record: &IndexFileRecord,
     dynamic_fields: &[String],
+    validity: &RowValidity,
 ) -> ILResult<SearchIndexEntries> {
     let index_file = storage.open(&index_file_record.relative_path).await?;
 
@@ -260,7 +289,7 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search_query, dynamic_fields).await?;
+    let search_index_entries = index.search(search_query, dynamic_fields, validity).await?;
 
     Ok(search_index_entries)
 }

@@ -175,8 +175,12 @@ impl TransactionHelper {
             .collect();
         let row_ids_arr =
             LargeBinaryArray::from_iter_values(row_ids_bytes.iter().map(|b| b.as_slice()));
+        let validity_bytes: Vec<Vec<u8>> = inline_indexes
+            .iter()
+            .map(|r| r.validity.bytes().to_vec())
+            .collect();
         let validity_arr =
-            LargeBinaryArray::from_iter_values(inline_indexes.iter().map(|r| r.validity.bytes()));
+            LargeBinaryArray::from_iter_values(validity_bytes.iter().map(|b| b.as_slice()));
         let index_data_arr = LargeBinaryArray::from_iter_values(
             inline_indexes.iter().map(|r| r.index_data.as_slice()),
         );

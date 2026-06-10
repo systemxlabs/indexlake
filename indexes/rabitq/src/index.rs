@@ -3,7 +3,9 @@ use std::sync::Arc;
 use arrow::array::Float64Array;
 use arrow::datatypes::{DataType, Field};
 use indexlake::expr::Expr;
-use indexlake::index::{DynamicColumn, FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{
+    DynamicColumn, FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery,
+};
 use indexlake::{ILError, ILResult};
 use uuid::Uuid;
 
@@ -52,6 +54,7 @@ impl Index for RabitqIndex {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        validity: &RowValidity,
     ) -> ILResult<SearchIndexEntries> {
         let query = query.downcast_ref::<RabitqSearchQuery>().ok_or_else(|| {
             ILError::index(format!(
@@ -61,15 +64,33 @@ impl Index for RabitqIndex {
 
         let score_higher_is_better = matches!(self.metric, RabitqMetric::InnerProduct);
 
-        let params = BruteForceSearchParams { top_k: query.limit };
-        let results = self
-            .inner
-            .search(&query.vector, params)
-            .map_err(|e| ILError::index(format!("RaBitQ brute force search failed: {e}")))?;
-        let (row_ids, scores): (Vec<Uuid>, Vec<f64>) = results
-            .into_iter()
-            .map(|r| (self.row_ids[r.id], r.score as f64))
-            .unzip();
+        // Keep fetching until we get enough valid rows or exhaust the index
+        let mut row_ids = Vec::new();
+        let mut scores = Vec::new();
+        let total_vectors = self.row_ids.len();
+        let mut fetch_limit = query.limit.min(total_vectors);
+        let mut scanned_count = 0;
+        while row_ids.len() < query.limit && fetch_limit <= total_vectors {
+            let params = BruteForceSearchParams { top_k: fetch_limit };
+            let results = self
+                .inner
+                .search(&query.vector, params)
+                .map_err(|e| ILError::index(format!("RaBitQ brute force search failed: {e}")))?;
+            for r in &results[scanned_count..] {
+                if validity.is_valid(r.id) {
+                    row_ids.push(self.row_ids[r.id]);
+                    scores.push(r.score as f64);
+                    if row_ids.len() >= query.limit {
+                        break;
+                    }
+                }
+            }
+            scanned_count = results.len();
+            if fetch_limit >= total_vectors {
+                break;
+            }
+            fetch_limit = (fetch_limit * 2).min(total_vectors);
+        }
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
         for dynamic_field in dynamic_fields {

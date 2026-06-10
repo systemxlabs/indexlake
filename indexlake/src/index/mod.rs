@@ -6,6 +6,7 @@ pub use manager::*;
 use uuid::Uuid;
 
 use crate::ILResult;
+pub use crate::catalog::RowValidity;
 use crate::expr::Expr;
 use crate::storage::{InputFile, OutputFile};
 use arrow::array::{ArrayRef, RecordBatch};
@@ -60,10 +61,15 @@ pub trait IndexBuilder: Debug + Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Index: Debug + Send + Sync {
+    /// Search the index.
+    /// `validity` indicates which rows in the index are valid.
+    /// Index implementations must filter out invalid rows internally
+    /// so that they do not occupy result slots.
     async fn search(
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        validity: &RowValidity,
     ) -> ILResult<SearchIndexEntries>;
 
     async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries>;

@@ -5,7 +5,8 @@ use arrow::datatypes::{DataType, Field};
 use bm25::Embedder;
 use indexlake::expr::Expr;
 use indexlake::index::{
-    DynamicColumn, FilterIndexEntries, Index, IndexDefinitionRef, SearchIndexEntries, SearchQuery,
+    DynamicColumn, FilterIndexEntries, Index, IndexDefinitionRef, RowValidity, SearchIndexEntries,
+    SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 
@@ -40,12 +41,15 @@ impl Index for BM25Index {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        validity: &RowValidity,
     ) -> ILResult<SearchIndexEntries> {
         let query = query
             .downcast_ref::<BM25SearchQuery>()
             .ok_or(ILError::index("Invalid query type"))?;
         let query_embedding = self.embedder.embed(&query.query);
-        let matches = self.scorer.matches(&query_embedding, query.limit)?;
+        let matches = self
+            .scorer
+            .matches(&query_embedding, query.limit, validity)?;
 
         let mut row_ids = Vec::with_capacity(matches.len());
         let mut scores = Vec::with_capacity(matches.len());
