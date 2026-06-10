@@ -10,13 +10,13 @@ use indexlake::{
     catalog::Catalog,
     expr::{col, lit},
     storage::{DataFileFormat, DirEntry, EntryMode, Storage},
-    table::{TableConfig, TableCreation, TableInsertion, TableOptimization, TableUpdate},
+    table::{TableConfig, TableCreation, TableInsertion, TableOptimization, TableScan, TableUpdate},
 };
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite,
     data::prepare_simple_testing_table,
     init_env_logger, storage_fs, storage_s3,
-    utils::{assert_data_file_count, assert_inline_row_count, full_table_scan, timestamp_millis},
+    utils::{assert_data_file_count, assert_inline_row_count, full_table_scan, table_scan, timestamp_millis},
 };
 
 #[rstest::rstest]
@@ -232,14 +232,15 @@ async fn rebuild_inline_indexes(
         .optimize(TableOptimization::RebuildInlineIndexes { index_names: None })
         .await?;
 
-    // Verify data is intact after rebuild
-    let table_str = full_table_scan(&table).await?;
+    // Verify data via index scan: filter on age triggers BTree index scan
     // prepare_simple_testing_table creates 4 rows (Alice 20, Bob 21, Charlie 22, David 23)
     // which get dumped to data files. We added 2 inline rows (Alice 30, Bob 25)
-    // and updated Bob->Updated. Rebuild consolidates inline indexes but data files unchanged.
+    // and updated Bob->Updated. Filter age>22 triggers index scan, returning only rows >22.
+    let scan = TableScan::default().with_filters(vec![col("age").gt(lit(22))]);
+    let table_str = table_scan(&table, scan).await?;
     assert_eq!(
         table_str,
-        "+---------+-----+\n| name    | age |\n+---------+-----+\n| Alice   | 20  |\n| Bob     | 21  |\n| Charlie | 22  |\n| David   | 23  |\n| Alice   | 30  |\n| Updated | 25  |\n+---------+-----+"
+        "+---------+-----+\n| name    | age |\n+---------+-----+\n| David   | 23  |\n| Alice   | 30  |\n| Updated | 25  |\n+---------+-----+"
     );
 
     Ok(())
