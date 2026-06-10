@@ -10,13 +10,18 @@ use indexlake::{
     catalog::Catalog,
     expr::{col, lit},
     storage::{DataFileFormat, DirEntry, EntryMode, Storage},
-    table::{TableConfig, TableCreation, TableInsertion, TableOptimization, TableUpdate},
+    table::{
+        TableConfig, TableCreation, TableInsertion, TableOptimization, TableScan, TableUpdate,
+    },
 };
 use indexlake_integration_tests::{
     catalog_postgres, catalog_sqlite,
     data::prepare_simple_testing_table,
     init_env_logger, storage_fs, storage_s3,
-    utils::{assert_data_file_count, assert_inline_row_count, full_table_scan, timestamp_millis},
+    utils::{
+        assert_data_file_count, assert_inline_row_count, full_table_scan, table_scan,
+        timestamp_millis,
+    },
 };
 
 #[rstest::rstest]
@@ -182,6 +187,94 @@ async fn merge_data_files(
 | Bob     | 21  |
 | Charlie | 22  |
 +---------+-----+"#
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() })]
+#[case(async { catalog_postgres().await }, async { storage_s3().await })]
+#[tokio::test(flavor = "multi_thread")]
+async fn rebuild_inline_indexes(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let mut client = Client::new(catalog, storage.clone());
+    client.register_index_kind(Arc::new(indexlake_index_btree::BTreeIndexKind));
+
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![
+        Field::new("name", DataType::Utf8, false),
+        Field::new("age", DataType::Int32, false),
+    ]));
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: table_schema.clone(),
+        config: TableConfig {
+            preferred_data_file_format: DataFileFormat::ParquetV2,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    client.create_table(table_creation).await?;
+
+    let table = client.load_table(&namespace_name, &table_name).await?;
+
+    // Create BTree index on age to enable index scan
+    let index_creation = indexlake::table::IndexCreation {
+        name: "idx_age".to_string(),
+        kind: "btree".to_string(),
+        key_columns: vec!["age".to_string()],
+        params: Arc::new(indexlake_index_btree::BTreeIndexParams {}),
+        concurrency: 1,
+        if_not_exists: false,
+    };
+    table.create_index(index_creation).await?;
+
+    // Reload table after create_index (takes ownership)
+    let table = client.load_table(&namespace_name, &table_name).await?;
+
+    // Insert data with try_dump(false) to keep inline rows
+    let batch = RecordBatch::try_new(
+        table_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie", "David"])),
+            Arc::new(Int32Array::from(vec![30, 25, 22, 23])),
+        ],
+    )?;
+    table
+        .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
+        .await?;
+
+    // Update to create additional inline index records
+    let update = TableUpdate {
+        set_map: HashMap::from([("name".to_string(), lit("Updated"))]),
+        condition: col("age").eq(lit(25)),
+    };
+    table.update(update).await?;
+
+    // Rebuild all inline indexes
+    table
+        .optimize(TableOptimization::RebuildInlineIndexes { index_names: None })
+        .await?;
+
+    // Verify via index scan: filter on age>22 triggers BTree index scan
+    let scan = TableScan::default().with_filters(vec![col("age").gt(lit(22))]);
+    let table_str = table_scan(&table, scan).await?;
+    assert_eq!(
+        table_str,
+        "+---------+-----+\n| name    | age |\n+---------+-----+\n| Alice   | 30  |\n| Updated | 25  |\n| David   | 23  |\n+---------+-----+"
     );
 
     Ok(())
