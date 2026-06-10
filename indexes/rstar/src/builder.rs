@@ -135,6 +135,7 @@ impl RStarIndexBuilder {
             .map(|batch| batch.num_rows())
             .sum();
         let mut rtree_objects = Vec::with_capacity(num_rows);
+        let mut row_ids = Vec::with_capacity(num_rows);
         for batch in self.index_batches.iter() {
             let row_id_array = batch.column(0).as_fixed_size_binary().clone();
             let xmin_array = batch.column(1).as_primitive::<Float64Type>().clone();
@@ -143,8 +144,8 @@ impl RStarIndexBuilder {
             let ymax_array = batch.column(4).as_primitive::<Float64Type>().clone();
 
             for i in 0..batch.num_rows() {
+                let row_id = Uuid::from_slice(row_id_array.value(i))?;
                 if !xmin_array.is_null(i) {
-                    let row_id = Uuid::from_slice(row_id_array.value(i))?;
                     let aabb = AABB::from_corners(
                         [xmin_array.value(i), ymin_array.value(i)],
                         [xmax_array.value(i), ymax_array.value(i)],
@@ -152,12 +153,15 @@ impl RStarIndexBuilder {
                     let object = IndexTreeObject { aabb, row_id };
                     rtree_objects.push(object);
                 }
+                // Always track row_id for validity position mapping
+                row_ids.push(row_id);
             }
         }
         let rtree = RTree::bulk_load(rtree_objects);
         Ok(RStarIndex {
             rtree,
             params: self.params.clone(),
+            row_ids,
         })
     }
 }

@@ -5,7 +5,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 
 use indexlake::catalog::Scalar;
 use indexlake::expr::{BinaryOp, Expr};
-use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery};
 use indexlake::{ILError, ILResult};
 use uuid::Uuid;
 
@@ -40,6 +40,7 @@ impl PartialOrd for OrderedScalar {
 #[derive(Debug)]
 pub struct BTreeIndex {
     btree: BTreeMap<OrderedScalar, Vec<Uuid>>,
+    pub row_ids: Vec<Uuid>,
 }
 
 impl Default for BTreeIndex {
@@ -52,10 +53,12 @@ impl BTreeIndex {
     pub fn new() -> Self {
         Self {
             btree: BTreeMap::new(),
+            row_ids: Vec::new(),
         }
     }
 
     pub fn insert(&mut self, key: OrderedScalar, row_id: Uuid) -> ILResult<()> {
+        self.row_ids.push(row_id);
         self.btree.entry(key).or_default().push(row_id);
         Ok(())
     }
@@ -121,7 +124,11 @@ impl Index for BTreeIndex {
         ))
     }
 
-    async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        filters: &[Expr],
+        validity: &RowValidity,
+    ) -> ILResult<FilterIndexEntries> {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
                 row_ids: Vec::new(),
@@ -134,6 +141,15 @@ impl Index for BTreeIndex {
             // TODO: optimize this by using a set
             result_row_ids.retain(|id| filter_row_ids.contains(id));
         }
+
+        // Filter by validity: map UUID to position and check validity
+        result_row_ids.retain(|row_id| {
+            self.row_ids
+                .iter()
+                .position(|r| r == row_id)
+                .map(|pos| validity.is_valid(pos).unwrap_or(false))
+                .unwrap_or(false)
+        });
 
         Ok(FilterIndexEntries {
             row_ids: result_row_ids,

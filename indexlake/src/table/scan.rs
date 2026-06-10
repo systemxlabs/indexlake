@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
+    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity,
     rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
@@ -464,16 +464,8 @@ async fn index_scan_inline_rows(
             let mut builder = index_kind.builder(index_def)?;
             builder.read_bytes(&record.index_data)?;
             let index = builder.build()?;
-            let entries = index.filter(&filters).await?;
-
-            // Only keep row_ids that are still valid in this segment
-            for row_id in entries.row_ids {
-                if let Some(pos) = record.row_ids.iter().position(|r| *r == row_id)
-                    && record.validity.is_valid(pos)?
-                {
-                    all_valid_row_ids.insert(row_id);
-                }
-            }
+            let entries = index.filter(&filters, &record.validity).await?;
+            all_valid_row_ids.extend(entries.row_ids);
         }
 
         filter_index_entries_list.push(FilterIndexEntries {
@@ -540,6 +532,7 @@ async fn index_scan_data_file(
         scan_filters,
         &index_file_records_map,
         index_filter_assignment,
+        &data_file_record.validity,
     )
     .await?;
 
@@ -573,6 +566,7 @@ async fn filter_index_files_row_ids(
     filters: &[Expr],
     index_file_records: &HashMap<Uuid, &IndexFileRecord>,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
+    validity: &RowValidity,
 ) -> ILResult<HashSet<Uuid>> {
     let mut filter_index_entries_list = Vec::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
@@ -604,7 +598,7 @@ async fn filter_index_files_row_ids(
 
         let index = index_builder.build()?;
 
-        let filter_index_entries = index.filter(&filters).await?;
+        let filter_index_entries = index.filter(&filters, validity).await?;
         filter_index_entries_list.push(filter_index_entries);
     }
 

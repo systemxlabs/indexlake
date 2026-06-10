@@ -115,7 +115,11 @@ impl Index for RabitqIndex {
         })
     }
 
-    async fn filter(&self, _filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        _filters: &[Expr],
+        _validity: &RowValidity,
+    ) -> ILResult<FilterIndexEntries> {
         Err(ILError::not_supported(
             "RaBitQ index does not support filter",
         ))
