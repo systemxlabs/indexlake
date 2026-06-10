@@ -21,7 +21,7 @@ use crate::{
 pub enum TableOptimization {
     CleanupOrphanFiles { last_modified_before: i64 },
     MergeDataFiles { valid_row_threshold: usize },
-    RebuildInlineIndexes { index_ids: Option<Vec<Uuid>> },
+    RebuildInlineIndexes { index_names: Option<Vec<String>> },
 }
 
 pub(crate) async fn process_table_optimization(
@@ -35,7 +35,24 @@ pub(crate) async fn process_table_optimization(
         TableOptimization::MergeDataFiles {
             valid_row_threshold,
         } => merge_data_files(table, valid_row_threshold).await,
-        TableOptimization::RebuildInlineIndexes { index_ids } => {
+        TableOptimization::RebuildInlineIndexes { index_names } => {
+            let index_ids = index_names
+                .as_ref()
+                .map(|names| {
+                    names
+                        .iter()
+                        .map(|name| {
+                            table
+                                .index_manager
+                                .get_index(name)
+                                .map(|def| def.index_id)
+                                .ok_or_else(|| {
+                                    ILError::invalid_input(format!("Index not found: {name}"))
+                                })
+                        })
+                        .collect::<ILResult<Vec<_>>>()
+                })
+                .transpose()?;
             rebuild_inline_indexes_from_scratch(table, index_ids.as_deref()).await
         }
     }

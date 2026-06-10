@@ -229,7 +229,7 @@ async fn rebuild_inline_indexes(
 
     // Rebuild all inline indexes - should complete without error
     table
-        .optimize(TableOptimization::RebuildInlineIndexes { index_ids: None })
+        .optimize(TableOptimization::RebuildInlineIndexes { index_names: None })
         .await?;
 
     // Verify data is still accessible via scan
