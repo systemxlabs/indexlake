@@ -42,7 +42,7 @@ impl PartialOrd for OrderedScalar {
 #[derive(Debug)]
 pub struct BTreeIndex {
     btree: BTreeMap<OrderedScalar, Vec<Uuid>>,
-    pub row_ids: Vec<Uuid>,
+    pub row_count: usize,
     pub row_id_to_pos: HashMap<Uuid, usize>,
 }
 
@@ -56,14 +56,14 @@ impl BTreeIndex {
     pub fn new() -> Self {
         Self {
             btree: BTreeMap::new(),
-            row_ids: Vec::new(),
+            row_count: 0,
             row_id_to_pos: HashMap::new(),
         }
     }
 
     pub fn insert(&mut self, key: OrderedScalar, row_id: Uuid) -> ILResult<()> {
-        self.row_id_to_pos.insert(row_id, self.row_ids.len());
-        self.row_ids.push(row_id);
+        self.row_id_to_pos.insert(row_id, self.row_count);
+        self.row_count += 1;
         self.btree.entry(key).or_default().push(row_id);
         Ok(())
     }

@@ -29,7 +29,7 @@ impl RTreeObject for IndexTreeObject {
 pub struct RStarIndex {
     pub rtree: RTree<IndexTreeObject>,
     pub params: RStarIndexParams,
-    pub row_ids: Vec<Uuid>,
+    pub row_count: usize,
     pub row_id_to_pos: HashMap<Uuid, usize>,
 }
 

@@ -132,8 +132,8 @@ impl IndexBuilder for BTreeIndexBuilder {
                     index.insert(key, row_id)?;
                 } else {
                     // Still track row_id for validity position mapping
-                    index.row_id_to_pos.insert(row_id, index.row_ids.len());
-                    index.row_ids.push(row_id);
+                    index.row_id_to_pos.insert(row_id, index.row_count);
+                    index.row_count += 1;
                 }
             }
         }
