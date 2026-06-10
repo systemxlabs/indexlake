@@ -186,3 +186,58 @@ async fn merge_data_files(
 
     Ok(())
 }
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() })]
+#[case(async { catalog_postgres().await }, async { storage_s3().await })]
+#[tokio::test(flavor = "multi_thread")]
+async fn rebuild_inline_indexes(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage.clone());
+    let table = prepare_simple_testing_table(&client, DataFileFormat::ParquetV2).await?;
+
+    // Insert data without triggering dump so inline indexes exist
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("name", DataType::Utf8, false),
+        Field::new("age", DataType::Int32, false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["Alice", "Bob"])),
+            Arc::new(Int32Array::from(vec![30, 25])),
+        ],
+    )?;
+    table
+        .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
+        .await?;
+
+    // Update to create additional inline index records with validity changes
+    let update = TableUpdate {
+        set_map: HashMap::from([("name".to_string(), lit("Updated"))]),
+        condition: col("age").eq(lit(25)),
+    };
+    table.update(update).await?;
+
+    // Rebuild all inline indexes - should complete without error
+    table
+        .optimize(TableOptimization::RebuildInlineIndexes { index_ids: None })
+        .await?;
+
+    // Verify data is still accessible via scan
+    let table_str = full_table_scan(&table).await?;
+    assert!(
+        !table_str.is_empty(),
+        "Table should not be empty after rebuild"
+    );
+
+    Ok(())
+}

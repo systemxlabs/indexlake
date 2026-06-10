@@ -21,7 +21,7 @@ use crate::{
 pub enum TableOptimization {
     CleanupOrphanFiles { last_modified_before: i64 },
     MergeDataFiles { valid_row_threshold: usize },
-    RebuildInlineIndexes,
+    RebuildInlineIndexes { index_ids: Option<Vec<Uuid>> },
 }
 
 pub(crate) async fn process_table_optimization(
@@ -35,18 +35,23 @@ pub(crate) async fn process_table_optimization(
         TableOptimization::MergeDataFiles {
             valid_row_threshold,
         } => merge_data_files(table, valid_row_threshold).await,
-        TableOptimization::RebuildInlineIndexes => rebuild_inline_indexes_from_scratch(table).await,
+        TableOptimization::RebuildInlineIndexes { index_ids } => {
+            rebuild_inline_indexes_from_scratch(table, index_ids.as_deref()).await
+        }
     }
 }
 
-async fn rebuild_inline_indexes_from_scratch(table: &Table) -> ILResult<()> {
+async fn rebuild_inline_indexes_from_scratch(
+    table: &Table,
+    index_ids: Option<&[Uuid]>,
+) -> ILResult<()> {
     let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
     rebuild_inline_indexes(
         &mut tx_helper,
         &table.table_id,
         &table.table_schema,
         &table.index_manager,
-        None,
+        index_ids,
     )
     .await?;
     tx_helper.commit().await?;
