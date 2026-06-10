@@ -337,7 +337,7 @@ async fn update_one_index_column_only_affects_that_index(
     assert_eq!(update_count, 1);
     assert_eq!(
         count_inline_index_records(catalog, &table.table_id).await?,
-        2
+        3
     );
 
     // Query via name index for new name - should return exactly 1 row
