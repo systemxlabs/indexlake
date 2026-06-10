@@ -232,11 +232,14 @@ async fn rebuild_inline_indexes(
         .optimize(TableOptimization::RebuildInlineIndexes { index_names: None })
         .await?;
 
-    // Verify data is still accessible via scan
+    // Verify data is intact after rebuild
     let table_str = full_table_scan(&table).await?;
-    assert!(
-        !table_str.is_empty(),
-        "Table should not be empty after rebuild"
+    // prepare_simple_testing_table creates 4 rows (Alice 20, Bob 21, Charlie 22, David 23)
+    // which get dumped to data files. We added 2 inline rows (Alice 30, Bob 25)
+    // and updated Bob->Updated. Rebuild consolidates inline indexes but data files unchanged.
+    assert_eq!(
+        table_str,
+        "+---------+-----+\n| name    | age |\n+---------+-----+\n| Alice   | 20  |\n| Bob     | 21  |\n| Charlie | 22  |\n| David   | 23  |\n| Alice   | 30  |\n| Updated | 25  |\n+---------+-----+"
     );
 
     Ok(())
