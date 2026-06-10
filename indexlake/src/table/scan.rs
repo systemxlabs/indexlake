@@ -16,7 +16,7 @@ use crate::catalog::{
     rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
-use crate::index::{FilterSupport, IndexManager};
+use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
 use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
@@ -412,9 +412,28 @@ async fn index_scan_inline_rows(
     index_filter_assignment: &HashMap<String, Vec<usize>>,
     non_index_filters: &[Expr],
 ) -> ILResult<RecordBatchStream> {
-    let mut index_builder_map = HashMap::new();
     let mut index_ids = Vec::new();
     for (index_name, _) in index_filter_assignment.iter() {
+        let index_def = table
+            .index_manager
+            .get_index(index_name)
+            .ok_or_else(|| ILError::internal(format!("Index {index_name} not found")))?;
+        index_ids.push(index_def.index_id);
+    }
+
+    // read inline index records ordered by created_at
+    let inline_index_records = catalog_helper.get_inline_indexes(&index_ids).await?;
+    let mut inline_index_records_map: HashMap<Uuid, Vec<InlineIndexRecord>> = HashMap::new();
+    for record in inline_index_records {
+        inline_index_records_map
+            .entry(record.index_id)
+            .or_default()
+            .push(record);
+    }
+
+    // filter row ids by indexes, per segment
+    let mut filter_index_entries_list: Vec<FilterIndexEntries> = Vec::new();
+    for (index_name, filter_indices) in index_filter_assignment.iter() {
         let index_def = table
             .index_manager
             .get_index(index_name)
@@ -425,48 +444,41 @@ async fn index_scan_inline_rows(
             .get_index_kind(kind)
             .ok_or_else(|| ILError::internal(format!("Index kind {kind} not registered")))?;
 
-        let index_builder = index_kind.builder(index_def)?;
-        index_builder_map.insert(index_name, index_builder);
-        index_ids.push(index_def.index_id);
-    }
-
-    // read inline index records
-    let inline_index_records = catalog_helper.get_inline_indexes(&index_ids).await?;
-    let mut inline_index_records_map: HashMap<Uuid, Vec<InlineIndexRecord>> = HashMap::new();
-    for record in inline_index_records {
-        inline_index_records_map
-            .entry(record.index_id)
-            .or_default()
-            .push(record);
-    }
-
-    // append index builders
-    for (_index_name, builder) in index_builder_map.iter_mut() {
-        let index_def = builder.index_def();
-
-        if let Some(records) = inline_index_records_map.get(&index_def.index_id) {
-            for record in records {
-                builder.read_bytes(&record.index_data)?;
-            }
-        }
-    }
-
-    // filter row ids by indexes
-    let mut filter_index_entries_list = Vec::new();
-    for (index_name, filter_indices) in index_filter_assignment.iter() {
-        let index_builder = index_builder_map.get_mut(index_name).ok_or_else(|| {
-            ILError::internal(format!("Index builder not found for index {index_name}"))
-        })?;
-
-        let index = index_builder.build()?;
-
         let filters = filter_indices
             .iter()
             .map(|idx| scan.filters[*idx].clone())
             .collect::<Vec<_>>();
 
-        let filter_index_entries = index.filter(&filters).await?;
-        filter_index_entries_list.push(filter_index_entries);
+        let mut all_valid_row_ids = HashSet::new();
+
+        let Some(records) = inline_index_records_map.get(&index_def.index_id) else {
+            // No inline index records for this index, return empty set
+            filter_index_entries_list.push(FilterIndexEntries {
+                row_ids: Vec::new(),
+            });
+            continue;
+        };
+
+        // For each segment, build a mini-index and filter
+        for record in records {
+            let mut builder = index_kind.builder(index_def)?;
+            builder.read_bytes(&record.index_data)?;
+            let index = builder.build()?;
+            let entries = index.filter(&filters).await?;
+
+            // Only keep row_ids that are still valid in this segment
+            for row_id in entries.row_ids {
+                if let Some(pos) = record.row_ids.iter().position(|r| *r == row_id)
+                    && record.validity.is_valid(pos)
+                {
+                    all_valid_row_ids.insert(row_id);
+                }
+            }
+        }
+
+        filter_index_entries_list.push(FilterIndexEntries {
+            row_ids: all_valid_row_ids.into_iter().collect(),
+        });
     }
 
     let mut intersected_row_ids = filter_index_entries_list[0]

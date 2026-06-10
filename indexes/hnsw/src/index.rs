@@ -4,7 +4,9 @@ use arrow::array::Float64Array;
 use arrow::datatypes::{DataType, Field};
 use hnsw::Hnsw;
 use indexlake::expr::Expr;
-use indexlake::index::{DynamicColumn, FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{
+    DynamicColumn, FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery,
+};
 use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
 use space::Knn;
@@ -51,6 +53,7 @@ impl Index for HnswIndex {
         &self,
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
+        validity: &RowValidity,
     ) -> ILResult<SearchIndexEntries> {
         let query = query.downcast_ref::<HnswSearchQuery>().ok_or_else(|| {
             ILError::index(format!(
@@ -58,14 +61,28 @@ impl Index for HnswIndex {
             ))
         })?;
 
-        let limit = std::cmp::min(query.limit, self.hnsw.len());
-
-        let neighbors = self.hnsw.knn(&query.vector, limit);
-        let mut row_ids = Vec::with_capacity(neighbors.len());
-        let mut scores = Vec::with_capacity(neighbors.len());
-        for neighbor in neighbors {
-            row_ids.push(self.row_ids[neighbor.index]);
-            scores.push(neighbor.distance as f64);
+        // Keep fetching until we get enough valid rows or exhaust the index
+        let mut row_ids = Vec::new();
+        let mut scores = Vec::new();
+        let total = self.hnsw.len();
+        let mut fetch_limit = query.limit.min(total);
+        let mut scanned_count = 0;
+        while row_ids.len() < query.limit && fetch_limit <= total {
+            let neighbors = self.hnsw.knn(&query.vector, fetch_limit);
+            for neighbor in &neighbors[scanned_count..] {
+                if validity.is_valid(neighbor.index) {
+                    row_ids.push(self.row_ids[neighbor.index]);
+                    scores.push(neighbor.distance as f64);
+                    if row_ids.len() >= query.limit {
+                        break;
+                    }
+                }
+            }
+            scanned_count = neighbors.len();
+            if fetch_limit >= total {
+                break;
+            }
+            fetch_limit = (fetch_limit * 2).min(total);
         }
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());

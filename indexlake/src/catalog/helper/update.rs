@@ -4,7 +4,8 @@ use arrow::array::ArrayRef;
 use uuid::Uuid;
 
 use crate::catalog::{
-    INTERNAL_ROW_ID_FIELD_NAME, RowValidity, Scalar, TransactionHelper, inline_row_table_name,
+    INTERNAL_ROW_ID_FIELD_NAME, InlineIndexRecord, RowValidity, Scalar, TransactionHelper,
+    inline_row_table_name,
 };
 use crate::expr::Expr;
 use crate::{ILError, ILResult};
@@ -156,5 +157,61 @@ impl TransactionHelper {
 
         self.update_data_file_validity(data_file_id, &old_validity, &validity)
             .await
+    }
+
+    /// Mark specific row_ids as invalid in inline index segments.
+    /// Returns the number of segments updated.
+    pub(crate) async fn invalidate_inline_index_rows(
+        &mut self,
+        index_id: &Uuid,
+        invalid_row_ids: &HashSet<Uuid>,
+    ) -> ILResult<usize> {
+        if invalid_row_ids.is_empty() {
+            return Ok(0);
+        }
+
+        // Fetch all inline index records for this index
+        let schema = std::sync::Arc::new(InlineIndexRecord::catalog_schema());
+        let rows = self
+            .query_rows(
+                &format!(
+                    "SELECT {} FROM indexlake_inline_index WHERE index_id = {} ORDER BY created_at ASC",
+                    schema.select_items(self.catalog.as_ref()).join(", "),
+                    self.catalog.sql_uuid_literal(index_id),
+                ),
+                schema,
+            )
+            .await?;
+
+        let mut updated_count = 0;
+
+        for row in rows {
+            let record = InlineIndexRecord::from_row(row)?;
+            let mut modified = false;
+            let mut validity = record.validity.clone();
+
+            for (i, row_id) in record.row_ids.iter().enumerate() {
+                if invalid_row_ids.contains(row_id) && validity.is_valid(i) {
+                    validity.set(i, false);
+                    modified = true;
+                }
+            }
+
+            if modified {
+                // Update the record in the database
+                let update_count = self
+                    .transaction
+                    .execute(&format!(
+                        "UPDATE indexlake_inline_index SET validity = {} WHERE index_id = {} AND created_at = {}",
+                        self.catalog.sql_binary_literal(validity.bytes()),
+                        self.catalog.sql_uuid_literal(&record.index_id),
+                        record.created_at,
+                    ))
+                    .await?;
+                updated_count += update_count;
+            }
+        }
+
+        Ok(updated_count)
     }
 }

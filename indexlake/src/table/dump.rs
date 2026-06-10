@@ -374,11 +374,12 @@ async fn flush_index_builders(
         let mut index_data = Vec::new();
         index_builder.write_bytes(&mut index_data)?;
         let index_id = index_builder.index_def().index_id;
+        let row_ids_vec = row_ids.to_vec();
         inline_index_records.push(InlineIndexRecord {
             index_id,
             created_at: timestamp_ms_from_now(Duration::ZERO),
-            row_ids: row_ids.to_vec(),
-            validity: RowValidity::new(row_ids.len()),
+            row_ids: row_ids_vec.clone(),
+            validity: RowValidity::new(row_ids_vec.len()),
             index_data,
         });
     }

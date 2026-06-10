@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME, IndexFileRecord,
-    InlineIndexRecord, Row, rows_to_record_batch,
+    InlineIndexRecord, Row, RowValidity, rows_to_record_batch,
 };
 use crate::expr::row_ids_in_list_expr;
 use crate::index::{DynamicColumn, IndexDefinitionRef, IndexKind, SearchIndexEntries, SearchQuery};
@@ -230,19 +230,71 @@ async fn search_inline_rows(
     search: &TableSearch,
     inline_index_records: Vec<InlineIndexRecord>,
 ) -> ILResult<SearchIndexEntries> {
-    let mut index_builder = index_kind.builder(index_def)?;
+    // Build set of valid row_ids per segment
+    let mut all_row_ids = Vec::new();
+    let mut all_scores = Vec::new();
+    let mut all_dynamic_column_groups: Vec<Vec<DynamicColumn>> = Vec::new();
+    let mut score_higher_is_better = false;
 
-    for record in inline_index_records {
-        index_builder.read_bytes(&record.index_data)?;
+    for record in &inline_index_records {
+        let mut builder = index_kind.builder(index_def)?;
+        builder.read_bytes(&record.index_data)?;
+        let index = builder.build()?;
+
+        let entries = index
+            .search(
+                search.query.as_ref(),
+                &search.dynamic_fields,
+                &record.validity,
+            )
+            .await?;
+        score_higher_is_better = entries.score_higher_is_better;
+
+        // Filter results by validity (for index implementations that don't filter internally)
+        let mut kept_positions = Vec::new();
+        for (i, row_id) in entries.row_ids.iter().enumerate() {
+            if let Some(pos) = record.row_ids.iter().position(|r| r == row_id)
+                && record.validity.is_valid(pos)
+            {
+                all_row_ids.push(*row_id);
+                all_scores.push(entries.scores[i]);
+                kept_positions.push(i as u32);
+            }
+        }
+
+        // Filter dynamic columns for this delta
+        if !entries.dynamic_columns.is_empty() {
+            let indices = arrow::array::UInt32Array::from(kept_positions);
+            let filtered_dynamic_columns: Vec<DynamicColumn> = entries
+                .dynamic_columns
+                .into_iter()
+                .map(|col| {
+                    let filtered_values =
+                        arrow::compute::take(col.values.as_ref(), &indices, None)?;
+                    Ok(DynamicColumn {
+                        field: col.field,
+                        values: filtered_values,
+                    })
+                })
+                .collect::<arrow::error::Result<Vec<_>>>()
+                .map_err(|e| ILError::internal(format!("Failed to filter dynamic columns: {e}")))?;
+            all_dynamic_column_groups.push(filtered_dynamic_columns);
+        }
     }
 
-    let index = index_builder.build()?;
+    // Merge dynamic columns from all deltas
+    let merged_dynamic_columns = if all_dynamic_column_groups.is_empty() {
+        Vec::new()
+    } else {
+        concat_dynamic_columns(&all_dynamic_column_groups)?
+    };
 
-    let search_index_entries = index
-        .search(search.query.as_ref(), &search.dynamic_fields)
-        .await?;
-
-    Ok(search_index_entries)
+    Ok(SearchIndexEntries {
+        row_ids: all_row_ids,
+        scores: all_scores,
+        score_higher_is_better,
+        dynamic_columns: merged_dynamic_columns,
+    })
 }
 
 async fn search_index_file(
@@ -260,7 +312,11 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search_query, dynamic_fields).await?;
+    // File-based index: all rows are valid
+    let validity = RowValidity::all_valid();
+    let search_index_entries = index
+        .search(search_query, dynamic_fields, &validity)
+        .await?;
 
     Ok(search_index_entries)
 }

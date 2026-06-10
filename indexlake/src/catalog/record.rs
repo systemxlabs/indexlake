@@ -318,13 +318,30 @@ impl DataFileRecord {
 pub struct RowValidity {
     pub(crate) validity: Vec<u8>,
     pub(crate) num_rows: usize,
+    /// When true, all rows are considered valid regardless of validity bitmap.
+    /// Used for file-based indexes where all rows are inherently valid.
+    pub(crate) all_valid: bool,
 }
 
 impl RowValidity {
     pub fn new(num_rows: usize) -> Self {
         let num_bytes = num_rows.div_ceil(8);
         let validity = vec![u8::MAX; num_bytes];
-        Self { validity, num_rows }
+        Self {
+            validity,
+            num_rows,
+            all_valid: false,
+        }
+    }
+
+    /// Create a RowValidity that considers all rows valid.
+    /// Used for file-based indexes where all indexed rows are valid.
+    pub fn all_valid() -> Self {
+        Self {
+            validity: vec![u8::MAX],
+            num_rows: 8,
+            all_valid: true,
+        }
     }
 
     pub fn from(bytes: Vec<u8>, num_rows: usize) -> Self {
@@ -332,6 +349,7 @@ impl RowValidity {
         Self {
             validity: bytes,
             num_rows,
+            all_valid: false,
         }
     }
 
@@ -371,6 +389,9 @@ impl RowValidity {
     }
 
     pub fn is_valid(&self, row_idx: usize) -> bool {
+        if self.all_valid {
+            return true;
+        }
         assert!(row_idx < self.num_rows);
         let byte_idx = row_idx / 8;
         let bit_idx = row_idx % 8;
