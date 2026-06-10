@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::utils::timestamp_ms_from_now;
 
 use crate::catalog::{
-    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexOp, InlineIndexRecord,
+    CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, RowValidity,
     TableRecord, TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::Expr;
@@ -350,9 +350,9 @@ pub(crate) async fn build_inline_indexes_for_one_index(
             inline_index_records.push(InlineIndexRecord {
                 index_id: index_builder.index_def().index_id,
                 created_at: timestamp_ms_from_now(Duration::ZERO),
-                op: InlineIndexOp::Add,
                 row_ids: all_row_ids.clone(),
-                index_data: Some(index_data),
+                validity: RowValidity::new(all_row_ids.len()),
+                index_data,
             });
             tokio::time::sleep(Duration::from_millis(1)).await;
             counter = 0;
@@ -369,9 +369,9 @@ pub(crate) async fn build_inline_indexes_for_one_index(
         inline_index_records.push(InlineIndexRecord {
             index_id: index_builder.index_def().index_id,
             created_at: timestamp_ms_from_now(Duration::ZERO),
-            op: InlineIndexOp::Add,
             row_ids: all_row_ids.clone(),
-            index_data: Some(index_data),
+            validity: RowValidity::new(all_row_ids.len()),
+            index_data,
         });
     }
 

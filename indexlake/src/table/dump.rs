@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::catalog::{
     Catalog, CatalogHelper, CatalogSchema, DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME,
-    IndexFileRecord, InlineIndexOp, InlineIndexRecord, RowStream, RowValidity, TransactionHelper,
+    IndexFileRecord, InlineIndexRecord, RowStream, RowValidity, TransactionHelper,
     rows_to_record_batch,
 };
 use crate::expr::col;
@@ -377,9 +377,9 @@ async fn flush_index_builders(
         inline_index_records.push(InlineIndexRecord {
             index_id,
             created_at: timestamp_ms_from_now(Duration::ZERO),
-            op: InlineIndexOp::Add,
             row_ids: row_ids.to_vec(),
-            index_data: Some(index_data),
+            validity: RowValidity::new(row_ids.len()),
+            index_data,
         });
     }
     Ok(())

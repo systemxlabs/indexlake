@@ -233,9 +233,7 @@ async fn search_inline_rows(
     let mut index_builder = index_kind.builder(index_def)?;
 
     for record in inline_index_records {
-        if let Some(ref index_data) = record.index_data {
-            index_builder.read_bytes(index_data)?;
-        }
+        index_builder.read_bytes(&record.index_data)?;
     }
 
     let index = index_builder.build()?;
