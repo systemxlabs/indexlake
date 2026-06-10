@@ -77,7 +77,7 @@ impl Index for RabitqIndex {
                 .search(&query.vector, params)
                 .map_err(|e| ILError::index(format!("RaBitQ brute force search failed: {e}")))?;
             for r in &results[scanned_count..] {
-                if validity.is_valid(r.id) {
+                if validity.is_valid(r.id)? {
                     row_ids.push(self.row_ids[r.id]);
                     scores.push(r.score as f64);
                     if row_ids.len() >= query.limit {
@@ -115,7 +115,11 @@ impl Index for RabitqIndex {
         })
     }
 
-    async fn filter(&self, _filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        _filters: &[Expr],
+        _validity: &RowValidity,
+    ) -> ILResult<FilterIndexEntries> {
         Err(ILError::not_supported(
             "RaBitQ index does not support filter",
         ))

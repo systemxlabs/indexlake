@@ -5,7 +5,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 
 use indexlake::catalog::Scalar;
 use indexlake::expr::{BinaryOp, Expr};
-use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery};
 use indexlake::{ILError, ILResult};
 use uuid::Uuid;
 
@@ -121,7 +121,11 @@ impl Index for BTreeIndex {
         ))
     }
 
-    async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        filters: &[Expr],
+        _validity: &RowValidity,
+    ) -> ILResult<FilterIndexEntries> {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
                 row_ids: Vec::new(),
