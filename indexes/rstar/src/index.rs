@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use std::collections::HashMap;
+
 use indexlake::catalog::Scalar;
 use indexlake::expr::{Expr, Function};
 use indexlake::index::{FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery};
@@ -28,6 +30,7 @@ pub struct RStarIndex {
     pub rtree: RTree<IndexTreeObject>,
     pub params: RStarIndexParams,
     pub row_ids: Vec<Uuid>,
+    pub row_id_to_pos: HashMap<Uuid, usize>,
 }
 
 #[async_trait::async_trait]
@@ -68,12 +71,11 @@ impl Index for RStarIndex {
             row_ids.retain(|id| filter_row_ids.contains(id));
         }
 
-        // Filter by validity: map UUID to position and check validity
+        // Filter by validity using O(1) HashMap lookup
         row_ids.retain(|row_id| {
-            self.row_ids
-                .iter()
-                .position(|r| r == row_id)
-                .map(|pos| validity.is_valid(pos).unwrap_or(false))
+            self.row_id_to_pos
+                .get(row_id)
+                .map(|&pos| validity.is_valid(pos).unwrap_or(false))
                 .unwrap_or(false)
         });
 
