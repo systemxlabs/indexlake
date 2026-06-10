@@ -31,10 +31,6 @@ pub struct RStarIndex {
 
 #[async_trait::async_trait]
 impl Index for RStarIndex {
-    fn num_rows(&self) -> usize {
-        self.rtree.size()
-    }
-
     async fn search(
         &self,
         _query: &dyn SearchQuery,

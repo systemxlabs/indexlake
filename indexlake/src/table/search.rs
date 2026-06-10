@@ -143,6 +143,7 @@ pub(crate) async fn process_search(
         let index_def = index_def.clone();
         let search_query = search.query.clone();
         let dynamic_fields = search.dynamic_fields.clone();
+        let validity = data_file_record.validity.clone();
         let handle = tokio::spawn(async move {
             let search_entries = search_index_file(
                 storage.as_ref(),
@@ -151,6 +152,7 @@ pub(crate) async fn process_search(
                 search_query.as_ref(),
                 &index_file_record,
                 &dynamic_fields,
+                &validity,
             )
             .await?;
             Ok::<_, ILError>((data_file_id, search_entries))
@@ -304,6 +306,7 @@ async fn search_index_file(
     search_query: &dyn SearchQuery,
     index_file_record: &IndexFileRecord,
     dynamic_fields: &[String],
+    validity: &RowValidity,
 ) -> ILResult<SearchIndexEntries> {
     let index_file = storage.open(&index_file_record.relative_path).await?;
 
@@ -312,13 +315,7 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    // File-based index: create validity bitmap with all rows valid
-    // (file-based indexes don't track per-row validity; filtering happens at table layer)
-    let num_rows = index.num_rows();
-    let validity = RowValidity::new(num_rows);
-    let search_index_entries = index
-        .search(search_query, dynamic_fields, &validity)
-        .await?;
+    let search_index_entries = index.search(search_query, dynamic_fields, validity).await?;
 
     Ok(search_index_entries)
 }
