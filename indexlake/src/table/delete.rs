@@ -26,8 +26,10 @@ pub(crate) async fn process_delete_by_condition(
     matched_data_file_row_ids: HashMap<Uuid, HashSet<Uuid>>,
 ) -> ILResult<usize> {
     // Directly delete inline rows and collect deleted row_ids
-    let (inline_delete_count, deleted_row_ids) =
+    let deleted_row_ids =
         delete_inline_rows(tx_helper, &table.table_id, &table.table_schema, condition).await?;
+
+    let inline_delete_count = deleted_row_ids.len();
 
     // Invalidate deleted rows in all inline indexes
     if !deleted_row_ids.is_empty() {
@@ -84,7 +86,7 @@ pub(crate) async fn delete_inline_rows(
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
     condition: &Expr,
-) -> ILResult<(usize, Vec<Uuid>)> {
+) -> ILResult<Vec<Uuid>> {
     // TODO improve performance through projection
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
@@ -105,10 +107,10 @@ pub(crate) async fn delete_inline_rows(
         }
     }
     drop(chunk_stream);
-    let count = tx_helper
+    tx_helper
         .delete_inline_rows(table_id, &[], Some(matched_row_ids.as_slice()))
         .await?;
-    Ok((count, matched_row_ids))
+    Ok(matched_row_ids)
 }
 
 pub(crate) async fn delete_data_file_rows_by_condition(
@@ -142,13 +144,15 @@ pub(crate) async fn process_delete_by_row_id_condition(
     table: &Table,
     row_id_condition: &Expr,
 ) -> ILResult<usize> {
-    let (inline_delete_count, deleted_row_ids) = delete_inline_rows(
+    let deleted_row_ids = delete_inline_rows(
         tx_helper,
         &table.table_id,
         &table.table_schema,
         row_id_condition,
     )
     .await?;
+
+    let inline_delete_count = deleted_row_ids.len();
 
     // Invalidate deleted rows in all inline indexes
     if !deleted_row_ids.is_empty() {
