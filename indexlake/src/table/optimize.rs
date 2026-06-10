@@ -13,7 +13,7 @@ use crate::{
     catalog::{DataFileRecord, IndexFileRecord, RowValidity, TransactionHelper},
     index::IndexBuilder,
     storage::{EntryMode, build_parquet_writer, read_data_file_by_record},
-    table::{Table, insert_task},
+    table::{Table, dump::rebuild_inline_indexes, insert_task},
     utils::extract_row_ids_from_record_batch,
 };
 
@@ -21,6 +21,7 @@ use crate::{
 pub enum TableOptimization {
     CleanupOrphanFiles { last_modified_before: i64 },
     MergeDataFiles { valid_row_threshold: usize },
+    RebuildInlineIndexes,
 }
 
 pub(crate) async fn process_table_optimization(
@@ -34,7 +35,22 @@ pub(crate) async fn process_table_optimization(
         TableOptimization::MergeDataFiles {
             valid_row_threshold,
         } => merge_data_files(table, valid_row_threshold).await,
+        TableOptimization::RebuildInlineIndexes => rebuild_inline_indexes_from_scratch(table).await,
     }
+}
+
+async fn rebuild_inline_indexes_from_scratch(table: &Table) -> ILResult<()> {
+    let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
+    rebuild_inline_indexes(
+        &mut tx_helper,
+        &table.table_id,
+        &table.table_schema,
+        &table.index_manager,
+        None,
+    )
+    .await?;
+    tx_helper.commit().await?;
+    Ok(())
 }
 
 async fn cleanup_orphan_files(table: &Table, last_modified_before: i64) -> ILResult<()> {
