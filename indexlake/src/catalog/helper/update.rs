@@ -206,17 +206,29 @@ impl TransactionHelper {
             }
 
             if modified {
-                // Update the record in the database
-                let update_count = self
-                    .transaction
-                    .execute(&format!(
-                        "UPDATE indexlake_inline_index SET validity = {} WHERE index_id = {} AND created_at = {}",
-                        self.catalog.sql_binary_literal(validity.bytes()),
-                        self.catalog.sql_uuid_literal(&idx_id),
-                        idx_created_at,
-                    ))
-                    .await?;
-                updated_count += update_count;
+                if validity.count_valid() == 0 {
+                    // All rows invalid: delete the record entirely
+                    let delete_count = self
+                        .transaction
+                        .execute(&format!(
+                            "DELETE FROM indexlake_inline_index WHERE index_id = {} AND created_at = {}",
+                            self.catalog.sql_uuid_literal(&idx_id),
+                            idx_created_at,
+                        ))
+                        .await?;
+                    updated_count += delete_count;
+                } else {
+                    let update_count = self
+                        .transaction
+                        .execute(&format!(
+                            "UPDATE indexlake_inline_index SET validity = {} WHERE index_id = {} AND created_at = {}",
+                            self.catalog.sql_binary_literal(validity.bytes()),
+                            self.catalog.sql_uuid_literal(&idx_id),
+                            idx_created_at,
+                        ))
+                        .await?;
+                    updated_count += update_count;
+                }
             }
         }
 
