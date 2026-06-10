@@ -144,16 +144,17 @@ impl RStarIndexBuilder {
             let ymax_array = batch.column(4).as_primitive::<Float64Type>().clone();
 
             for i in 0..batch.num_rows() {
+                let row_id = Uuid::from_slice(row_id_array.value(i))?;
                 if !xmin_array.is_null(i) {
-                    let row_id = Uuid::from_slice(row_id_array.value(i))?;
                     let aabb = AABB::from_corners(
                         [xmin_array.value(i), ymin_array.value(i)],
                         [xmax_array.value(i), ymax_array.value(i)],
                     );
                     let object = IndexTreeObject { aabb, row_id };
                     rtree_objects.push(object);
-                    row_ids.push(row_id);
                 }
+                // Always track row_id for validity position mapping
+                row_ids.push(row_id);
             }
         }
         let rtree = RTree::bulk_load(rtree_objects);

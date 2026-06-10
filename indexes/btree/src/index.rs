@@ -40,7 +40,7 @@ impl PartialOrd for OrderedScalar {
 #[derive(Debug)]
 pub struct BTreeIndex {
     btree: BTreeMap<OrderedScalar, Vec<Uuid>>,
-    row_ids: Vec<Uuid>,
+    pub row_ids: Vec<Uuid>,
 }
 
 impl Default for BTreeIndex {
@@ -113,6 +113,10 @@ impl BTreeIndex {
 
 #[async_trait::async_trait]
 impl Index for BTreeIndex {
+    fn num_rows(&self) -> usize {
+        self.row_ids.len()
+    }
+
     async fn search(
         &self,
         _query: &dyn SearchQuery,

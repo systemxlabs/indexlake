@@ -126,10 +126,13 @@ impl IndexBuilder for BTreeIndexBuilder {
             let key_column = batch.column(1);
 
             for i in 0..batch.num_rows() {
+                let row_id = Uuid::from_slice(row_id_array.value(i))?;
                 if key_column.is_valid(i) {
                     let key = OrderedScalar(Scalar::try_from_array(key_column, i)?);
-                    let row_id = Uuid::from_slice(row_id_array.value(i))?;
                     index.insert(key, row_id)?;
+                } else {
+                    // Still track row_id for validity position mapping
+                    index.row_ids.push(row_id);
                 }
             }
         }

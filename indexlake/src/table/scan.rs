@@ -596,8 +596,7 @@ async fn filter_index_files_row_ids(
 
         let index = index_builder.build()?;
 
-        // File-based index: validity filtering is handled at the data file level
-        let validity = RowValidity::new(1);
+        let validity = RowValidity::new(index.num_rows());
         let filter_index_entries = index.filter(&filters, &validity).await?;
         filter_index_entries_list.push(filter_index_entries);
     }
