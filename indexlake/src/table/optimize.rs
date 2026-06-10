@@ -62,35 +62,14 @@ async fn rebuild_inline_indexes_from_scratch(
     table: &Table,
     index_ids: Option<&[Uuid]>,
 ) -> ILResult<()> {
-    let task_id = format!("rebuild-inline-indexes-{}", table.table_id);
-    if insert_task(
-        &table.catalog,
-        task_id.clone(),
-        Duration::from_secs(24 * 60 * 60),
-    )
-    .await
-    .is_err()
-    {
-        debug!(
-            "[indexlake] Table {} already has a rebuild inline indexes task",
-            table.table_id
-        );
-        return Ok(());
-    }
-
-    let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
     rebuild_inline_indexes(
-        &mut tx_helper,
+        &table.catalog,
         &table.table_id,
         &table.table_schema,
         &table.index_manager,
         index_ids,
     )
-    .await?;
-
-    tx_helper.delete_task(&task_id).await?;
-    tx_helper.commit().await?;
-    Ok(())
+    .await
 }
 
 async fn cleanup_orphan_files(table: &Table, last_modified_before: i64) -> ILResult<()> {
