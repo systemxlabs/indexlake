@@ -54,10 +54,10 @@ pub(crate) async fn process_update_by_condition(
     update: TableUpdate,
     mut matched_data_file_rows: HashMap<Uuid, RecordBatchStream>,
 ) -> ILResult<usize> {
-    let (inline_update_count, updated_row_ids) =
-        update_inline_rows(tx_helper, table, &update).await?;
+    let updated_row_ids = update_inline_rows(tx_helper, table, &update).await?;
+    let inline_update_count = updated_row_ids.len();
 
-    if inline_update_count != 0 {
+    if !updated_row_ids.is_empty() {
         let updated_field_ids: Vec<String> = update.set_map.keys().cloned().collect();
         let affected_index_ids = table
             .index_manager
@@ -124,7 +124,7 @@ pub(crate) async fn update_inline_rows(
     tx_helper: &mut TransactionHelper,
     table: &Table,
     update: &TableUpdate,
-) -> ILResult<(usize, Vec<Uuid>)> {
+) -> ILResult<Vec<Uuid>> {
     // 1. Build projected schema: only scan columns needed for condition eval,
     //    update expression eval, and update targets.
     let mut projection_columns = HashSet::new();
@@ -192,7 +192,7 @@ pub(crate) async fn update_inline_rows(
     drop(chunk_stream);
 
     if matched_batches.is_empty() {
-        return Ok((0, Vec::new()));
+        return Ok(Vec::new());
     }
 
     // 3. Evaluate updated values in Arrow
@@ -236,7 +236,7 @@ pub(crate) async fn update_inline_rows(
     }
 
     // 6. Write back via row_id-targeted UPDATE
-    let count = tx_helper
+    tx_helper
         .update_inline_rows_by_row_ids(
             &table.table_id,
             &all_row_ids,
@@ -244,7 +244,7 @@ pub(crate) async fn update_inline_rows(
             &concatenated_arrays,
         )
         .await?;
-    Ok((count, all_row_ids))
+    Ok(all_row_ids)
 }
 
 pub(crate) async fn update_data_file_rows_by_matched_rows(
