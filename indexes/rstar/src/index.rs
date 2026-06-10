@@ -27,6 +27,7 @@ impl RTreeObject for IndexTreeObject {
 pub struct RStarIndex {
     pub rtree: RTree<IndexTreeObject>,
     pub params: RStarIndexParams,
+    pub row_ids: Vec<Uuid>,
 }
 
 #[async_trait::async_trait]
@@ -45,7 +46,7 @@ impl Index for RStarIndex {
     async fn filter(
         &self,
         filters: &[Expr],
-        _validity: &RowValidity,
+        validity: &RowValidity,
     ) -> ILResult<FilterIndexEntries> {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
@@ -66,6 +67,15 @@ impl Index for RStarIndex {
                 .collect::<HashSet<_>>();
             row_ids.retain(|id| filter_row_ids.contains(id));
         }
+
+        // Filter by validity: map UUID to position and check validity
+        row_ids.retain(|row_id| {
+            self.row_ids
+                .iter()
+                .position(|r| r == row_id)
+                .map(|pos| validity.is_valid(pos).unwrap_or(false))
+                .unwrap_or(false)
+        });
 
         Ok(FilterIndexEntries {
             row_ids: row_ids.into_iter().collect(),
