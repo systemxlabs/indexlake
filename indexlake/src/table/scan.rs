@@ -469,7 +469,7 @@ async fn index_scan_inline_rows(
             // Only keep row_ids that are still valid in this segment
             for row_id in entries.row_ids {
                 if let Some(pos) = record.row_ids.iter().position(|r| *r == row_id)
-                    && record.validity.is_valid(pos)
+                    && record.validity.is_valid(pos)?
                 {
                     all_valid_row_ids.insert(row_id);
                 }

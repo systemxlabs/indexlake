@@ -370,11 +370,16 @@ impl RowValidity {
         &self.validity
     }
 
-    pub fn is_valid(&self, row_idx: usize) -> bool {
-        assert!(row_idx < self.num_rows);
+    pub fn is_valid(&self, row_idx: usize) -> ILResult<bool> {
+        if row_idx >= self.num_rows {
+            return Err(ILError::internal(format!(
+                "RowValidity index out of bounds: {row_idx} >= {}",
+                self.num_rows
+            )));
+        }
         let byte_idx = row_idx / 8;
         let bit_idx = row_idx % 8;
-        (self.validity[byte_idx] & (1 << bit_idx)) != 0
+        Ok((self.validity[byte_idx] & (1 << bit_idx)) != 0)
     }
 }
 

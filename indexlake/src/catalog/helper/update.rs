@@ -199,7 +199,7 @@ impl TransactionHelper {
             let mut modified = false;
 
             for (i, row_id) in row_ids.iter().enumerate() {
-                if invalid_row_ids.contains(row_id) && validity.is_valid(i) {
+                if invalid_row_ids.contains(row_id) && validity.is_valid(i)? {
                     validity.set(i, false);
                     modified = true;
                 }

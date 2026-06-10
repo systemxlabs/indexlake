@@ -70,7 +70,7 @@ impl Index for HnswIndex {
         while row_ids.len() < query.limit && fetch_limit <= total {
             let neighbors = self.hnsw.knn(&query.vector, fetch_limit);
             for neighbor in &neighbors[scanned_count..] {
-                if validity.is_valid(neighbor.index) {
+                if validity.is_valid(neighbor.index)? {
                     row_ids.push(self.row_ids[neighbor.index]);
                     scores.push(neighbor.distance as f64);
                     if row_ids.len() >= query.limit {
