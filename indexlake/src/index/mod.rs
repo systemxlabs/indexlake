@@ -72,7 +72,11 @@ pub trait Index: Debug + Send + Sync {
         validity: &RowValidity,
     ) -> ILResult<SearchIndexEntries>;
 
-    async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries>;
+    async fn filter(
+        &self,
+        filters: &[Expr],
+        validity: &RowValidity,
+    ) -> ILResult<FilterIndexEntries>;
 }
 
 #[derive(Debug, Clone)]

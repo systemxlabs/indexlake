@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use indexlake::catalog::Scalar;
 use indexlake::expr::{Expr, Function};
-use indexlake::index::{FilterIndexEntries, Index, SearchIndexEntries, SearchQuery};
+use indexlake::index::{FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery};
 use indexlake::{ILError, ILResult};
 use rstar::{AABB, RTree, RTreeObject};
 use uuid::Uuid;
@@ -42,7 +42,11 @@ impl Index for RStarIndex {
         ))
     }
 
-    async fn filter(&self, filters: &[Expr]) -> ILResult<FilterIndexEntries> {
+    async fn filter(
+        &self,
+        filters: &[Expr],
+        _validity: &RowValidity,
+    ) -> ILResult<FilterIndexEntries> {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
                 row_ids: Vec::new(),

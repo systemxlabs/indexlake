@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::catalog::{
-    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord,
+    CatalogHelper, CatalogSchema, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity,
     rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
@@ -464,16 +464,8 @@ async fn index_scan_inline_rows(
             let mut builder = index_kind.builder(index_def)?;
             builder.read_bytes(&record.index_data)?;
             let index = builder.build()?;
-            let entries = index.filter(&filters).await?;
-
-            // Only keep row_ids that are still valid in this segment
-            for row_id in entries.row_ids {
-                if let Some(pos) = record.row_ids.iter().position(|r| *r == row_id)
-                    && record.validity.is_valid(pos)?
-                {
-                    all_valid_row_ids.insert(row_id);
-                }
-            }
+            let entries = index.filter(&filters, &record.validity).await?;
+            all_valid_row_ids.extend(entries.row_ids);
         }
 
         filter_index_entries_list.push(FilterIndexEntries {
@@ -604,7 +596,9 @@ async fn filter_index_files_row_ids(
 
         let index = index_builder.build()?;
 
-        let filter_index_entries = index.filter(&filters).await?;
+        // File-based index: validity filtering is handled at the data file level
+        let validity = RowValidity::new(1);
+        let filter_index_entries = index.filter(&filters, &validity).await?;
         filter_index_entries_list.push(filter_index_entries);
     }
 
