@@ -61,6 +61,9 @@ pub trait IndexBuilder: Debug + Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Index: Debug + Send + Sync {
+    /// Returns the number of rows indexed.
+    fn num_rows(&self) -> usize;
+
     /// Search the index.
     /// `validity` indicates which rows in the index are valid (not deleted/updated).
     async fn search(

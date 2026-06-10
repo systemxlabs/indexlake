@@ -80,6 +80,10 @@ struct Posting {
 }
 
 impl ArrowScorer {
+    pub fn num_rows(&self) -> usize {
+        self.row_ids.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.row_ids.is_empty()
     }

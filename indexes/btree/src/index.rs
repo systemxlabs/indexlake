@@ -110,6 +110,10 @@ impl BTreeIndex {
 
 #[async_trait::async_trait]
 impl Index for BTreeIndex {
+    fn num_rows(&self) -> usize {
+        self.btree.values().map(|v| v.len()).sum()
+    }
+
     async fn search(
         &self,
         _query: &dyn SearchQuery,

@@ -37,6 +37,10 @@ pub struct BM25Index {
 
 #[async_trait::async_trait]
 impl Index for BM25Index {
+    fn num_rows(&self) -> usize {
+        self.scorer.num_rows()
+    }
+
     async fn search(
         &self,
         query: &dyn SearchQuery,

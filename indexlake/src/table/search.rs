@@ -312,8 +312,10 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    // File-based index: all rows are valid
-    let validity = RowValidity::all_valid();
+    // File-based index: create validity bitmap with all rows valid
+    // (file-based indexes don't track per-row validity; filtering happens at table layer)
+    let num_rows = index.num_rows();
+    let validity = RowValidity::new(num_rows);
     let search_index_entries = index
         .search(search_query, dynamic_fields, &validity)
         .await?;
