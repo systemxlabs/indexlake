@@ -49,7 +49,7 @@ impl Index for BM25Index {
         let query_embedding = self.embedder.embed(&query.query);
         let matches = self
             .scorer
-            .matches(&query_embedding, query.limit, Some(validity))?;
+            .matches(&query_embedding, query.limit, validity)?;
 
         let mut row_ids = Vec::with_capacity(matches.len());
         let mut scores = Vec::with_capacity(matches.len());

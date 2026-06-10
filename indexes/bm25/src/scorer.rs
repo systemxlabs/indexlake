@@ -265,7 +265,7 @@ impl ArrowScorer {
         &self,
         query_embedding: &Embedding<u32>,
         limit: Option<usize>,
-        validity: Option<&indexlake::index::RowValidity>,
+        validity: &indexlake::index::RowValidity,
     ) -> ILResult<Vec<ScoredDocument<Uuid>>> {
         if self.row_ids.is_empty() || matches!(limit, Some(0)) {
             return Ok(Vec::new());
@@ -297,9 +297,7 @@ impl ArrowScorer {
         let mut scores = Vec::new();
         for (doc_id, &score) in scores_by_doc_id.iter().enumerate() {
             if score > 0.0 {
-                if let Some(validity) = validity
-                    && !validity.is_valid(doc_id)
-                {
+                if !validity.is_valid(doc_id) {
                     continue;
                 }
                 scores.push(ScoredDocument {
