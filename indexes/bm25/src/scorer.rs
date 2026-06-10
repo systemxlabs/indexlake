@@ -272,7 +272,8 @@ impl ArrowScorer {
         }
 
         let total_documents = self.row_ids.len();
-        let mut scores_by_doc_id = vec![0f32; total_documents];
+        // Use HashMap for sparse scoring: only track docs with non-zero scores
+        let mut scores_by_doc_id: HashMap<u32, f32> = HashMap::new();
         for token_index in query_embedding.indices() {
             let Some(postings) = self.postings.get(token_index) else {
                 continue;
@@ -290,21 +291,19 @@ impl ArrowScorer {
                     compute_idf(total_documents, token_frequency)
                 });
             for posting in postings {
-                scores_by_doc_id[posting.doc_id as usize] += idf * posting.value;
+                *scores_by_doc_id.entry(posting.doc_id).or_default() += idf * posting.value;
             }
         }
 
-        let mut scores = Vec::new();
-        for (doc_id, &score) in scores_by_doc_id.iter().enumerate() {
-            if score > 0.0 {
-                if !validity.is_valid(doc_id)? {
-                    continue;
-                }
-                scores.push(ScoredDocument {
-                    id: self.row_ids[doc_id],
-                    score,
-                });
+        let mut scores = Vec::with_capacity(scores_by_doc_id.len());
+        for (&doc_id, &score) in &scores_by_doc_id {
+            if !validity.is_valid(doc_id as usize)? {
+                continue;
             }
+            scores.push(ScoredDocument {
+                id: self.row_ids[doc_id as usize],
+                score,
+            });
         }
 
         if let Some(limit) = limit
