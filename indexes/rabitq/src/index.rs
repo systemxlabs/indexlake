@@ -50,10 +50,6 @@ impl std::fmt::Debug for RabitqIndex {
 
 #[async_trait::async_trait]
 impl Index for RabitqIndex {
-    fn num_rows(&self) -> usize {
-        self.row_ids.len()
-    }
-
     async fn search(
         &self,
         query: &dyn SearchQuery,

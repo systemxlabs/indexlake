@@ -77,8 +77,6 @@ pub trait Index: Debug + Send + Sync {
         filters: &[Expr],
         validity: &RowValidity,
     ) -> ILResult<FilterIndexEntries>;
-
-    fn num_rows(&self) -> usize;
 }
 
 #[derive(Debug, Clone)]

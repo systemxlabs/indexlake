@@ -532,6 +532,7 @@ async fn index_scan_data_file(
         scan_filters,
         &index_file_records_map,
         index_filter_assignment,
+        &data_file_record.validity,
     )
     .await?;
 
@@ -565,6 +566,7 @@ async fn filter_index_files_row_ids(
     filters: &[Expr],
     index_file_records: &HashMap<Uuid, &IndexFileRecord>,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
+    validity: &RowValidity,
 ) -> ILResult<HashSet<Uuid>> {
     let mut filter_index_entries_list = Vec::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
@@ -596,8 +598,7 @@ async fn filter_index_files_row_ids(
 
         let index = index_builder.build()?;
 
-        let validity = RowValidity::new(index.num_rows());
-        let filter_index_entries = index.filter(&filters, &validity).await?;
+        let filter_index_entries = index.filter(&filters, validity).await?;
         filter_index_entries_list.push(filter_index_entries);
     }
 
