@@ -251,36 +251,10 @@ async fn search_inline_rows(
             )
             .await?;
         score_higher_is_better = entries.score_higher_is_better;
-
-        // Filter results by validity (for index implementations that don't filter internally)
-        let mut kept_positions = Vec::new();
-        for (i, row_id) in entries.row_ids.iter().enumerate() {
-            if let Some(pos) = record.row_ids.iter().position(|r| r == row_id)
-                && record.validity.is_valid(pos)
-            {
-                all_row_ids.push(*row_id);
-                all_scores.push(entries.scores[i]);
-                kept_positions.push(i as u32);
-            }
-        }
-
-        // Filter dynamic columns for this delta
+        all_row_ids.extend(entries.row_ids);
+        all_scores.extend(entries.scores);
         if !entries.dynamic_columns.is_empty() {
-            let indices = arrow::array::UInt32Array::from(kept_positions);
-            let filtered_dynamic_columns: Vec<DynamicColumn> = entries
-                .dynamic_columns
-                .into_iter()
-                .map(|col| {
-                    let filtered_values =
-                        arrow::compute::take(col.values.as_ref(), &indices, None)?;
-                    Ok(DynamicColumn {
-                        field: col.field,
-                        values: filtered_values,
-                    })
-                })
-                .collect::<arrow::error::Result<Vec<_>>>()
-                .map_err(|e| ILError::internal(format!("Failed to filter dynamic columns: {e}")))?;
-            all_dynamic_column_groups.push(filtered_dynamic_columns);
+            all_dynamic_column_groups.push(entries.dynamic_columns);
         }
     }
 
