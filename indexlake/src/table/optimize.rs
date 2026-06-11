@@ -53,9 +53,24 @@ pub(crate) async fn process_table_optimization(
                         .collect::<ILResult<Vec<_>>>()
                 })
                 .transpose()?;
+            // Acquire task guard before starting transaction (prevents SQLite write lock conflict)
+            let task_id = format!("rebuild-inline-indexes-{}", table.table_id);
+            if insert_task(
+                &table.catalog,
+                task_id.clone(),
+                Duration::from_secs(24 * 60 * 60),
+            )
+            .await
+            .is_err()
+            {
+                debug!(
+                    "[indexlake] Table {} already has a rebuild task, skipping",
+                    table.table_id
+                );
+                return Ok(());
+            }
             let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
             rebuild_inline_indexes(
-                &table.catalog,
                 &mut tx_helper,
                 &table.table_id,
                 &table.table_schema,
@@ -63,6 +78,7 @@ pub(crate) async fn process_table_optimization(
                 index_ids.as_deref(),
             )
             .await?;
+            tx_helper.delete_task(&task_id).await?;
             tx_helper.commit().await
         }
     }

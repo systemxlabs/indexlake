@@ -102,6 +102,26 @@ impl DumpTask {
             return Ok(false);
         }
 
+        // Acquire rebuild task guard before starting the dump transaction
+        let rebuild_task_id = format!("rebuild-inline-indexes-{}", self.table_id);
+        if insert_task(
+            &self.catalog,
+            rebuild_task_id.clone(),
+            Duration::from_secs(24 * 60 * 60),
+        )
+        .await
+        .is_err()
+        {
+            debug!(
+                "[indexlake] Table {} already has a rebuild task, skipping dump",
+                self.table_id
+            );
+            let mut tx_helper = TransactionHelper::new(&self.catalog).await?;
+            tx_helper.delete_task(&self.task_id).await?;
+            tx_helper.commit().await?;
+            return Ok(false);
+        }
+
         let mut tx_helper = TransactionHelper::new(&self.catalog).await?;
         let mut inline_row_count = tx_helper.count_inline_rows(&self.table_id).await?;
         if inline_row_count < self.table_config.inline_row_count_limit as i64 {
@@ -219,7 +239,6 @@ impl DumpTask {
             .await?;
 
         rebuild_inline_indexes(
-            &self.catalog,
             &mut tx_helper,
             &self.table_id,
             &self.table_schema,
@@ -228,6 +247,7 @@ impl DumpTask {
         )
         .await?;
 
+        tx_helper.delete_task(&rebuild_task_id).await?;
         tx_helper.delete_task(&self.task_id).await?;
 
         tx_helper.commit().await?;
@@ -290,23 +310,12 @@ impl DumpTask {
 }
 
 pub(crate) async fn rebuild_inline_indexes(
-    catalog: &Arc<dyn Catalog>,
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
     index_manager: &IndexManager,
     index_ids: Option<&[Uuid]>,
 ) -> ILResult<()> {
-    // Task guard: prevent concurrent rebuilds (dump + optimize may race)
-    let task_id = format!("rebuild-inline-indexes-{table_id}");
-    if insert_task(catalog, task_id.clone(), Duration::from_secs(24 * 60 * 60))
-        .await
-        .is_err()
-    {
-        debug!("[indexlake] Table {table_id} already has a rebuild task, skipping");
-        return Ok(());
-    }
-
     let inline_index_records =
         full_build_inline_index_records(tx_helper, table_id, table_schema, || {
             index_manager.new_index_builders(index_ids)
@@ -321,9 +330,6 @@ pub(crate) async fn rebuild_inline_indexes(
     tx_helper
         .insert_inline_indexes(&inline_index_records)
         .await?;
-
-    // Release task guard
-    tx_helper.delete_task(&task_id).await?;
 
     Ok(())
 }
