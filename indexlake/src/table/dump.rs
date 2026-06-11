@@ -218,9 +218,6 @@ impl DumpTask {
             .insert_index_files(&all_index_file_records)
             .await?;
 
-        tx_helper.commit().await?;
-
-        // Rebuild inline indexes in a separate transaction with task guard
         rebuild_inline_indexes(
             &self.catalog,
             &mut tx_helper,
