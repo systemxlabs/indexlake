@@ -53,27 +53,19 @@ pub(crate) async fn process_table_optimization(
                         .collect::<ILResult<Vec<_>>>()
                 })
                 .transpose()?;
-            rebuild_inline_indexes_from_scratch(table, index_ids.as_deref()).await
+            let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
+            rebuild_inline_indexes(
+                &table.catalog,
+                &mut tx_helper,
+                &table.table_id,
+                &table.table_schema,
+                &table.index_manager,
+                index_ids.as_deref(),
+            )
+            .await?;
+            tx_helper.commit().await
         }
     }
-}
-
-async fn rebuild_inline_indexes_from_scratch(
-    table: &Table,
-    index_ids: Option<&[Uuid]>,
-) -> ILResult<()> {
-    let mut tx_helper = TransactionHelper::new(&table.catalog).await?;
-    rebuild_inline_indexes(
-        &table.catalog,
-        &mut tx_helper,
-        &table.table_id,
-        &table.table_schema,
-        &table.index_manager,
-        index_ids,
-    )
-    .await?;
-    tx_helper.commit().await?;
-    Ok(())
 }
 
 async fn cleanup_orphan_files(table: &Table, last_modified_before: i64) -> ILResult<()> {
