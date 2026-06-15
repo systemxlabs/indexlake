@@ -2,8 +2,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::{Schema, SchemaRef};
-use datafusion_common::stats::Precision;
-use datafusion_common::{DataFusionError, Statistics, project_schema};
+use datafusion_common::{DataFusionError, project_schema};
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::EquivalenceProperties;
 use datafusion_physical_plan::display::ProjectSchemaDisplay;
@@ -119,27 +118,6 @@ impl ExecutionPlan for IndexLakeSearchExec {
             self.schema(),
             stream,
         )))
-    }
-
-    fn partition_statistics(
-        &self,
-        partition: Option<usize>,
-    ) -> Result<Statistics, DataFusionError> {
-        if let Some(partition) = partition
-            && partition != 0
-        {
-            return Ok(Statistics {
-                num_rows: Precision::Absent,
-                total_byte_size: Precision::Absent,
-                column_statistics: Statistics::unknown_column(&self.schema()),
-            });
-        }
-        // Search results are inexact by nature
-        Ok(Statistics {
-            num_rows: Precision::Inexact(0),
-            total_byte_size: Precision::Absent,
-            column_statistics: Statistics::unknown_column(&self.schema()),
-        })
     }
 
     fn fetch(&self) -> Option<usize> {
