@@ -12,7 +12,6 @@ use datafusion_proto::logical_plan::to_proto::serialize_exprs;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use datafusion_proto::protobuf::Schema as ProtoSchema;
 use indexlake::catalog::{DataFileRecord, RowValidity};
-use indexlake::index::SearchQueryCodec;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::TableUpdate;
 use prost::Message;
@@ -30,24 +29,11 @@ use crate::{
 #[derive(Debug)]
 pub struct IndexLakePhysicalCodec {
     client: Arc<indexlake::Client>,
-    codecs: HashMap<String, Arc<dyn SearchQueryCodec>>,
 }
 
 impl IndexLakePhysicalCodec {
     pub fn new(client: Arc<indexlake::Client>) -> Self {
-        Self {
-            client,
-            codecs: HashMap::new(),
-        }
-    }
-
-    /// Register a search query codec for a given index kind.
-    pub fn register_query_codec(
-        &mut self,
-        kind: impl Into<String>,
-        codec: Arc<dyn SearchQueryCodec>,
-    ) {
-        self.codecs.insert(kind.into(), codec);
+        Self { client }
     }
 }
 
@@ -125,12 +111,16 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
 
-                let codec = self.codecs.get(&node.index_kind).ok_or_else(|| {
-                    DataFusionError::Internal(format!(
-                        "Search query codec not registered for index kind: {}",
-                        node.index_kind
-                    ))
-                })?;
+                let codec = self
+                    .client
+                    .search_query_codecs
+                    .get(&node.index_kind)
+                    .ok_or_else(|| {
+                        DataFusionError::Internal(format!(
+                            "Search query codec not registered for index kind: {}",
+                            node.index_kind
+                        ))
+                    })?;
                 let query = codec.decode(&node.query_data).map_err(|e| {
                     DataFusionError::Internal(format!("Failed to decode search query: {e}"))
                 })?;
@@ -293,7 +283,8 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         projection,
                         schema: Some(schema),
                         query_data: self
-                            .codecs
+                            .client
+                            .search_query_codecs
                             .get(exec.query.index_kind())
                             .map(|codec| codec.encode(exec.query.as_ref()))
                             .unwrap_or_default(),
