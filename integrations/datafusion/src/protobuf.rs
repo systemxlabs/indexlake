@@ -133,6 +133,8 @@ pub struct IndexLakeSearchExecNode {
     pub projection: ::core::option::Option<Projection>,
     #[prost(message, optional, tag = "7")]
     pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
+    #[prost(bytes = "vec", tag = "8")]
+    pub query_data: ::prost::alloc::vec::Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

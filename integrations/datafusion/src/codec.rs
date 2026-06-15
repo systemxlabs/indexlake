@@ -278,6 +278,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         dynamic_fields: exec.dynamic_fields.clone(),
                         projection,
                         schema: Some(schema),
+                        query_data: exec.query.encode(),
                     },
                 )),
             };
@@ -548,5 +549,9 @@ impl SearchQuery for GenericSearchQuery {
 
     fn limit(&self) -> Option<usize> {
         self.limit
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_default()
     }
 }

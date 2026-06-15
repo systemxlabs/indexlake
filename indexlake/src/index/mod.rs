@@ -109,6 +109,11 @@ pub trait SearchQuery: Debug + Send + Sync + Any {
     fn index_kind(&self) -> &str;
 
     fn limit(&self) -> Option<usize>;
+
+    /// Encode this query to bytes for protobuf serialization.
+    fn encode(&self) -> Vec<u8> {
+        vec![]
+    }
 }
 
 impl dyn SearchQuery {
