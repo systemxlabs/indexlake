@@ -169,7 +169,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 Ok(Arc::new(IndexLakeUpdateExec::try_new(lazy_table, update)?))
             }
             IndexLakePhysicalPlanType::Delete(node) => {
-                let condition: indexlake::expr::Expr = serde_json::from_str(
+                let condition: indexlake::expr::Expr = deserialize_il_expr(
                     &node
                         .condition
                         .ok_or_else(|| {
@@ -178,12 +178,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                             )
                         })?
                         .json,
-                )
-                .map_err(|e| {
-                    DataFusionError::Internal(format!(
-                        "Failed to deserialize delete condition: {e}"
-                    ))
-                })?;
+                )?;
 
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
@@ -299,9 +294,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 .set_map
                 .iter()
                 .map(|(col, expr)| {
-                    let value_json = serde_json::to_string(expr).map_err(|e| {
-                        DataFusionError::Internal(format!("Failed to serialize update value: {e}"))
-                    })?;
+                    let value_json = serialize_il_expr(expr)?;
                     Ok(ExprColumnAssignment {
                         column: col.clone(),
                         value: Some(IndexLakeExprNode { json: value_json }),
@@ -330,9 +323,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
             Ok(())
         } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeDeleteExec>() {
-            let condition_json = serde_json::to_string(&exec.condition).map_err(|e| {
-                DataFusionError::Internal(format!("Failed to serialize delete condition: {e}"))
-            })?;
+            let condition_json = serialize_il_expr(&exec.condition)?;
 
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Delete(
