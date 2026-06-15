@@ -115,7 +115,7 @@ pub trait SearchQuery: Debug + Send + Sync + Any {
 
 /// Codec for serializing/deserializing SearchQuery to/from bytes.
 pub trait SearchQueryCodec: Debug + Send + Sync {
-    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8>;
+    fn encode(&self, query: &dyn SearchQuery) -> ILResult<Vec<u8>>;
     fn decode(&self, data: &[u8]) -> ILResult<Arc<dyn SearchQuery>>;
 }
 

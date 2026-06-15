@@ -286,7 +286,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                             .client
                             .search_query_codecs
                             .get(exec.query.index_kind())
-                            .map(|codec| codec.encode(exec.query.as_ref()))
+                            .and_then(|codec| codec.encode(exec.query.as_ref()).ok())
                             .unwrap_or_default(),
                     },
                 )),

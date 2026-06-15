@@ -38,11 +38,15 @@ impl SearchQuery for RabitqSearchQuery {
 pub struct RabitqSearchQueryCodec;
 
 impl indexlake::index::SearchQueryCodec for RabitqSearchQueryCodec {
-    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8> {
-        query
-            .downcast_ref::<RabitqSearchQuery>()
-            .map(|q| serde_json::to_vec(q).unwrap_or_default())
-            .unwrap_or_default()
+    fn encode(&self, query: &dyn SearchQuery) -> indexlake::ILResult<Vec<u8>> {
+        let q = query.downcast_ref::<RabitqSearchQuery>().ok_or_else(|| {
+            indexlake::ILError::index(
+                "RabitqSearchQueryCodec encode: query is not RabitqSearchQuery",
+            )
+        })?;
+        serde_json::to_vec(q).map_err(|e| {
+            indexlake::ILError::index(format!("Failed to encode RabitqSearchQuery: {e}"))
+        })
     }
 
     fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {

@@ -34,11 +34,13 @@ impl SearchQuery for HnswSearchQuery {
 pub struct HnswSearchQueryCodec;
 
 impl indexlake::index::SearchQueryCodec for HnswSearchQueryCodec {
-    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8> {
-        query
-            .downcast_ref::<HnswSearchQuery>()
-            .map(|q| serde_json::to_vec(q).unwrap_or_default())
-            .unwrap_or_default()
+    fn encode(&self, query: &dyn SearchQuery) -> indexlake::ILResult<Vec<u8>> {
+        let q = query.downcast_ref::<HnswSearchQuery>().ok_or_else(|| {
+            indexlake::ILError::index("HnswSearchQueryCodec encode: query is not HnswSearchQuery")
+        })?;
+        serde_json::to_vec(q).map_err(|e| {
+            indexlake::ILError::index(format!("Failed to encode HnswSearchQuery: {e}"))
+        })
     }
 
     fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {

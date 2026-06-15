@@ -32,11 +32,13 @@ impl SearchQuery for BM25SearchQuery {
 pub struct BM25SearchQueryCodec;
 
 impl indexlake::index::SearchQueryCodec for BM25SearchQueryCodec {
-    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8> {
-        query
-            .downcast_ref::<BM25SearchQuery>()
-            .map(|q| serde_json::to_vec(q).unwrap_or_default())
-            .unwrap_or_default()
+    fn encode(&self, query: &dyn SearchQuery) -> indexlake::ILResult<Vec<u8>> {
+        let q = query.downcast_ref::<BM25SearchQuery>().ok_or_else(|| {
+            indexlake::ILError::index("BM25SearchQueryCodec encode: query is not BM25SearchQuery")
+        })?;
+        serde_json::to_vec(q).map_err(|e| {
+            indexlake::ILError::index(format!("Failed to encode BM25SearchQuery: {e}"))
+        })
     }
 
     fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {
