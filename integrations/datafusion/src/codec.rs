@@ -113,11 +113,12 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
                 let codec = self
                     .client
-                    .search_query_codecs
+                    .index_kinds
                     .get(&node.index_kind)
+                    .and_then(|kind| kind.search_query_codec())
                     .ok_or_else(|| {
                         DataFusionError::Internal(format!(
-                            "Search query codec not registered for index kind: {}",
+                            "Search query codec not found for index kind: {}",
                             node.index_kind
                         ))
                     })?;
@@ -284,8 +285,9 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         schema: Some(schema),
                         query_data: self
                             .client
-                            .search_query_codecs
+                            .index_kinds
                             .get(exec.query.index_kind())
+                            .and_then(|kind| kind.search_query_codec())
                             .and_then(|codec| codec.encode(exec.query.as_ref()).ok())
                             .unwrap_or_default(),
                     },

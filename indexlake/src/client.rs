@@ -6,7 +6,7 @@ use crate::catalog::{
     Catalog, CatalogHelper, INTERNAL_ROW_ID_FIELD_NAME, INTERNAL_ROW_ID_FIELD_REF,
     TransactionHelper,
 };
-use crate::index::{IndexDefinition, IndexKind, IndexManager, SearchQueryCodec};
+use crate::index::{IndexDefinition, IndexKind, IndexManager};
 use crate::storage::Storage;
 use crate::table::{Table, TableCreation, TableSchema, process_create_table};
 use crate::{ILError, ILResult};
@@ -18,7 +18,6 @@ pub struct Client {
     pub catalog: Arc<dyn Catalog>,
     pub storage: Arc<dyn Storage>,
     pub index_kinds: HashMap<String, Arc<dyn IndexKind>>,
-    pub search_query_codecs: HashMap<String, Arc<dyn SearchQueryCodec>>,
 }
 
 impl Client {
@@ -27,7 +26,6 @@ impl Client {
             catalog,
             storage,
             index_kinds: HashMap::new(),
-            search_query_codecs: HashMap::new(),
         }
     }
 
@@ -36,11 +34,6 @@ impl Client {
     }
 
     pub fn register_index_kind(&mut self, index_kind: Arc<dyn IndexKind>) {
-        // Auto-register SearchQueryCodec if the index kind supports it
-        if let Some(codec) = index_kind.search_query_codec() {
-            self.search_query_codecs
-                .insert(index_kind.kind().to_string(), codec);
-        }
         self.index_kinds
             .insert(index_kind.kind().to_string(), index_kind);
     }
