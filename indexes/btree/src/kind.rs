@@ -4,7 +4,7 @@ use arrow::datatypes::{DataType, FieldRef};
 use indexlake::expr::{BinaryOp, Expr};
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    SearchQuery, SearchQueryCodec,
 };
 use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,10 @@ impl IndexKind for BTreeIndexKind {
         _query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(false)
+    }
+
+    fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>> {
+        None
     }
 
     fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {

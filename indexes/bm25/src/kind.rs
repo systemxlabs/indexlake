@@ -4,12 +4,12 @@ use arrow::datatypes::{DataType, Field, FieldRef};
 use indexlake::expr::Expr;
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    SearchQuery, SearchQueryCodec,
 };
 use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
 
-use crate::{BM25SearchQuery, Bm25IndexBuilder};
+use crate::{BM25SearchQuery, BM25SearchQueryCodec, Bm25IndexBuilder};
 
 #[derive(Debug)]
 pub struct BM25IndexKind;
@@ -55,6 +55,10 @@ impl IndexKind for BM25IndexKind {
         } else {
             Ok(false)
         }
+    }
+
+    fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>> {
+        Some(Arc::new(BM25SearchQueryCodec))
     }
 
     fn dynamic_fields(&self, _: &IndexDefinition) -> ILResult<Vec<FieldRef>> {

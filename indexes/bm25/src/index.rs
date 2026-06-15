@@ -26,23 +26,26 @@ impl SearchQuery for BM25SearchQuery {
     fn limit(&self) -> Option<usize> {
         self.limit
     }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
 }
 
-/// Register BM25SearchQuery decoder on first access.
-pub fn ensure_bm25_decoder_registered() {
-    use std::sync::OnceLock;
-    static REGISTERED: OnceLock<()> = OnceLock::new();
-    REGISTERED.get_or_init(|| {
-        indexlake::index::register_search_query_decoder("bm25", |data| {
-            serde_json::from_slice::<BM25SearchQuery>(data)
-                .ok()
-                .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
-        });
-    });
+#[derive(Debug)]
+pub struct BM25SearchQueryCodec;
+
+impl indexlake::index::SearchQueryCodec for BM25SearchQueryCodec {
+    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8> {
+        query
+            .downcast_ref::<BM25SearchQuery>()
+            .map(|q| serde_json::to_vec(q).unwrap_or_default())
+            .unwrap_or_default()
+    }
+
+    fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {
+        serde_json::from_slice::<BM25SearchQuery>(data)
+            .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
+            .map_err(|e| {
+                indexlake::ILError::index(format!("Failed to decode BM25SearchQuery: {e}"))
+            })
+    }
 }
 
 pub struct BM25Index {

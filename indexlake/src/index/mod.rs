@@ -31,6 +31,8 @@ pub trait IndexKind: Debug + Send + Sync {
         query: &dyn SearchQuery,
     ) -> ILResult<bool>;
 
+    fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>>;
+
     fn dynamic_fields(&self, index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>>;
 
     fn supports_filter(
@@ -109,33 +111,13 @@ pub trait SearchQuery: Debug + Send + Sync + Any {
     fn index_kind(&self) -> &str;
 
     fn limit(&self) -> Option<usize>;
-
-    /// Encode this query to bytes for protobuf serialization.
-    fn encode(&self) -> Vec<u8>;
 }
 
-/// Registry for decoding SearchQuery from bytes.
-/// Each index implementation registers its decoder via `register_search_query_decoder`.
-pub type SearchQueryDecoder = fn(&[u8]) -> Option<Arc<dyn SearchQuery>>;
-
-/// Decode a search query from bytes using the registered decoder for the given index kind.
-pub fn decode_search_query(kind: &str, data: &[u8]) -> Option<Arc<dyn SearchQuery>> {
-    SEARCH_QUERY_REGISTRY
-        .read()
-        .unwrap()
-        .get(kind)
-        .and_then(|decoder| decoder(data))
+/// Codec for serializing/deserializing SearchQuery to/from bytes.
+pub trait SearchQueryCodec: Debug + Send + Sync {
+    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8>;
+    fn decode(&self, data: &[u8]) -> ILResult<Arc<dyn SearchQuery>>;
 }
-
-/// Register a search query decoder for a given index kind.
-pub fn register_search_query_decoder(kind: &str, decoder: SearchQueryDecoder) {
-    let mut registry = SEARCH_QUERY_REGISTRY.write().unwrap();
-    registry.insert(kind.to_string(), decoder);
-}
-
-static SEARCH_QUERY_REGISTRY: std::sync::LazyLock<
-    std::sync::RwLock<std::collections::HashMap<String, SearchQueryDecoder>>,
-> = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
 
 impl dyn SearchQuery {
     pub fn is<T: SearchQuery>(&self) -> bool {

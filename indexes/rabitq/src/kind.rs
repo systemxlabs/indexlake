@@ -4,12 +4,12 @@ use arrow::datatypes::{DataType, Field, FieldRef};
 use indexlake::expr::Expr;
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    SearchQuery, SearchQueryCodec,
 };
 use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
 
-use crate::{RabitqIndexBuilder, RabitqSearchQuery};
+use crate::{RabitqIndexBuilder, RabitqSearchQuery, RabitqSearchQueryCodec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RabitqMetric {
@@ -88,6 +88,10 @@ impl IndexKind for RabitqIndexKind {
         query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(query.downcast_ref::<RabitqSearchQuery>().is_some())
+    }
+
+    fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>> {
+        Some(Arc::new(RabitqSearchQueryCodec))
     }
 
     fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {

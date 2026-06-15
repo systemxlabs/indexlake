@@ -4,12 +4,12 @@ use arrow::datatypes::{DataType, Field, FieldRef};
 use indexlake::expr::Expr;
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    SearchQuery, SearchQueryCodec,
 };
 use indexlake::{ILError, ILResult};
 use serde::{Deserialize, Serialize};
 
-use crate::{HnswIndexBuilder, HnswSearchQuery};
+use crate::{HnswIndexBuilder, HnswSearchQuery, HnswSearchQueryCodec};
 
 #[derive(Debug)]
 pub struct HnswIndexKind;
@@ -64,6 +64,10 @@ impl IndexKind for HnswIndexKind {
             return Ok(false);
         };
         Ok(true)
+    }
+
+    fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>> {
+        Some(Arc::new(HnswSearchQueryCodec))
     }
 
     fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {

@@ -8,7 +8,7 @@ use indexlake::catalog::Scalar;
 use indexlake::expr::{Expr, Function};
 use indexlake::index::{
     FilterSupport, IndexBuilder, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams,
-    SearchQuery,
+    SearchQuery, SearchQueryCodec,
 };
 use indexlake::{ILError, ILResult};
 
@@ -60,6 +60,10 @@ impl IndexKind for RStarIndexKind {
         _query: &dyn SearchQuery,
     ) -> ILResult<bool> {
         Ok(false)
+    }
+
+    fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>> {
+        None
     }
 
     fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {

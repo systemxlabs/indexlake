@@ -32,22 +32,26 @@ impl SearchQuery for RabitqSearchQuery {
     fn limit(&self) -> Option<usize> {
         Some(self.limit)
     }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
 }
 
-pub fn ensure_rabitq_decoder_registered() {
-    use std::sync::OnceLock;
-    static REGISTERED: OnceLock<()> = OnceLock::new();
-    REGISTERED.get_or_init(|| {
-        indexlake::index::register_search_query_decoder("rabitq", |data| {
-            serde_json::from_slice::<RabitqSearchQuery>(data)
-                .ok()
-                .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
-        });
-    });
+#[derive(Debug)]
+pub struct RabitqSearchQueryCodec;
+
+impl indexlake::index::SearchQueryCodec for RabitqSearchQueryCodec {
+    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8> {
+        query
+            .downcast_ref::<RabitqSearchQuery>()
+            .map(|q| serde_json::to_vec(q).unwrap_or_default())
+            .unwrap_or_default()
+    }
+
+    fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {
+        serde_json::from_slice::<RabitqSearchQuery>(data)
+            .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
+            .map_err(|e| {
+                indexlake::ILError::index(format!("Failed to decode RabitqSearchQuery: {e}"))
+            })
+    }
 }
 
 pub struct RabitqIndex {

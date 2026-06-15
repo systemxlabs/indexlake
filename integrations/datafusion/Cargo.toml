@@ -10,9 +10,6 @@ description = "IndexLake datafusion integration"
 
 [dependencies]
 indexlake = { workspace = true }
-indexlake-index-bm25 = { workspace = true }
-indexlake-index-hnsw = { workspace = true }
-indexlake-index-rabitq = { workspace = true }
 
 # Core DataFusion components (instead of full datafusion crate)
 arrow = { workspace = true }

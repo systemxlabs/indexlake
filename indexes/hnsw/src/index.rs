@@ -28,22 +28,26 @@ impl SearchQuery for HnswSearchQuery {
     fn limit(&self) -> Option<usize> {
         Some(self.limit)
     }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
 }
 
-pub fn ensure_hnsw_decoder_registered() {
-    use std::sync::OnceLock;
-    static REGISTERED: OnceLock<()> = OnceLock::new();
-    REGISTERED.get_or_init(|| {
-        indexlake::index::register_search_query_decoder("hnsw", |data| {
-            serde_json::from_slice::<HnswSearchQuery>(data)
-                .ok()
-                .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
-        });
-    });
+#[derive(Debug)]
+pub struct HnswSearchQueryCodec;
+
+impl indexlake::index::SearchQueryCodec for HnswSearchQueryCodec {
+    fn encode(&self, query: &dyn SearchQuery) -> Vec<u8> {
+        query
+            .downcast_ref::<HnswSearchQuery>()
+            .map(|q| serde_json::to_vec(q).unwrap_or_default())
+            .unwrap_or_default()
+    }
+
+    fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {
+        serde_json::from_slice::<HnswSearchQuery>(data)
+            .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
+            .map_err(|e| {
+                indexlake::ILError::index(format!("Failed to decode HnswSearchQuery: {e}"))
+            })
+    }
 }
 
 pub struct HnswIndex {
