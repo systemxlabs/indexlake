@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
@@ -11,15 +13,20 @@ use datafusion_proto::logical_plan::to_proto::serialize_exprs;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use datafusion_proto::protobuf::Schema as ProtoSchema;
 use indexlake::catalog::{DataFileRecord, RowValidity};
+use indexlake::index::SearchQuery;
 use indexlake::storage::DataFileFormat;
+use indexlake::table::TableUpdate;
 use prost::Message;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::index_lake_physical_plan_node::IndexLakePhysicalPlanType;
 use crate::{
-    DataFile, IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode,
-    IndexLakeScanExec, IndexLakeScanExecNode, LazyTable, TableScanPartition,
-    TableScanPartitionAuto, TableScanPartitionProvided, table_scan_partition,
+    DataFile, ExprColumnAssignment, IndexLakeDeleteExec, IndexLakeDeleteExecNode,
+    IndexLakeInsertExec, IndexLakeInsertExecNode, IndexLakePhysicalPlanNode, IndexLakeScanExec,
+    IndexLakeScanExecNode, IndexLakeSearchExec, IndexLakeSearchExecNode, IndexLakeUpdateExec,
+    IndexLakeUpdateExecNode, LazyTable, TableScanPartition, TableScanPartitionAuto,
+    TableScanPartitionProvided, table_scan_partition,
 };
 
 #[derive(Debug)]
@@ -101,6 +108,67 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     node.bypass_insert_threshold as usize,
                 )?))
             }
+            IndexLakePhysicalPlanType::Search(node) => {
+                let schema = parse_schema(node.schema)?;
+                let projection = parse_projection(node.projection.as_ref());
+                let lazy_table =
+                    LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
+
+                // Search query is decoded with basic info; type-specific params
+                // require the SearchQueryCodec registered on the caller's side.
+                let query = Arc::new(GenericSearchQuery {
+                    index_kind: node.index_kind.clone(),
+                    limit: node.limit.map(|l| l as usize),
+                });
+
+                Ok(Arc::new(IndexLakeSearchExec::try_new(
+                    lazy_table,
+                    schema,
+                    query,
+                    node.dynamic_fields.clone(),
+                    projection,
+                )?))
+            }
+            IndexLakePhysicalPlanType::Update(node) => {
+                let condition: indexlake::expr::Expr = serde_json::from_str(&node.condition_json)
+                    .map_err(|e| {
+                    DataFusionError::Internal(format!(
+                        "Failed to deserialize update condition: {e}"
+                    ))
+                })?;
+
+                let mut set_map = HashMap::new();
+                for assignment in &node.assignments {
+                    let value: indexlake::expr::Expr = serde_json::from_str(&assignment.value_json)
+                        .map_err(|e| {
+                            DataFusionError::Internal(format!(
+                                "Failed to deserialize update assignment value: {e}"
+                            ))
+                        })?;
+                    set_map.insert(assignment.column.clone(), value);
+                }
+
+                let lazy_table =
+                    LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
+
+                let update = TableUpdate { set_map, condition };
+                Ok(Arc::new(IndexLakeUpdateExec::try_new(lazy_table, update)?))
+            }
+            IndexLakePhysicalPlanType::Delete(node) => {
+                let condition: indexlake::expr::Expr = serde_json::from_str(&node.condition_json)
+                    .map_err(|e| {
+                    DataFusionError::Internal(format!(
+                        "Failed to deserialize delete condition: {e}"
+                    ))
+                })?;
+
+                let lazy_table =
+                    LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
+
+                Ok(Arc::new(IndexLakeDeleteExec::try_new(
+                    lazy_table, condition,
+                )?))
+            }
         }
     }
 
@@ -164,6 +232,93 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             proto.encode(buf).map_err(|e| {
                 DataFusionError::Internal(format!(
                     "Failed to encode indexlake insert execution plan: {e:?}"
+                ))
+            })?;
+
+            Ok(())
+        } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeSearchExec>() {
+            let schema = serialize_schema(&exec.output_schema)?;
+            let projection = serialize_projection(exec.projection.as_ref());
+
+            let proto = IndexLakePhysicalPlanNode {
+                index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Search(
+                    IndexLakeSearchExecNode {
+                        namespace_name: exec.lazy_table.namespace_name.clone(),
+                        table_name: exec.lazy_table.table_name.clone(),
+                        index_kind: exec.query.index_kind().to_string(),
+                        limit: exec.query.limit().map(|l| l as u32),
+                        dynamic_fields: exec.dynamic_fields.clone(),
+                        projection,
+                        schema: Some(schema),
+                    },
+                )),
+            };
+
+            proto.encode(buf).map_err(|e| {
+                DataFusionError::Internal(format!(
+                    "Failed to encode indexlake search execution plan: {e:?}"
+                ))
+            })?;
+
+            Ok(())
+        } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeUpdateExec>() {
+            let condition_json = serde_json::to_string(&exec.update.condition).map_err(|e| {
+                DataFusionError::Internal(format!("Failed to serialize update condition: {e}"))
+            })?;
+
+            let assignments = exec
+                .update
+                .set_map
+                .iter()
+                .map(|(col, expr)| {
+                    let value_json = serde_json::to_string(expr).map_err(|e| {
+                        DataFusionError::Internal(format!(
+                            "Failed to serialize update assignment value: {e}"
+                        ))
+                    })?;
+                    Ok(ExprColumnAssignment {
+                        column: col.clone(),
+                        value_json,
+                    })
+                })
+                .collect::<Result<Vec<_>, DataFusionError>>()?;
+
+            let proto = IndexLakePhysicalPlanNode {
+                index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Update(
+                    IndexLakeUpdateExecNode {
+                        namespace_name: exec.lazy_table.namespace_name.clone(),
+                        table_name: exec.lazy_table.table_name.clone(),
+                        condition_json,
+                        assignments,
+                    },
+                )),
+            };
+
+            proto.encode(buf).map_err(|e| {
+                DataFusionError::Internal(format!(
+                    "Failed to encode indexlake update execution plan: {e:?}"
+                ))
+            })?;
+
+            Ok(())
+        } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeDeleteExec>() {
+            let condition_json = serde_json::to_string(&exec.condition).map_err(|e| {
+                DataFusionError::Internal(format!("Failed to serialize delete condition: {e}"))
+            })?;
+
+            let proto = IndexLakePhysicalPlanNode {
+                index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Delete(
+                    IndexLakeDeleteExecNode {
+                        namespace_name: exec.lazy_table.namespace_name.clone(),
+                        table_name: exec.lazy_table.table_name.clone(),
+                        condition_json,
+                    },
+                )),
+            };
+
+            proto.encode(buf).map_err(|e| {
+                DataFusionError::Internal(format!(
+                    "Failed to encode indexlake delete execution plan: {e:?}"
                 ))
             })?;
 
@@ -344,5 +499,24 @@ fn parse_data_file_format(format: i32) -> Result<DataFileFormat, DataFusionError
     match proto_format {
         crate::protobuf::DataFileFormat::ParquetV1 => Ok(DataFileFormat::ParquetV1),
         crate::protobuf::DataFileFormat::ParquetV2 => Ok(DataFileFormat::ParquetV2),
+    }
+}
+
+/// A basic search query used for protobuf deserialization.
+/// Stores the index kind and limit; type-specific query params
+/// are not preserved across serialization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenericSearchQuery {
+    pub index_kind: String,
+    pub limit: Option<usize>,
+}
+
+impl SearchQuery for GenericSearchQuery {
+    fn index_kind(&self) -> &str {
+        &self.index_kind
+    }
+
+    fn limit(&self) -> Option<usize> {
+        self.limit
     }
 }

@@ -2745,6 +2745,8 @@ dependencies = [
  "indexlake",
  "log",
  "prost",
+ "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]
