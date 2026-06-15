@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::RabitqMetric;
 use crate::rabitq::{BruteForceRabitqIndex, BruteForceSearchParams};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RabitqSearchQuery {
     pub vector: Vec<f32>,
     pub limit: usize,
@@ -31,6 +31,30 @@ impl SearchQuery for RabitqSearchQuery {
 
     fn limit(&self) -> Option<usize> {
         Some(self.limit)
+    }
+}
+
+#[derive(Debug)]
+pub struct RabitqSearchQueryCodec;
+
+impl indexlake::index::SearchQueryCodec for RabitqSearchQueryCodec {
+    fn encode(&self, query: &dyn SearchQuery) -> indexlake::ILResult<Vec<u8>> {
+        let q = query.downcast_ref::<RabitqSearchQuery>().ok_or_else(|| {
+            indexlake::ILError::index(
+                "RabitqSearchQueryCodec encode: query is not RabitqSearchQuery",
+            )
+        })?;
+        serde_json::to_vec(q).map_err(|e| {
+            indexlake::ILError::index(format!("Failed to encode RabitqSearchQuery: {e}"))
+        })
+    }
+
+    fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {
+        serde_json::from_slice::<RabitqSearchQuery>(data)
+            .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
+            .map_err(|e| {
+                indexlake::ILError::index(format!("Failed to decode RabitqSearchQuery: {e}"))
+            })
     }
 }
 

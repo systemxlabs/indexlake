@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::Euclidean;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HnswSearchQuery {
     pub vector: Vec<f32>,
     pub limit: usize,
@@ -27,6 +27,28 @@ impl SearchQuery for HnswSearchQuery {
 
     fn limit(&self) -> Option<usize> {
         Some(self.limit)
+    }
+}
+
+#[derive(Debug)]
+pub struct HnswSearchQueryCodec;
+
+impl indexlake::index::SearchQueryCodec for HnswSearchQueryCodec {
+    fn encode(&self, query: &dyn SearchQuery) -> indexlake::ILResult<Vec<u8>> {
+        let q = query.downcast_ref::<HnswSearchQuery>().ok_or_else(|| {
+            indexlake::ILError::index("HnswSearchQueryCodec encode: query is not HnswSearchQuery")
+        })?;
+        serde_json::to_vec(q).map_err(|e| {
+            indexlake::ILError::index(format!("Failed to encode HnswSearchQuery: {e}"))
+        })
+    }
+
+    fn decode(&self, data: &[u8]) -> indexlake::ILResult<Arc<dyn SearchQuery>> {
+        serde_json::from_slice::<HnswSearchQuery>(data)
+            .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
+            .map_err(|e| {
+                indexlake::ILError::index(format!("Failed to decode HnswSearchQuery: {e}"))
+            })
     }
 }
 

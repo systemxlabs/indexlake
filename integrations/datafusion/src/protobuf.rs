@@ -3,7 +3,7 @@
 pub struct IndexLakePhysicalPlanNode {
     #[prost(
         oneof = "index_lake_physical_plan_node::IndexLakePhysicalPlanType",
-        tags = "1, 2"
+        tags = "1, 2, 3, 4, 5"
     )]
     pub index_lake_physical_plan_type:
         ::core::option::Option<index_lake_physical_plan_node::IndexLakePhysicalPlanType>,
@@ -16,6 +16,12 @@ pub mod index_lake_physical_plan_node {
         Scan(super::IndexLakeScanExecNode),
         #[prost(message, tag = "2")]
         Insert(super::IndexLakeInsertExecNode),
+        #[prost(message, tag = "3")]
+        Search(super::IndexLakeSearchExecNode),
+        #[prost(message, tag = "4")]
+        Update(super::IndexLakeUpdateExecNode),
+        #[prost(message, tag = "5")]
+        Delete(super::IndexLakeDeleteExecNode),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -111,6 +117,62 @@ pub enum DataFileFormat {
     ParquetV1 = 0,
     ParquetV2 = 1,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IndexLakeSearchExecNode {
+    #[prost(string, tag = "1")]
+    pub namespace_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub table_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub index_kind: ::prost::alloc::string::String,
+    #[prost(uint32, optional, tag = "4")]
+    pub limit: ::core::option::Option<u32>,
+    #[prost(string, repeated, tag = "5")]
+    pub dynamic_fields: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "6")]
+    pub projection: ::core::option::Option<Projection>,
+    #[prost(message, optional, tag = "7")]
+    pub schema: ::core::option::Option<::datafusion_proto::protobuf::Schema>,
+    #[prost(bytes = "vec", tag = "8")]
+    pub query_data: ::prost::alloc::vec::Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IndexLakeExprNode {
+    #[prost(string, tag = "1")]
+    pub json: ::prost::alloc::string::String,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IndexLakeUpdateExecNode {
+    #[prost(string, tag = "1")]
+    pub namespace_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub table_name: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub condition: ::core::option::Option<IndexLakeExprNode>,
+    #[prost(message, repeated, tag = "4")]
+    pub assignments: ::prost::alloc::vec::Vec<ExprColumnAssignment>,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ExprColumnAssignment {
+    #[prost(string, tag = "1")]
+    pub column: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "2")]
+    pub value: ::core::option::Option<IndexLakeExprNode>,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IndexLakeDeleteExecNode {
+    #[prost(string, tag = "1")]
+    pub namespace_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub table_name: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub condition: ::core::option::Option<IndexLakeExprNode>,
+}
+
 impl DataFileFormat {
     /// String value of the enum field names used in the ProtoBuf definition.
     ///

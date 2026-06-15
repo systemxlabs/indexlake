@@ -9,6 +9,9 @@ message IndexLakePhysicalPlanNode {
   oneof IndexLakePhysicalPlanType {
     IndexLakeScanExecNode scan = 1;
     IndexLakeInsertExecNode insert = 2;
+    IndexLakeSearchExecNode search = 3;
+    IndexLakeUpdateExecNode update = 4;
+    IndexLakeDeleteExecNode delete = 5;
   }
 }
 
@@ -67,4 +70,37 @@ message DataFile {
 enum DataFileFormat {
   ParquetV1 = 0;
   ParquetV2 = 1;
+}
+
+message IndexLakeExprNode {
+  string json = 1;
+}
+
+message IndexLakeSearchExecNode {
+  string namespace_name = 1;
+  string table_name = 2;
+  string index_kind = 3;
+  optional uint32 limit = 4;
+  repeated string dynamic_fields = 5;
+  Projection projection = 6;
+  datafusion_common.Schema schema = 7;
+  bytes query_data = 8;
+}
+
+message IndexLakeUpdateExecNode {
+  string namespace_name = 1;
+  string table_name = 2;
+  IndexLakeExprNode condition = 3;
+  repeated ExprColumnAssignment assignments = 4;
+}
+
+message ExprColumnAssignment {
+  string column = 1;
+  IndexLakeExprNode value = 2;
+}
+
+message IndexLakeDeleteExecNode {
+  string namespace_name = 1;
+  string table_name = 2;
+  IndexLakeExprNode condition = 3;
 }

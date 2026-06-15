@@ -31,6 +31,8 @@ pub trait IndexKind: Debug + Send + Sync {
         query: &dyn SearchQuery,
     ) -> ILResult<bool>;
 
+    fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>>;
+
     fn dynamic_fields(&self, index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>>;
 
     fn supports_filter(
@@ -109,6 +111,12 @@ pub trait SearchQuery: Debug + Send + Sync + Any {
     fn index_kind(&self) -> &str;
 
     fn limit(&self) -> Option<usize>;
+}
+
+/// Codec for serializing/deserializing SearchQuery to/from bytes.
+pub trait SearchQueryCodec: Debug + Send + Sync {
+    fn encode(&self, query: &dyn SearchQuery) -> ILResult<Vec<u8>>;
+    fn decode(&self, data: &[u8]) -> ILResult<Arc<dyn SearchQuery>>;
 }
 
 impl dyn SearchQuery {
