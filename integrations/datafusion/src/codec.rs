@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
@@ -13,11 +12,9 @@ use datafusion_proto::logical_plan::to_proto::serialize_exprs;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use datafusion_proto::protobuf::Schema as ProtoSchema;
 use indexlake::catalog::{DataFileRecord, RowValidity};
-use indexlake::index::SearchQuery;
 use indexlake::storage::DataFileFormat;
 use indexlake::table::TableUpdate;
 use prost::Message;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::index_lake_physical_plan_node::IndexLakePhysicalPlanType;
@@ -114,12 +111,19 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
 
-                // Search query is decoded with basic info; type-specific params
-                // require the SearchQueryCodec registered on the caller's side.
-                let query = Arc::new(GenericSearchQuery {
-                    index_kind: node.index_kind.clone(),
-                    limit: node.limit.map(|l| l as usize),
-                });
+                // Ensure decoders are registered
+                indexlake_index_bm25::ensure_bm25_decoder_registered();
+                indexlake_index_hnsw::ensure_hnsw_decoder_registered();
+                indexlake_index_rabitq::ensure_rabitq_decoder_registered();
+
+                let query =
+                    indexlake::index::decode_search_query(&node.index_kind, &node.query_data)
+                        .ok_or_else(|| {
+                            DataFusionError::Internal(format!(
+                                "Failed to decode search query for kind: {}",
+                                node.index_kind
+                            ))
+                        })?;
 
                 Ok(Arc::new(IndexLakeSearchExec::try_new(
                     lazy_table,
@@ -530,28 +534,5 @@ fn parse_data_file_format(format: i32) -> Result<DataFileFormat, DataFusionError
     match proto_format {
         crate::protobuf::DataFileFormat::ParquetV1 => Ok(DataFileFormat::ParquetV1),
         crate::protobuf::DataFileFormat::ParquetV2 => Ok(DataFileFormat::ParquetV2),
-    }
-}
-
-/// A basic search query used for protobuf deserialization.
-/// Stores the index kind and limit; type-specific query params
-/// are not preserved across serialization.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenericSearchQuery {
-    pub index_kind: String,
-    pub limit: Option<usize>,
-}
-
-impl SearchQuery for GenericSearchQuery {
-    fn index_kind(&self) -> &str {
-        &self.index_kind
-    }
-
-    fn limit(&self) -> Option<usize> {
-        self.limit
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
     }
 }

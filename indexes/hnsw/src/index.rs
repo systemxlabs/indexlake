@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::Euclidean;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HnswSearchQuery {
     pub vector: Vec<f32>,
     pub limit: usize,
@@ -28,6 +28,22 @@ impl SearchQuery for HnswSearchQuery {
     fn limit(&self) -> Option<usize> {
         Some(self.limit)
     }
+
+    fn encode(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_default()
+    }
+}
+
+pub fn ensure_hnsw_decoder_registered() {
+    use std::sync::OnceLock;
+    static REGISTERED: OnceLock<()> = OnceLock::new();
+    REGISTERED.get_or_init(|| {
+        indexlake::index::register_search_query_decoder("hnsw", |data| {
+            serde_json::from_slice::<HnswSearchQuery>(data)
+                .ok()
+                .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
+        });
+    });
 }
 
 pub struct HnswIndex {

@@ -12,7 +12,7 @@ use indexlake::{ILError, ILResult};
 
 use crate::{ArrowScorer, BM25IndexParams, JiebaTokenizer};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BM25SearchQuery {
     pub query: String,
     pub limit: Option<usize>,
@@ -26,6 +26,23 @@ impl SearchQuery for BM25SearchQuery {
     fn limit(&self) -> Option<usize> {
         self.limit
     }
+
+    fn encode(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_default()
+    }
+}
+
+/// Register BM25SearchQuery decoder on first access.
+pub fn ensure_bm25_decoder_registered() {
+    use std::sync::OnceLock;
+    static REGISTERED: OnceLock<()> = OnceLock::new();
+    REGISTERED.get_or_init(|| {
+        indexlake::index::register_search_query_decoder("bm25", |data| {
+            serde_json::from_slice::<BM25SearchQuery>(data)
+                .ok()
+                .map(|q| Arc::new(q) as Arc<dyn SearchQuery>)
+        });
+    });
 }
 
 pub struct BM25Index {
