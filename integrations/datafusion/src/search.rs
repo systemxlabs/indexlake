@@ -25,7 +25,6 @@ pub struct IndexLakeSearchExec {
     pub query: Arc<dyn SearchQuery>,
     pub dynamic_fields: Vec<String>,
     pub projection: Option<Vec<usize>>,
-    pub batch_size: usize,
     properties: Arc<PlanProperties>,
 }
 
@@ -36,7 +35,6 @@ impl IndexLakeSearchExec {
         query: Arc<dyn SearchQuery>,
         dynamic_fields: Vec<String>,
         projection: Option<Vec<usize>>,
-        batch_size: usize,
     ) -> Result<Self, DataFusionError> {
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let properties = Arc::new(PlanProperties::new(
@@ -51,7 +49,6 @@ impl IndexLakeSearchExec {
             query,
             dynamic_fields,
             projection,
-            batch_size,
             properties,
         })
     }
