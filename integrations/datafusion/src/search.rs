@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::datatypes::{Schema, SchemaRef};
+use arrow::datatypes::SchemaRef;
 use datafusion_common::{DataFusionError, project_schema};
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::EquivalenceProperties;
@@ -15,7 +15,7 @@ use futures::TryStreamExt;
 use indexlake::index::SearchQuery;
 use indexlake::table::TableSearch;
 
-use crate::LazyTable;
+use crate::{LazyTable, schema_projection_equals};
 
 #[derive(Debug)]
 pub struct IndexLakeSearchExec {
@@ -156,16 +156,4 @@ impl DisplayAs for IndexLakeSearchExec {
         }
         Ok(())
     }
-}
-
-fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
-    if left.fields.len() != right.fields.len() {
-        return false;
-    }
-    for (left_field, right_field) in left.fields.iter().zip(right.fields.iter()) {
-        if left_field.name() != right_field.name() {
-            return false;
-        }
-    }
-    true
 }
