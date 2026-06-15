@@ -268,13 +268,29 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         dynamic_fields: exec.dynamic_fields.clone(),
                         projection,
                         schema: Some(schema),
-                        query_data: self
-                            .client
-                            .index_kinds
-                            .get(exec.query.index_kind())
-                            .and_then(|kind| kind.search_query_codec())
-                            .and_then(|codec| codec.encode(exec.query.as_ref()).ok())
-                            .unwrap_or_default(),
+                        query_data: {
+                            let kind = self
+                                .client
+                                .index_kinds
+                                .get(exec.query.index_kind())
+                                .ok_or_else(|| {
+                                    DataFusionError::Internal(format!(
+                                        "Index kind '{}' not found",
+                                        exec.query.index_kind()
+                                    ))
+                                })?;
+                            let codec = kind.search_query_codec().ok_or_else(|| {
+                                DataFusionError::Internal(format!(
+                                    "Search query codec not found for index kind: {}",
+                                    exec.query.index_kind()
+                                ))
+                            })?;
+                            codec.encode(exec.query.as_ref()).map_err(|e| {
+                                DataFusionError::Internal(format!(
+                                    "Failed to encode search query: {e}"
+                                ))
+                            })?
+                        },
                     },
                 )),
             };
