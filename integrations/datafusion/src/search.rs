@@ -1,8 +1,9 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use arrow::datatypes::SchemaRef;
-use datafusion_common::{DataFusionError, project_schema};
+use arrow::datatypes::{Schema, SchemaRef};
+use datafusion_common::stats::Precision;
+use datafusion_common::{DataFusionError, Statistics, project_schema};
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::EquivalenceProperties;
 use datafusion_physical_plan::display::ProjectSchemaDisplay;
@@ -15,7 +16,7 @@ use futures::TryStreamExt;
 use indexlake::index::SearchQuery;
 use indexlake::table::TableSearch;
 
-use crate::{LazyTable, schema_projection_equals};
+use crate::LazyTable;
 
 #[derive(Debug)]
 pub struct IndexLakeSearchExec {
@@ -24,6 +25,7 @@ pub struct IndexLakeSearchExec {
     pub query: Arc<dyn SearchQuery>,
     pub dynamic_fields: Vec<String>,
     pub projection: Option<Vec<usize>>,
+    pub batch_size: usize,
     properties: Arc<PlanProperties>,
 }
 
@@ -34,6 +36,7 @@ impl IndexLakeSearchExec {
         query: Arc<dyn SearchQuery>,
         dynamic_fields: Vec<String>,
         projection: Option<Vec<usize>>,
+        batch_size: usize,
     ) -> Result<Self, DataFusionError> {
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let properties = Arc::new(PlanProperties::new(
@@ -48,6 +51,7 @@ impl IndexLakeSearchExec {
             query,
             dynamic_fields,
             projection,
+            batch_size,
             properties,
         })
     }
@@ -120,6 +124,27 @@ impl ExecutionPlan for IndexLakeSearchExec {
         )))
     }
 
+    fn partition_statistics(
+        &self,
+        partition: Option<usize>,
+    ) -> Result<Statistics, DataFusionError> {
+        if let Some(partition) = partition
+            && partition != 0
+        {
+            return Ok(Statistics {
+                num_rows: Precision::Absent,
+                total_byte_size: Precision::Absent,
+                column_statistics: Statistics::unknown_column(&self.schema()),
+            });
+        }
+        // Search results are inexact by nature
+        Ok(Statistics {
+            num_rows: Precision::Inexact(0),
+            total_byte_size: Precision::Absent,
+            column_statistics: Statistics::unknown_column(&self.schema()),
+        })
+    }
+
     fn fetch(&self) -> Option<usize> {
         self.query.limit()
     }
@@ -136,12 +161,14 @@ impl DisplayAs for IndexLakeSearchExec {
         write!(
             f,
             "IndexLakeSearchExec: table={}.{}, kind={}",
-            self.lazy_table.namespace_name,
-            self.lazy_table.table_name,
-            self.query.index_kind()
+            self.lazy_table.namespace_name, self.lazy_table.table_name, self.query.index_kind()
         )?;
         if !self.dynamic_fields.is_empty() {
-            write!(f, ", dynamic_fields=[{}]", self.dynamic_fields.join(", "))?;
+            write!(
+                f,
+                ", dynamic_fields=[{}]",
+                self.dynamic_fields.join(", ")
+            )?;
         }
         let projected_schema = self.schema();
         if !schema_projection_equals(&projected_schema, &self.output_schema) {
@@ -156,4 +183,16 @@ impl DisplayAs for IndexLakeSearchExec {
         }
         Ok(())
     }
+}
+
+fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
+    if left.fields.len() != right.fields.len() {
+        return false;
+    }
+    for (left_field, right_field) in left.fields.iter().zip(right.fields.iter()) {
+        if left_field.name() != right_field.name() {
+            return false;
+        }
+    }
+    true
 }
