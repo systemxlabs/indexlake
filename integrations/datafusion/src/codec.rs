@@ -135,7 +135,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 )?))
             }
             IndexLakePhysicalPlanType::Update(node) => {
-                let condition: indexlake::expr::Expr = serde_json::from_str(
+                let condition: indexlake::expr::Expr = deserialize_il_expr(
                     &node
                         .condition
                         .ok_or_else(|| {
@@ -144,16 +144,11 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                             )
                         })?
                         .json,
-                )
-                .map_err(|e| {
-                    DataFusionError::Internal(format!(
-                        "Failed to deserialize update condition: {e}"
-                    ))
-                })?;
+                )?;
 
                 let mut set_map = HashMap::new();
                 for assignment in &node.assignments {
-                    let value: indexlake::expr::Expr = serde_json::from_str(
+                    let value: indexlake::expr::Expr = deserialize_il_expr(
                         &assignment
                             .value
                             .as_ref()
@@ -163,12 +158,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                                 )
                             })?
                             .json,
-                    )
-                    .map_err(|e| {
-                        DataFusionError::Internal(format!(
-                            "Failed to deserialize update assignment: {e}"
-                        ))
-                    })?;
+                    )?;
                     set_map.insert(assignment.column.clone(), value);
                 }
 
@@ -302,9 +292,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
             Ok(())
         } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeUpdateExec>() {
-            let condition_json = serde_json::to_string(&exec.update.condition).map_err(|e| {
-                DataFusionError::Internal(format!("Failed to serialize update condition: {e}"))
-            })?;
+            let condition_json = serialize_il_expr(&exec.update.condition)?;
 
             let assignments = exec
                 .update
@@ -532,6 +520,17 @@ fn serialize_data_file_format(format: DataFileFormat) -> i32 {
         DataFileFormat::ParquetV2 => crate::protobuf::DataFileFormat::ParquetV2,
     };
     proto_format.into()
+}
+
+fn serialize_il_expr(expr: &indexlake::expr::Expr) -> Result<String, DataFusionError> {
+    serde_json::to_string(expr)
+        .map_err(|e| DataFusionError::Internal(format!("Failed to serialize indexlake expr: {e}")))
+}
+
+fn deserialize_il_expr(json: &str) -> Result<indexlake::expr::Expr, DataFusionError> {
+    serde_json::from_str(json).map_err(|e| {
+        DataFusionError::Internal(format!("Failed to deserialize indexlake expr: {e}"))
+    })
 }
 
 fn parse_data_file_format(format: i32) -> Result<DataFileFormat, DataFusionError> {
