@@ -136,14 +136,12 @@ impl DisplayAs for IndexLakeSearchExec {
         write!(
             f,
             "IndexLakeSearchExec: table={}.{}, kind={}",
-            self.lazy_table.namespace_name, self.lazy_table.table_name, self.query.index_kind()
+            self.lazy_table.namespace_name,
+            self.lazy_table.table_name,
+            self.query.index_kind()
         )?;
         if !self.dynamic_fields.is_empty() {
-            write!(
-                f,
-                ", dynamic_fields=[{}]",
-                self.dynamic_fields.join(", ")
-            )?;
+            write!(f, ", dynamic_fields=[{}]", self.dynamic_fields.join(", "))?;
         }
         let projected_schema = self.schema();
         if !schema_projection_equals(&projected_schema, &self.output_schema) {
