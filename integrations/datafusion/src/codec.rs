@@ -135,30 +135,19 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 )?))
             }
             IndexLakePhysicalPlanType::Update(node) => {
-                let condition: indexlake::expr::Expr = deserialize_il_expr(
-                    &node
-                        .condition
-                        .ok_or_else(|| {
-                            DataFusionError::Internal(
-                                "Missing condition in update node".to_string(),
-                            )
-                        })?
-                        .json,
-                )?;
+                let condition: indexlake::expr::Expr =
+                    deserialize_il_expr(node.condition.as_ref().ok_or_else(|| {
+                        DataFusionError::Internal("Missing condition in update node".to_string())
+                    })?)?;
 
                 let mut set_map = HashMap::new();
                 for assignment in &node.assignments {
-                    let value: indexlake::expr::Expr = deserialize_il_expr(
-                        &assignment
-                            .value
-                            .as_ref()
-                            .ok_or_else(|| {
-                                DataFusionError::Internal(
-                                    "Missing value in update assignment".to_string(),
-                                )
-                            })?
-                            .json,
-                    )?;
+                    let value: indexlake::expr::Expr =
+                        deserialize_il_expr(assignment.value.as_ref().ok_or_else(|| {
+                            DataFusionError::Internal(
+                                "Missing value in update assignment".to_string(),
+                            )
+                        })?)?;
                     set_map.insert(assignment.column.clone(), value);
                 }
 
@@ -169,16 +158,10 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                 Ok(Arc::new(IndexLakeUpdateExec::try_new(lazy_table, update)?))
             }
             IndexLakePhysicalPlanType::Delete(node) => {
-                let condition: indexlake::expr::Expr = deserialize_il_expr(
-                    &node
-                        .condition
-                        .ok_or_else(|| {
-                            DataFusionError::Internal(
-                                "Missing condition in delete node".to_string(),
-                            )
-                        })?
-                        .json,
-                )?;
+                let condition: indexlake::expr::Expr =
+                    deserialize_il_expr(node.condition.as_ref().ok_or_else(|| {
+                        DataFusionError::Internal("Missing condition in delete node".to_string())
+                    })?)?;
 
                 let lazy_table =
                     LazyTable::new(self.client.clone(), node.namespace_name, node.table_name);
@@ -303,17 +286,17 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
             Ok(())
         } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeUpdateExec>() {
-            let condition_json = serialize_il_expr(&exec.update.condition)?;
+            let condition_node = serialize_il_expr(&exec.update.condition)?;
 
             let assignments = exec
                 .update
                 .set_map
                 .iter()
                 .map(|(col, expr)| {
-                    let value_json = serialize_il_expr(expr)?;
+                    let value_node = serialize_il_expr(expr)?;
                     Ok(ExprColumnAssignment {
                         column: col.clone(),
-                        value: Some(IndexLakeExprNode { json: value_json }),
+                        value: Some(value_node),
                     })
                 })
                 .collect::<Result<Vec<_>, DataFusionError>>()?;
@@ -323,9 +306,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     IndexLakeUpdateExecNode {
                         namespace_name: exec.lazy_table.namespace_name.clone(),
                         table_name: exec.lazy_table.table_name.clone(),
-                        condition: Some(IndexLakeExprNode {
-                            json: condition_json,
-                        }),
+                        condition: Some(condition_node),
                         assignments,
                     },
                 )),
@@ -339,16 +320,14 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
 
             Ok(())
         } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeDeleteExec>() {
-            let condition_json = serialize_il_expr(&exec.condition)?;
+            let condition_node = serialize_il_expr(&exec.condition)?;
 
             let proto = IndexLakePhysicalPlanNode {
                 index_lake_physical_plan_type: Some(IndexLakePhysicalPlanType::Delete(
                     IndexLakeDeleteExecNode {
                         namespace_name: exec.lazy_table.namespace_name.clone(),
                         table_name: exec.lazy_table.table_name.clone(),
-                        condition: Some(IndexLakeExprNode {
-                            json: condition_json,
-                        }),
+                        condition: Some(condition_node),
                     },
                 )),
             };
@@ -529,13 +508,15 @@ fn serialize_data_file_format(format: DataFileFormat) -> i32 {
     proto_format.into()
 }
 
-fn serialize_il_expr(expr: &indexlake::expr::Expr) -> Result<String, DataFusionError> {
-    serde_json::to_string(expr)
-        .map_err(|e| DataFusionError::Internal(format!("Failed to serialize indexlake expr: {e}")))
+fn serialize_il_expr(expr: &indexlake::expr::Expr) -> Result<IndexLakeExprNode, DataFusionError> {
+    let json = serde_json::to_string(expr).map_err(|e| {
+        DataFusionError::Internal(format!("Failed to serialize indexlake expr: {e}"))
+    })?;
+    Ok(IndexLakeExprNode { json })
 }
 
-fn deserialize_il_expr(json: &str) -> Result<indexlake::expr::Expr, DataFusionError> {
-    serde_json::from_str(json).map_err(|e| {
+fn deserialize_il_expr(node: &IndexLakeExprNode) -> Result<indexlake::expr::Expr, DataFusionError> {
+    serde_json::from_str(&node.json).map_err(|e| {
         DataFusionError::Internal(format!("Failed to deserialize indexlake expr: {e}"))
     })
 }
