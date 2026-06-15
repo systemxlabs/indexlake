@@ -20,7 +20,7 @@ use indexlake::catalog::DataFileRecord;
 use indexlake::table::{Table, TableScan, TableScanPartition};
 use log::error;
 
-use crate::{LazyTable, datafusion_expr_to_indexlake_expr};
+use crate::{LazyTable, datafusion_expr_to_indexlake_expr, schema_projection_equals};
 
 #[derive(Debug)]
 pub struct IndexLakeScanExec {
@@ -254,18 +254,6 @@ impl DisplayAs for IndexLakeScanExec {
         }
         Ok(())
     }
-}
-
-fn schema_projection_equals(left: &Schema, right: &Schema) -> bool {
-    if left.fields.len() != right.fields.len() {
-        return false;
-    }
-    for (left_field, right_field) in left.fields.iter().zip(right.fields.iter()) {
-        if left_field.name() != right_field.name() {
-            return false;
-        }
-    }
-    true
 }
 
 pub(crate) fn build_scan_partitions(
