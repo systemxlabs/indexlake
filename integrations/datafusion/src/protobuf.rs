@@ -136,13 +136,19 @@ pub struct IndexLakeSearchExecNode {
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct IndexLakeExprNode {
+    #[prost(string, tag = "1")]
+    pub json: ::prost::alloc::string::String,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IndexLakeUpdateExecNode {
     #[prost(string, tag = "1")]
     pub namespace_name: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub table_name: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub condition_json: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub condition: ::core::option::Option<IndexLakeExprNode>,
     #[prost(message, repeated, tag = "4")]
     pub assignments: ::prost::alloc::vec::Vec<ExprColumnAssignment>,
 }
@@ -151,8 +157,8 @@ pub struct IndexLakeUpdateExecNode {
 pub struct ExprColumnAssignment {
     #[prost(string, tag = "1")]
     pub column: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub value_json: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "2")]
+    pub value: ::core::option::Option<IndexLakeExprNode>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -161,8 +167,8 @@ pub struct IndexLakeDeleteExecNode {
     pub namespace_name: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub table_name: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub condition_json: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub condition: ::core::option::Option<IndexLakeExprNode>,
 }
 
 impl DataFileFormat {
