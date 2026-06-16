@@ -286,6 +286,7 @@ async fn search_inline_rows(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn search_index_file(
     storage: &dyn Storage,
     index_kind: &dyn IndexKind,
