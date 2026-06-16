@@ -51,10 +51,10 @@ async fn create_hnsw_index(
     let mut search = TableSearch {
         query: Arc::new(HnswSearchQuery {
             vector: vec![26.0, 26.0, 26.0],
-            limit: 2,
         }),
         projection: None,
         dynamic_fields: vec![],
+        limit: Some(2),
         concurrency: 8,
     };
 

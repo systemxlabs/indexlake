@@ -72,6 +72,7 @@ pub trait Index: Debug + Send + Sync {
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
         validity: &RowValidity,
+        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries>;
 
     async fn filter(
@@ -109,8 +110,6 @@ pub enum FilterSupport {
 
 pub trait SearchQuery: Debug + Send + Sync + Any {
     fn index_kind(&self) -> &str;
-
-    fn limit(&self) -> Option<usize>;
 }
 
 /// Codec for serializing/deserializing SearchQuery to/from bytes.

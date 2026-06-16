@@ -822,7 +822,6 @@ async fn datafusion_search_exec(
     // Use BM25 search to find "Rust" documents
     let query = Arc::new(indexlake_index_bm25::BM25SearchQuery {
         query: "Rust".to_string(),
-        limit: Some(2),
     });
     let dynamic_fields = vec!["score".to_string()];
 
@@ -921,7 +920,6 @@ async fn datafusion_search_exec_serialization(
 
     let query = Arc::new(indexlake_index_bm25::BM25SearchQuery {
         query: "Rust".to_string(),
-        limit: Some(1),
     });
     let dynamic_fields = vec!["score".to_string()];
 

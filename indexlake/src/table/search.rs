@@ -23,6 +23,7 @@ pub struct TableSearch {
     pub query: Arc<dyn SearchQuery>,
     pub projection: Option<Vec<usize>>,
     pub dynamic_fields: Vec<String>,
+    pub limit: Option<usize>,
     /// Maximum number of concurrent data file index searches and row reads.
     pub concurrency: usize,
 }
@@ -152,6 +153,7 @@ pub(crate) async fn process_search(
             let index_kind = index_kind.clone();
             let index_def = index_def.clone();
             let search_query = search.query.clone();
+            let search_limit = search.limit;
             let dynamic_fields = search.dynamic_fields.clone();
             let validity = data_file_record.validity.clone();
             async move {
@@ -164,6 +166,7 @@ pub(crate) async fn process_search(
                     &index_file_record,
                     &dynamic_fields,
                     &validity,
+                    search_limit,
                 )
                 .await?;
                 Ok::<_, ILError>((data_file_id, search_entries))
@@ -183,11 +186,8 @@ pub(crate) async fn process_search(
     let score_higher_is_better = inline_search_entries.score_higher_is_better;
     all_search_entries.push((RowLocation::Inline, inline_search_entries));
 
-    let merged_entries = merge_search_index_entries(
-        all_search_entries,
-        score_higher_is_better,
-        search.query.limit(),
-    )?;
+    let merged_entries =
+        merge_search_index_entries(all_search_entries, score_higher_is_better, search.limit)?;
 
     // Determine if user explicitly requested _row_id in their projection
     let user_wants_row_id = search
@@ -260,6 +260,7 @@ async fn search_inline_rows(
                 search.query.as_ref(),
                 &search.dynamic_fields,
                 &record.validity,
+                search.limit,
             )
             .await?;
         score_higher_is_better = entries.score_higher_is_better;
@@ -293,6 +294,7 @@ async fn search_index_file(
     index_file_record: &IndexFileRecord,
     dynamic_fields: &[String],
     validity: &RowValidity,
+    limit: Option<usize>,
 ) -> ILResult<SearchIndexEntries> {
     let index_file = storage.open(&index_file_record.relative_path).await?;
 
@@ -301,7 +303,9 @@ async fn search_index_file(
 
     let index = index_builder.build()?;
 
-    let search_index_entries = index.search(search_query, dynamic_fields, validity).await?;
+    let search_index_entries = index
+        .search(search_query, dynamic_fields, validity, limit)
+        .await?;
 
     Ok(search_index_entries)
 }

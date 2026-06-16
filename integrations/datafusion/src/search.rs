@@ -23,6 +23,7 @@ pub struct IndexLakeSearchExec {
     pub query: Arc<dyn SearchQuery>,
     pub dynamic_fields: Vec<String>,
     pub projection: Option<Vec<usize>>,
+    pub limit: Option<usize>,
     properties: Arc<PlanProperties>,
 }
 
@@ -49,6 +50,7 @@ impl IndexLakeSearchExec {
             query,
             dynamic_fields,
             projection,
+            limit: None,
             properties,
         })
     }
@@ -93,6 +95,7 @@ impl ExecutionPlan for IndexLakeSearchExec {
         let query = self.query.clone();
         let dynamic_fields = self.dynamic_fields.clone();
         let projection = self.projection.clone();
+        let limit = self.limit;
 
         let fut = async move {
             let table = lazy_table.get_or_load().await?;
@@ -101,6 +104,7 @@ impl ExecutionPlan for IndexLakeSearchExec {
                 query,
                 projection: projection.clone(),
                 dynamic_fields: dynamic_fields.clone(),
+                limit,
                 concurrency: 8,
             };
 
@@ -117,7 +121,7 @@ impl ExecutionPlan for IndexLakeSearchExec {
     }
 
     fn fetch(&self) -> Option<usize> {
-        self.query.limit()
+        self.limit
     }
 
     fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
@@ -142,7 +146,7 @@ impl DisplayAs for IndexLakeSearchExec {
         if let Some(ref projection) = self.projection {
             write!(f, ", projection={projection:?}")?;
         }
-        if let Some(limit) = self.query.limit() {
+        if let Some(limit) = self.limit {
             write!(f, ", limit={limit}")?;
         }
         Ok(())

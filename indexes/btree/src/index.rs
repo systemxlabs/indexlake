@@ -123,6 +123,7 @@ impl Index for BTreeIndex {
         _query: &dyn SearchQuery,
         _dynamic_fields: &[String],
         _validity: &indexlake::index::RowValidity,
+        _limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         Err(ILError::not_supported(
             "B-tree index does not support search",

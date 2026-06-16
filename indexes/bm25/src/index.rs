@@ -15,16 +15,11 @@ use crate::{ArrowScorer, BM25IndexParams, JiebaTokenizer};
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BM25SearchQuery {
     pub query: String,
-    pub limit: Option<usize>,
 }
 
 impl SearchQuery for BM25SearchQuery {
     fn index_kind(&self) -> &str {
         "bm25"
-    }
-
-    fn limit(&self) -> Option<usize> {
-        self.limit
     }
 }
 
@@ -64,14 +59,13 @@ impl Index for BM25Index {
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
         validity: &RowValidity,
+        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         let query = query
             .downcast_ref::<BM25SearchQuery>()
             .ok_or(ILError::index("Invalid query type"))?;
         let query_embedding = self.embedder.embed(&query.query);
-        let matches = self
-            .scorer
-            .matches(&query_embedding, query.limit, validity)?;
+        let matches = self.scorer.matches(&query_embedding, limit, validity)?;
 
         let mut row_ids = Vec::with_capacity(matches.len());
         let mut scores = Vec::with_capacity(matches.len());

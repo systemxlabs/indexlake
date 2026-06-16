@@ -100,10 +100,10 @@ async fn create_bm25_index(
     let mut search = TableSearch {
         query: Arc::new(BM25SearchQuery {
             query: "pink".to_string(),
-            limit: Some(2),
         }),
         projection: None,
         dynamic_fields: vec![],
+        limit: Some(2),
         concurrency: 8,
     };
     let table_str = table_search(&table, search.clone()).await?;
@@ -135,10 +135,10 @@ async fn create_bm25_index(
     let mut search = TableSearch {
         query: Arc::new(BM25SearchQuery {
             query: "大学".to_string(),
-            limit: Some(2),
         }),
         projection: None,
         dynamic_fields: vec![],
+        limit: Some(2),
         concurrency: 8,
     };
     let table_str = table_search(&table, search.clone()).await?;
@@ -170,10 +170,10 @@ async fn create_bm25_index(
     let search_without_row_id = TableSearch {
         query: Arc::new(BM25SearchQuery {
             query: "pink".to_string(),
-            limit: Some(2),
         }),
         projection: Some(vec![1]),
         dynamic_fields: vec![],
+        limit: Some(2),
         concurrency: 8,
     };
     let table_str = table_search(&table, search_without_row_id).await?;
