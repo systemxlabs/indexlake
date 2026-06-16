@@ -36,7 +36,7 @@ impl IndexLakeSearchExec {
     ) -> Result<Self, DataFusionError> {
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let exec_schema =
-            merge_dynamic_fields(&lazy_table, &query, &projected_schema, &dynamic_fields);
+            merge_dynamic_fields(&lazy_table, &query, &projected_schema, &dynamic_fields)?;
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(exec_schema),
             Partitioning::UnknownPartitioning(1),
@@ -152,44 +152,49 @@ impl DisplayAs for IndexLakeSearchExec {
 /// Extend the projected schema with dynamic field columns.
 ///
 /// Dynamic field Arrow types are resolved from the [`IndexKind`]
-/// via `lazy_table.client.index_kinds`. Falls back to `DataType::Null`
-/// placeholders if the index kind or its dynamic fields are not found.
+/// via `lazy_table.client.index_kinds`.
 fn merge_dynamic_fields(
     lazy_table: &LazyTable,
     query: &Arc<dyn SearchQuery>,
     projected_schema: &SchemaRef,
     dynamic_fields: &[String],
-) -> SchemaRef {
+) -> Result<SchemaRef, DataFusionError> {
     if dynamic_fields.is_empty() {
-        return projected_schema.clone();
+        return Ok(projected_schema.clone());
     }
 
-    // Resolve dynamic field types from IndexKind
-    let resolved_fields = lazy_table
+    let index_kind = lazy_table
         .client
         .index_kinds
         .get(query.index_kind())
-        .and_then(|kind| kind.dynamic_fields().ok());
+        .ok_or_else(|| {
+            DataFusionError::Internal(format!("Index kind '{}' not found", query.index_kind()))
+        })?;
+
+    let resolved_fields = index_kind.dynamic_fields().map_err(|e| {
+        DataFusionError::Internal(format!(
+            "Failed to resolve dynamic fields for index kind '{}': {e}",
+            query.index_kind()
+        ))
+    })?;
 
     let mut fields = projected_schema.fields().to_vec();
-    if let Some(resolved) = resolved_fields {
-        for field in resolved {
-            if dynamic_fields.contains(&field.name().to_string()) {
-                fields.push(field);
-            }
-        }
-    } else {
-        // Fallback: use Null placeholders
-        for name in dynamic_fields {
-            fields.push(Arc::new(arrow::datatypes::Field::new(
-                name.clone(),
-                arrow::datatypes::DataType::Null,
-                true,
-            )));
-        }
+    for name in dynamic_fields {
+        let field = resolved_fields
+            .iter()
+            .find(|f| f.name() == name.as_str())
+            .cloned()
+            .ok_or_else(|| {
+                DataFusionError::Internal(format!(
+                    "Dynamic field '{}' not found in index kind '{}'",
+                    name,
+                    query.index_kind()
+                ))
+            })?;
+        fields.push(field);
     }
-    Arc::new(arrow::datatypes::Schema::new_with_metadata(
+    Ok(Arc::new(arrow::datatypes::Schema::new_with_metadata(
         fields,
         projected_schema.metadata().clone(),
-    ))
+    )))
 }
