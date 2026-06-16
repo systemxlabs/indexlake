@@ -61,12 +61,8 @@ impl IndexKind for BM25IndexKind {
         Some(Arc::new(BM25SearchQueryCodec))
     }
 
-    fn dynamic_fields(&self) -> ILResult<Vec<FieldRef>> {
-        Ok(vec![Arc::new(Field::new(
-            "score",
-            DataType::Float64,
-            false,
-        ))])
+    fn dynamic_fields(&self) -> Vec<FieldRef> {
+        vec![Arc::new(Field::new("score", DataType::Float64, false))]
     }
 
     fn supports_filter(&self, _: &IndexDefinition, _: &Expr) -> ILResult<FilterSupport> {

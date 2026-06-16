@@ -76,8 +76,8 @@ impl IndexKind for BTreeIndexKind {
         None
     }
 
-    fn dynamic_fields(&self) -> ILResult<Vec<FieldRef>> {
-        Ok(Vec::new())
+    fn dynamic_fields(&self) -> Vec<FieldRef> {
+        Vec::new()
     }
 
     fn supports_filter(

@@ -53,7 +53,7 @@ impl TableSearch {
             })?;
 
         let supported_fields = index_kind
-            .dynamic_fields()?
+            .dynamic_fields()
             .into_iter()
             .map(|field| (field.name().clone(), field))
             .collect::<HashMap<_, _>>();

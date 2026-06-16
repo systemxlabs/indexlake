@@ -171,12 +171,7 @@ fn merge_dynamic_fields(
             DataFusionError::Internal(format!("Index kind '{}' not found", query.index_kind()))
         })?;
 
-    let resolved_fields = index_kind.dynamic_fields().map_err(|e| {
-        DataFusionError::Internal(format!(
-            "Failed to resolve dynamic fields for index kind '{}': {e}",
-            query.index_kind()
-        ))
-    })?;
+    let resolved_fields = index_kind.dynamic_fields();
 
     let mut fields = projected_schema.fields().to_vec();
     for name in dynamic_fields {
