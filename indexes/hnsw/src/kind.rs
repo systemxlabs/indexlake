@@ -70,7 +70,7 @@ impl IndexKind for HnswIndexKind {
         Some(Arc::new(HnswSearchQueryCodec))
     }
 
-    fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {
+    fn dynamic_fields(&self) -> ILResult<Vec<FieldRef>> {
         Ok(vec![Arc::new(Field::new(
             "distance",
             DataType::Float64,

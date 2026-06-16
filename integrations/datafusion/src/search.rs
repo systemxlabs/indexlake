@@ -2,7 +2,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
-use datafusion_common::DataFusionError;
+use datafusion_common::{DataFusionError, project_schema};
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::EquivalenceProperties;
 use datafusion_physical_plan::execution_plan::{Boundedness, EmissionType};
@@ -29,13 +29,14 @@ pub struct IndexLakeSearchExec {
 impl IndexLakeSearchExec {
     pub fn try_new(
         lazy_table: LazyTable,
-        exec_schema: SchemaRef,
+        output_schema: SchemaRef,
         query: Arc<dyn SearchQuery>,
         dynamic_fields: Vec<String>,
         projection: Option<Vec<usize>>,
     ) -> Result<Self, DataFusionError> {
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
-        let exec_schema = merge_dynamic_fields(&projected_schema, &dynamic_fields);
+        let exec_schema =
+            merge_dynamic_fields(&lazy_table, &query, &projected_schema, &dynamic_fields);
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(exec_schema),
             Partitioning::UnknownPartitioning(1),
@@ -150,21 +151,42 @@ impl DisplayAs for IndexLakeSearchExec {
 
 /// Extend the projected schema with dynamic field columns.
 ///
-/// Dynamic field Arrow types are resolved at execution time via
-/// [`TableSearch::output_schema()`]; here we use `DataType::Null`
-/// placeholders so that the schema shape (column count and names)
-/// matches the actual output.
-fn merge_dynamic_fields(projected_schema: &SchemaRef, dynamic_fields: &[String]) -> SchemaRef {
+/// Dynamic field Arrow types are resolved from the [`IndexKind`]
+/// via `lazy_table.client.index_kinds`. Falls back to `DataType::Null`
+/// placeholders if the index kind or its dynamic fields are not found.
+fn merge_dynamic_fields(
+    lazy_table: &LazyTable,
+    query: &Arc<dyn SearchQuery>,
+    projected_schema: &SchemaRef,
+    dynamic_fields: &[String],
+) -> SchemaRef {
     if dynamic_fields.is_empty() {
         return projected_schema.clone();
     }
+
+    // Resolve dynamic field types from IndexKind
+    let resolved_fields = lazy_table
+        .client
+        .index_kinds
+        .get(query.index_kind())
+        .and_then(|kind| kind.dynamic_fields().ok());
+
     let mut fields = projected_schema.fields().to_vec();
-    for name in dynamic_fields {
-        fields.push(Arc::new(arrow::datatypes::Field::new(
-            name.clone(),
-            arrow::datatypes::DataType::Null,
-            true,
-        )));
+    if let Some(resolved) = resolved_fields {
+        for field in resolved {
+            if dynamic_fields.contains(&field.name().to_string()) {
+                fields.push(field);
+            }
+        }
+    } else {
+        // Fallback: use Null placeholders
+        for name in dynamic_fields {
+            fields.push(Arc::new(arrow::datatypes::Field::new(
+                name.clone(),
+                arrow::datatypes::DataType::Null,
+                true,
+            )));
+        }
     }
     Arc::new(arrow::datatypes::Schema::new_with_metadata(
         fields,

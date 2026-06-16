@@ -33,7 +33,7 @@ pub trait IndexKind: Debug + Send + Sync {
 
     fn search_query_codec(&self) -> Option<Arc<dyn SearchQueryCodec>>;
 
-    fn dynamic_fields(&self, index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>>;
+    fn dynamic_fields(&self) -> ILResult<Vec<FieldRef>>;
 
     fn supports_filter(
         &self,
