@@ -132,6 +132,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                     query,
                     node.dynamic_fields.clone(),
                     projection,
+                    node.limit.map(|l| l as usize),
                 )?))
             }
             IndexLakePhysicalPlanType::Update(node) => {

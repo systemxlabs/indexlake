@@ -831,7 +831,14 @@ async fn datafusion_search_exec(
 
     let lazy_table =
         LazyTable::new(Arc::new(client), namespace_name, table_name).with_table(Arc::new(table));
-    let exec = IndexLakeSearchExec::try_new(lazy_table, table_schema, query, dynamic_fields, None)?;
+    let exec = IndexLakeSearchExec::try_new(
+        lazy_table,
+        table_schema,
+        query,
+        dynamic_fields,
+        None,
+        Some(2),
+    )?;
 
     // Verify exec schema includes dynamic field
     let schema = exec.schema();
@@ -929,7 +936,14 @@ async fn datafusion_search_exec_serialization(
     let client = Arc::new(client);
     let lazy_table = LazyTable::new(client.clone(), namespace_name.clone(), table_name.clone())
         .with_table(Arc::new(table));
-    let exec = IndexLakeSearchExec::try_new(lazy_table, table_schema, query, dynamic_fields, None)?;
+    let exec = IndexLakeSearchExec::try_new(
+        lazy_table,
+        table_schema,
+        query,
+        dynamic_fields,
+        None,
+        Some(1),
+    )?;
     let exec = Arc::new(exec);
 
     // Serialize and deserialize

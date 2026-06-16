@@ -34,6 +34,7 @@ impl IndexLakeSearchExec {
         query: Arc<dyn SearchQuery>,
         dynamic_fields: Vec<String>,
         projection: Option<Vec<usize>>,
+        limit: Option<usize>,
     ) -> Result<Self, DataFusionError> {
         let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let exec_schema =
@@ -50,7 +51,7 @@ impl IndexLakeSearchExec {
             query,
             dynamic_fields,
             projection,
-            limit: None,
+            limit,
             properties,
         })
     }
@@ -124,10 +125,21 @@ impl ExecutionPlan for IndexLakeSearchExec {
         self.limit
     }
 
-    fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
-        // Create a new search query with the requested limit
-        // Note: we can't modify the query in place, so we return None
-        None
+    fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
+        match IndexLakeSearchExec::try_new(
+            self.lazy_table.clone(),
+            self.output_schema.clone(),
+            self.query.clone(),
+            self.dynamic_fields.clone(),
+            self.projection.clone(),
+            limit,
+        ) {
+            Ok(exec) => Some(Arc::new(exec)),
+            Err(e) => {
+                log::error!("[indexlake] Failed to create IndexLakeSearchExec with fetch: {e}");
+                None
+            }
+        }
     }
 }
 
