@@ -17,16 +17,11 @@ use crate::Euclidean;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HnswSearchQuery {
     pub vector: Vec<f32>,
-    pub limit: usize,
 }
 
 impl SearchQuery for HnswSearchQuery {
     fn index_kind(&self) -> &str {
         "hnsw"
-    }
-
-    fn limit(&self) -> Option<usize> {
-        Some(self.limit)
     }
 }
 
@@ -76,6 +71,7 @@ impl Index for HnswIndex {
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
         validity: &RowValidity,
+        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         let query = query.downcast_ref::<HnswSearchQuery>().ok_or_else(|| {
             ILError::index(format!(
@@ -83,19 +79,20 @@ impl Index for HnswIndex {
             ))
         })?;
 
+        let limit = limit.unwrap_or(usize::MAX);
         // Keep fetching until we get enough valid rows or exhaust the index
         let mut row_ids = Vec::new();
         let mut scores = Vec::new();
         let total = self.hnsw.len();
-        let mut fetch_limit = query.limit.min(total);
+        let mut fetch_limit = limit.min(total);
         let mut scanned_count = 0;
-        while row_ids.len() < query.limit && fetch_limit <= total {
+        while row_ids.len() < limit && fetch_limit <= total {
             let neighbors = self.hnsw.knn(&query.vector, fetch_limit);
             for neighbor in &neighbors[scanned_count..] {
                 if validity.is_valid(neighbor.index)? {
                     row_ids.push(self.row_ids[neighbor.index]);
                     scores.push(neighbor.distance as f64);
-                    if row_ids.len() >= query.limit {
+                    if row_ids.len() >= limit {
                         break;
                     }
                 }

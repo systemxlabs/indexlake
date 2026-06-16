@@ -247,7 +247,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
                         namespace_name: exec.lazy_table.namespace_name.clone(),
                         table_name: exec.lazy_table.table_name.clone(),
                         index_kind: exec.query.index_kind().to_string(),
-                        limit: exec.query.limit().map(|l| l as u32),
+                        limit: exec.limit.map(|l| l as u32),
                         dynamic_fields: exec.dynamic_fields.clone(),
                         projection,
                         schema: Some(schema),

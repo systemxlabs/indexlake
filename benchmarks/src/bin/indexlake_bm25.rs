@@ -102,10 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let table_search = TableSearch {
         query: Arc::new(BM25SearchQuery {
             query: "杨绛女士".to_string(),
-            limit: Some(limit),
         }),
         projection: None,
         dynamic_fields: vec![],
+        limit: Some(limit),
         concurrency: 8,
     };
     let mut stream = table.search(table_search).await?;

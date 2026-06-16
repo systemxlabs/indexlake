@@ -15,22 +15,17 @@ use crate::rabitq::{BruteForceRabitqIndex, BruteForceSearchParams};
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RabitqSearchQuery {
     pub vector: Vec<f32>,
-    pub limit: usize,
 }
 
 impl RabitqSearchQuery {
-    pub fn new(vector: Vec<f32>, limit: usize) -> Self {
-        Self { vector, limit }
+    pub fn new(vector: Vec<f32>) -> Self {
+        Self { vector }
     }
 }
 
 impl SearchQuery for RabitqSearchQuery {
     fn index_kind(&self) -> &str {
         "rabitq"
-    }
-
-    fn limit(&self) -> Option<usize> {
-        Some(self.limit)
     }
 }
 
@@ -79,6 +74,7 @@ impl Index for RabitqIndex {
         query: &dyn SearchQuery,
         dynamic_fields: &[String],
         validity: &RowValidity,
+        limit: Option<usize>,
     ) -> ILResult<SearchIndexEntries> {
         let query = query.downcast_ref::<RabitqSearchQuery>().ok_or_else(|| {
             ILError::index(format!(
@@ -86,15 +82,16 @@ impl Index for RabitqIndex {
             ))
         })?;
 
+        let limit = limit.unwrap_or(usize::MAX);
         let score_higher_is_better = matches!(self.metric, RabitqMetric::InnerProduct);
 
         // Keep fetching until we get enough valid rows or exhaust the index
         let mut row_ids = Vec::new();
         let mut scores = Vec::new();
         let total_vectors = self.row_ids.len();
-        let mut fetch_limit = query.limit.min(total_vectors);
+        let mut fetch_limit = limit.min(total_vectors);
         let mut scanned_count = 0;
-        while row_ids.len() < query.limit && fetch_limit <= total_vectors {
+        while row_ids.len() < limit && fetch_limit <= total_vectors {
             let params = BruteForceSearchParams { top_k: fetch_limit };
             let results = self
                 .inner
@@ -104,7 +101,7 @@ impl Index for RabitqIndex {
                 if validity.is_valid(r.id)? {
                     row_ids.push(self.row_ids[r.id]);
                     scores.push(r.score as f64);
-                    if row_ids.len() >= query.limit {
+                    if row_ids.len() >= limit {
                         break;
                     }
                 }
