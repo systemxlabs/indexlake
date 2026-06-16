@@ -9,7 +9,7 @@ use datafusion_proto::protobuf::PhysicalPlanNode;
 use indexlake::Client;
 use indexlake::catalog::{Catalog, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use indexlake::storage::{DataFileFormat, Storage};
-use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion, TableSearch};
+use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion};
 use indexlake_datafusion::{
     IndexLakePhysicalCodec, IndexLakeSearchExec, IndexLakeTable, LazyTable,
 };
@@ -826,20 +826,13 @@ async fn datafusion_search_exec(
     });
     let dynamic_fields = vec!["score".to_string()];
 
-    // Compute the correct exec schema via TableSearch::output_schema()
+    // try_new computes exec schema from raw table schema + projection + dynamic fields
     let table = client.load_table(&namespace_name, &table_name).await?;
-    let table_search = TableSearch {
-        query: query.clone(),
-        projection: None,
-        dynamic_fields: dynamic_fields.clone(),
-        concurrency: 8,
-    };
-    let exec_schema = table_search.output_schema(&table)?;
+    let table_schema = table.output_schema.clone();
 
     let lazy_table =
         LazyTable::new(Arc::new(client), namespace_name, table_name).with_table(Arc::new(table));
-    let exec =
-        IndexLakeSearchExec::try_new(lazy_table, exec_schema.clone(), query, dynamic_fields, None)?;
+    let exec = IndexLakeSearchExec::try_new(lazy_table, table_schema, query, dynamic_fields, None)?;
 
     // Verify exec schema includes dynamic field
     let schema = exec.schema();
@@ -933,18 +926,12 @@ async fn datafusion_search_exec_serialization(
     let dynamic_fields = vec!["score".to_string()];
 
     let table = client.load_table(&namespace_name, &table_name).await?;
-    let table_search = TableSearch {
-        query: query.clone(),
-        projection: None,
-        dynamic_fields: dynamic_fields.clone(),
-        concurrency: 8,
-    };
-    let exec_schema = table_search.output_schema(&table)?;
+    let table_schema = table.output_schema.clone();
 
     let client = Arc::new(client);
     let lazy_table = LazyTable::new(client.clone(), namespace_name.clone(), table_name.clone())
         .with_table(Arc::new(table));
-    let exec = IndexLakeSearchExec::try_new(lazy_table, exec_schema, query, dynamic_fields, None)?;
+    let exec = IndexLakeSearchExec::try_new(lazy_table, table_schema, query, dynamic_fields, None)?;
     let exec = Arc::new(exec);
 
     // Serialize and deserialize
