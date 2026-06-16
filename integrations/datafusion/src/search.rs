@@ -2,7 +2,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
-use datafusion_common::{DataFusionError, project_schema};
+use datafusion_common::DataFusionError;
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::EquivalenceProperties;
 use datafusion_physical_plan::execution_plan::{Boundedness, EmissionType};
@@ -29,7 +29,7 @@ pub struct IndexLakeSearchExec {
 impl IndexLakeSearchExec {
     pub fn try_new(
         lazy_table: LazyTable,
-        output_schema: SchemaRef,
+        exec_schema: SchemaRef,
         query: Arc<dyn SearchQuery>,
         dynamic_fields: Vec<String>,
         projection: Option<Vec<usize>>,
