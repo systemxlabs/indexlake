@@ -60,8 +60,7 @@ impl IndexLakeTable {
         let counts = self
             .table
             .count(&[TableScanPartition::single_partition()])
-            .await
-            .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+            .await?;
         self.table_row_count = Some(counts[0]);
         Ok(self)
     }
@@ -116,19 +115,11 @@ impl TableProvider for IndexLakeTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let data_file_count = self
-            .table
-            .data_file_count()
-            .await
-            .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+        let data_file_count = self.table.data_file_count().await?;
         let data_files = if data_file_count > 1000 {
             None
         } else {
-            let records = self
-                .table
-                .data_file_records()
-                .await
-                .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+            let records = self.table.data_file_records().await?;
             Some(Arc::new(records))
         };
 
@@ -148,11 +139,7 @@ impl TableProvider for IndexLakeTable {
         .with_table(self.table.clone());
 
         let scan_partitions = Arc::new(build_scan_partitions(self.num_scan_partitions, data_files));
-        let partition_row_counts = self
-            .table
-            .count(scan_partitions.as_ref())
-            .await
-            .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+        let partition_row_counts = self.table.count(scan_partitions.as_ref()).await?;
         let partition_row_counts = Arc::new(partition_row_counts);
         let exec = IndexLakeScanExec::try_new(
             lazy_table,
@@ -178,10 +165,7 @@ impl TableProvider for IndexLakeTable {
                 supports.push(TableProviderFilterPushDown::Unsupported);
                 continue;
             };
-            let support = self
-                .table
-                .supports_filter(il_expr.clone())
-                .map_err(|e| DataFusionError::Internal(e.to_string()))?;
+            let support = self.table.supports_filter(il_expr.clone())?;
             match support {
                 FilterSupport::Exact => supports.push(TableProviderFilterPushDown::Exact),
                 FilterSupport::Inexact => supports.push(TableProviderFilterPushDown::Inexact),

@@ -2659,6 +2659,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "comfy-table",
+ "datafusion-common",
  "derive-visitor",
  "derive-with",
  "futures",

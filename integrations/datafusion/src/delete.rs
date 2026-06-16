@@ -78,15 +78,9 @@ impl ExecutionPlan for IndexLakeDeleteExec {
         let condition = self.condition.clone();
 
         let stream = futures::stream::once(async move {
-            let table = lazy_table
-                .get_or_load()
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let table = lazy_table.get_or_load().await?;
 
-            let count = table
-                .delete(condition)
-                .await
-                .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+            let count = table.delete(condition).await?;
 
             make_result_batch(count as i64)
         })

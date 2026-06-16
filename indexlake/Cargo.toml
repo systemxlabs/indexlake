@@ -24,6 +24,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4", "v7"] }
+datafusion-common = { workspace = true, optional = true }
+
+[features]
+datafusion = ["datafusion-common"]
 
 [lib]
 doctest = false
