@@ -62,7 +62,7 @@ impl IndexKind for RabitqIndexKind {
             .arrow_schema
             .field_with_name(key_column_name)?;
         match key_field.data_type() {
-            DataType::List(inner) => {
+            DataType::List(inner) | DataType::FixedSizeList(inner, _) => {
                 if !matches!(inner.data_type(), DataType::Float32) || inner.is_nullable() {
                     return Err(ILError::index(
                         "RaBitQ index key column must be a list of non-nullable float32",
