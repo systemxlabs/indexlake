@@ -103,6 +103,7 @@ impl ExecutionPlan for IndexLakeSearchExec {
                 query,
                 projection: projection.clone(),
                 dynamic_fields: dynamic_fields.clone(),
+                concurrency: 8,
             };
 
             let stream = table

@@ -55,6 +55,7 @@ async fn create_hnsw_index(
         }),
         projection: None,
         dynamic_fields: vec![],
+        concurrency: 8,
     };
 
     let table = client.load_table(&namespace_name, &table_name).await?;
