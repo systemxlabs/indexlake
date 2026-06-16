@@ -4,7 +4,7 @@ use std::sync::Arc;
 use arrow::array::{ArrayRef, FixedSizeBinaryArray, Float64Array, RecordBatch};
 use arrow::compute::SortOptions;
 use arrow::datatypes::{FieldRef, Schema, SchemaRef};
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -23,9 +23,17 @@ pub struct TableSearch {
     pub query: Arc<dyn SearchQuery>,
     pub projection: Option<Vec<usize>>,
     pub dynamic_fields: Vec<String>,
+    /// Maximum number of concurrent data file index searches and row reads.
+    pub concurrency: usize,
 }
 
 impl TableSearch {
+    /// Set the maximum number of concurrent data file operations during search.
+    pub fn with_concurrency(mut self, concurrency: usize) -> Self {
+        self.concurrency = concurrency;
+        self
+    }
+
     pub fn output_schema(&self, table: &Table) -> ILResult<SchemaRef> {
         let projected_schema = project_schema(&table.output_schema, self.projection.as_ref())?;
         if self.dynamic_fields.is_empty() {
@@ -128,43 +136,46 @@ pub(crate) async fn process_search(
         .map(|record| (record.data_file_id, record))
         .collect();
 
-    let mut handles = Vec::new();
-    for data_file_record in data_file_records.iter() {
-        let data_file_id = data_file_record.data_file_id;
-        let index_file_record =
-            index_file_records
-                .get(&data_file_id)
-                .cloned()
-                .ok_or(ILError::index(format!(
-                    "Index file not found for index {index_id} and data file {data_file_id}"
-                )))?;
-        let storage = table.storage.clone();
-        let index_kind = index_kind.clone();
-        let index_def = index_def.clone();
-        let search_query = search.query.clone();
-        let dynamic_fields = search.dynamic_fields.clone();
-        let validity = data_file_record.validity.clone();
-        let handle = tokio::spawn(async move {
-            let search_entries = search_index_file(
-                storage.as_ref(),
-                index_kind.as_ref(),
-                &index_def,
-                search_query.as_ref(),
-                &index_file_record,
-                &dynamic_fields,
-                &validity,
-            )
-            .await?;
-            Ok::<_, ILError>((data_file_id, search_entries))
-        });
-        handles.push(handle);
-    }
+    // Search data file indexes with bounded concurrency
+    let max_concurrency = search.concurrency.min(data_file_records.len().max(1));
+    let results: Vec<_> = futures::stream::iter(data_file_records.clone())
+        .map(|data_file_record| {
+            let data_file_id = data_file_record.data_file_id;
+            let index_file_record =
+                index_file_records
+                    .get(&data_file_id)
+                    .cloned()
+                    .ok_or(ILError::index(format!(
+                        "Index file not found for index {index_id} and data file {data_file_id}"
+                    )));
+            let storage = table.storage.clone();
+            let index_kind = index_kind.clone();
+            let index_def = index_def.clone();
+            let search_query = search.query.clone();
+            let dynamic_fields = search.dynamic_fields.clone();
+            let validity = data_file_record.validity.clone();
+            async move {
+                let index_file_record = index_file_record?;
+                let search_entries = search_index_file(
+                    storage.as_ref(),
+                    index_kind.as_ref(),
+                    &index_def,
+                    search_query.as_ref(),
+                    &index_file_record,
+                    &dynamic_fields,
+                    &validity,
+                )
+                .await?;
+                Ok::<_, ILError>((data_file_id, search_entries))
+            }
+        })
+        .buffered(max_concurrency)
+        .collect()
+        .await;
 
-    let join_all = futures::future::join_all(handles).await;
-
-    let mut all_search_entries = Vec::with_capacity(join_all.len() + 1);
-    for res in join_all {
-        let (data_file_id, search_entries) = res??;
+    let mut all_search_entries = Vec::with_capacity(results.len() + 1);
+    for res in results {
+        let (data_file_id, search_entries) = res?;
         all_search_entries.push((RowLocation::DataFile(data_file_id), search_entries));
     }
 
@@ -203,6 +214,7 @@ pub(crate) async fn process_search(
         &merged_entries.row_score_locations,
         internal_projection,
         &data_file_records,
+        search.concurrency,
     )
     .await?;
 
@@ -520,6 +532,7 @@ async fn read_rows(
     row_id_score_locations: &[(RowScore, RowLocation)],
     projection: Option<Vec<usize>>,
     data_file_records: &[DataFileRecord],
+    concurrency: usize,
 ) -> ILResult<(RecordBatch, Vec<RecordBatch>)> {
     // Collect inline row ids
     let inline_row_ids: Vec<_> = row_id_score_locations
@@ -565,15 +578,14 @@ async fn read_rows(
         Ok::<_, ILError>(batch)
     };
 
-    // Create data file reading tasks - parallelized
-    let data_file_tasks: Vec<_> = data_file_row_ids
-        .into_iter()
+    // Read data file rows with bounded concurrency
+    let max_concurrency = concurrency.min(data_file_row_ids.len().max(1));
+    let data_file_results = futures::stream::iter(data_file_row_ids)
         .map(|(data_file_id, row_ids)| {
             let table = table.clone();
             let projection = projection.clone();
             let data_file_records = data_file_records.to_vec();
-
-            tokio::spawn(async move {
+            async move {
                 let data_file_record = data_file_records
                     .iter()
                     .find(|record| record.data_file_id == data_file_id)
@@ -595,21 +607,20 @@ async fn read_rows(
 
                 let batches: Vec<RecordBatch> = stream.try_collect::<Vec<_>>().await?;
                 Ok::<_, ILError>(batches)
-            })
+            }
         })
-        .collect();
+        .buffered(max_concurrency);
 
-    // Execute inline task and all data file tasks concurrently
+    // Execute inline task and data file tasks concurrently
     let (inline_result, data_file_results) =
-        tokio::join!(inline_task, futures::future::join_all(data_file_tasks));
+        tokio::join!(inline_task, data_file_results.collect::<Vec<_>>());
 
     let inline_batch = inline_result?;
 
     // Collect all data file batches
     let mut all_data_file_batches = Vec::new();
     for result in data_file_results {
-        let batches = result.map_err(|e| ILError::internal(format!("Task join error: {e}")))??;
-        all_data_file_batches.extend(batches);
+        all_data_file_batches.extend(result?);
     }
 
     Ok((inline_batch, all_data_file_batches))

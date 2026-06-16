@@ -104,6 +104,7 @@ async fn create_bm25_index(
         }),
         projection: None,
         dynamic_fields: vec![],
+        concurrency: 8,
     };
     let table_str = table_search(&table, search.clone()).await?;
     println!("{}", table_str);
@@ -138,6 +139,7 @@ async fn create_bm25_index(
         }),
         projection: None,
         dynamic_fields: vec![],
+        concurrency: 8,
     };
     let table_str = table_search(&table, search.clone()).await?;
     println!("{}", table_str);
@@ -172,6 +174,7 @@ async fn create_bm25_index(
         }),
         projection: Some(vec![1]),
         dynamic_fields: vec![],
+        concurrency: 8,
     };
     let table_str = table_search(&table, search_without_row_id).await?;
     println!("{}", table_str);
