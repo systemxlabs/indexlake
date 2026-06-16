@@ -1,3 +1,4 @@
+use arrow::array::{RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::util::pretty::pretty_format_batches;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
@@ -8,8 +9,10 @@ use datafusion_proto::protobuf::PhysicalPlanNode;
 use indexlake::Client;
 use indexlake::catalog::{Catalog, INTERNAL_ROW_ID_FIELD_NAME, Scalar};
 use indexlake::storage::{DataFileFormat, Storage};
-use indexlake::table::{TableConfig, TableCreation};
-use indexlake_datafusion::{IndexLakePhysicalCodec, IndexLakeTable};
+use indexlake::table::{IndexCreation, TableConfig, TableCreation, TableInsertion};
+use indexlake_datafusion::{
+    IndexLakePhysicalCodec, IndexLakeSearchExec, IndexLakeTable, LazyTable,
+};
 use indexlake_integration_tests::data::prepare_simple_testing_table;
 use indexlake_integration_tests::utils::{
     datafusion_delete, datafusion_insert, datafusion_scan, datafusion_update,
@@ -741,6 +744,216 @@ async fn datafusion_count1_with_filter(
 | 2               |
 +-----------------+"#,
     );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn datafusion_search_exec(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let mut client = Client::new(catalog, storage);
+    client.register_index_kind(Arc::new(indexlake_index_bm25::BM25IndexKind));
+
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![
+        Field::new("title", DataType::Utf8, false),
+        Field::new("content", DataType::Utf8, false),
+    ]));
+    let table_config = TableConfig {
+        preferred_data_file_format: format,
+        ..Default::default()
+    };
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: table_schema.clone(),
+        config: table_config,
+        ..Default::default()
+    };
+    client.create_table(table_creation).await?;
+
+    // Insert test data
+    let table = client.load_table(&namespace_name, &table_name).await?;
+    let batches = vec![RecordBatch::try_new(
+        table_schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec![
+                "Rust Guide",
+                "Python Guide",
+                "Rust vs Python",
+            ])),
+            Arc::new(StringArray::from(vec![
+                "Rust is a systems programming language",
+                "Python is a scripting language",
+                "Comparing Rust and Python for data engineering",
+            ])),
+        ],
+    )?];
+    table.insert(TableInsertion::new(batches)).await?;
+
+    // Create BM25 index (create_index takes ownership, so reload)
+    let table = client.load_table(&namespace_name, &table_name).await?;
+    let index_creation = IndexCreation {
+        name: "content_idx".to_string(),
+        kind: "bm25".to_string(),
+        key_columns: vec!["content".to_string()],
+        params: Arc::new(indexlake_index_bm25::BM25IndexParams { avgdl: 256. }),
+        concurrency: 1,
+        if_not_exists: false,
+    };
+    table.create_index(index_creation).await?;
+
+    // Use BM25 search to find "Rust" documents
+    let query = Arc::new(indexlake_index_bm25::BM25SearchQuery {
+        query: "Rust".to_string(),
+        limit: Some(2),
+    });
+    let dynamic_fields = vec!["score".to_string()];
+
+    // try_new computes exec schema from raw table schema + projection + dynamic fields
+    let table = client.load_table(&namespace_name, &table_name).await?;
+    let table_schema = table.output_schema.clone();
+
+    let lazy_table =
+        LazyTable::new(Arc::new(client), namespace_name, table_name).with_table(Arc::new(table));
+    let exec = IndexLakeSearchExec::try_new(lazy_table, table_schema, query, dynamic_fields, None)?;
+
+    // Verify exec schema includes dynamic field
+    let schema = exec.schema();
+    let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    assert_eq!(
+        field_names,
+        vec!["_indexlake_row_id", "title", "content", "score"]
+    );
+
+    // Execute and collect results
+    let session = SessionContext::new();
+    let batches = collect(Arc::new(exec), session.task_ctx()).await?;
+    let table_str = pretty_format_batches(&batches)?.to_string();
+    println!("{table_str}");
+
+    // Should have at most 2 results (limit=2), with score column
+    assert!(batches.iter().map(|b| b.num_rows()).sum::<usize>() <= 2);
+    assert!(batches[0].schema().index_of("score").is_ok());
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn datafusion_search_exec_serialization(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let mut client = Client::new(catalog, storage);
+    client.register_index_kind(Arc::new(indexlake_index_bm25::BM25IndexKind));
+
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![Field::new(
+        "title",
+        DataType::Utf8,
+        false,
+    )]));
+    let table_config = TableConfig {
+        preferred_data_file_format: format,
+        ..Default::default()
+    };
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: table_schema.clone(),
+        config: table_config,
+        ..Default::default()
+    };
+    client.create_table(table_creation).await?;
+
+    // Insert test data
+    let table = client.load_table(&namespace_name, &table_name).await?;
+    let batches = vec![RecordBatch::try_new(
+        table_schema.clone(),
+        vec![Arc::new(StringArray::from(vec![
+            "Rust Guide",
+            "Python Guide",
+        ]))],
+    )?];
+    table.insert(TableInsertion::new(batches)).await?;
+
+    // Create BM25 index
+    let table = client.load_table(&namespace_name, &table_name).await?;
+    let index_creation = IndexCreation {
+        name: "title_idx".to_string(),
+        kind: "bm25".to_string(),
+        key_columns: vec!["title".to_string()],
+        params: Arc::new(indexlake_index_bm25::BM25IndexParams { avgdl: 256. }),
+        concurrency: 1,
+        if_not_exists: false,
+    };
+    table.create_index(index_creation).await?;
+
+    let query = Arc::new(indexlake_index_bm25::BM25SearchQuery {
+        query: "Rust".to_string(),
+        limit: Some(1),
+    });
+    let dynamic_fields = vec!["score".to_string()];
+
+    let table = client.load_table(&namespace_name, &table_name).await?;
+    let table_schema = table.output_schema.clone();
+
+    let client = Arc::new(client);
+    let lazy_table = LazyTable::new(client.clone(), namespace_name.clone(), table_name.clone())
+        .with_table(Arc::new(table));
+    let exec = IndexLakeSearchExec::try_new(lazy_table, table_schema, query, dynamic_fields, None)?;
+    let exec = Arc::new(exec);
+
+    // Serialize and deserialize
+    let codec = IndexLakePhysicalCodec::new(client.clone());
+    let mut plan_buf: Vec<u8> = vec![];
+    let plan_proto = PhysicalPlanNode::try_from_physical_plan(exec.clone(), &codec)?;
+    plan_proto.try_encode(&mut plan_buf)?;
+    let new_plan: Arc<dyn ExecutionPlan> =
+        PhysicalPlanNode::try_decode(&plan_buf).and_then(|proto| {
+            proto.try_into_physical_plan(&SessionContext::new().task_ctx(), &codec)
+        })?;
+
+    // Verify both can execute
+    let session = SessionContext::new();
+    let batches = collect(exec, session.task_ctx()).await?;
+    let deser_batches = collect(new_plan, session.task_ctx()).await?;
+
+    assert_eq!(batches.len(), deser_batches.len());
+    for (b1, b2) in batches.iter().zip(deser_batches.iter()) {
+        assert_eq!(b1.num_rows(), b2.num_rows());
+        assert_eq!(b1.num_columns(), b2.num_columns());
+    }
 
     Ok(())
 }
