@@ -90,3 +90,10 @@ impl From<uuid::Error> for ILError {
         ILError::InternalError(format!("UUID error: {err}"), Location::caller())
     }
 }
+
+#[cfg(feature = "datafusion")]
+impl From<ILError> for datafusion_common::DataFusionError {
+    fn from(err: ILError) -> Self {
+        datafusion_common::DataFusionError::External(Box::new(err))
+    }
+}

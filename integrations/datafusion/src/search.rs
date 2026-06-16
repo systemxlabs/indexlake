@@ -94,10 +94,7 @@ impl ExecutionPlan for IndexLakeSearchExec {
         let projection = self.projection.clone();
 
         let fut = async move {
-            let table = lazy_table
-                .get_or_load()
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let table = lazy_table.get_or_load().await?;
 
             let search = TableSearch {
                 query,
@@ -105,11 +102,8 @@ impl ExecutionPlan for IndexLakeSearchExec {
                 dynamic_fields: dynamic_fields.clone(),
             };
 
-            let stream = table
-                .search(search)
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
-            let stream = stream.map_err(|e| DataFusionError::External(Box::new(e)));
+            let stream = table.search(search).await?;
+            let stream = stream.map_err(DataFusionError::from);
             Ok::<_, DataFusionError>(stream)
         };
 

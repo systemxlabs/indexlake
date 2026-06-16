@@ -79,15 +79,9 @@ impl ExecutionPlan for IndexLakeUpdateExec {
         };
 
         let stream = futures::stream::once(async move {
-            let table = lazy_table
-                .get_or_load()
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let table = lazy_table.get_or_load().await?;
 
-            let count = table
-                .update(update)
-                .await
-                .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+            let count = table.update(update).await?;
 
             make_result_batch(count as i64)
         })

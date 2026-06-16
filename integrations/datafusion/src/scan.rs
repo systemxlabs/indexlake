@@ -148,10 +148,7 @@ impl ExecutionPlan for IndexLakeScanExec {
         let lazy_table = self.lazy_table.clone();
 
         let fut = async move {
-            let table = lazy_table
-                .get_or_load()
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let table = lazy_table.get_or_load().await?;
             get_batch_stream(table, projected_schema.clone(), scan).await
         };
         let stream = futures::stream::once(fut).try_flatten();
@@ -297,10 +294,7 @@ async fn get_batch_stream(
 ) -> Result<SendableRecordBatchStream, DataFusionError> {
     let stream = if scan.projection == Some(Vec::new()) {
         scan.projection = Some(vec![0]);
-        let stream = table
-            .scan(scan)
-            .await
-            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        let stream = table.scan(scan).await?;
         stream
             .map(|batch| {
                 let batch = batch?;
@@ -311,12 +305,9 @@ async fn get_batch_stream(
             })
             .boxed()
     } else {
-        table
-            .scan(scan)
-            .await
-            .map_err(|e| DataFusionError::Execution(e.to_string()))?
+        table.scan(scan).await?
     };
-    let stream = stream.map_err(|e| DataFusionError::Execution(e.to_string()));
+    let stream = stream.map_err(DataFusionError::from);
     Ok(Box::pin(RecordBatchStreamAdapter::new(
         projected_schema,
         stream,

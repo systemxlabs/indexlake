@@ -112,18 +112,12 @@ impl ExecutionPlan for IndexLakeInsertExec {
         let bypass_insert_threshold = self.bypass_insert_threshold;
 
         let stream = futures::stream::once(async move {
-            let table = lazy_table
-                .get_or_load()
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let table = lazy_table.get_or_load().await?;
 
             match insert_op {
                 InsertOp::Append => {}
                 InsertOp::Overwrite => {
-                    table
-                        .truncate()
-                        .await
-                        .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+                    table.truncate().await?;
                 }
                 InsertOp::Replace => {
                     return Err(DataFusionError::Execution(
@@ -143,11 +137,7 @@ impl ExecutionPlan for IndexLakeInsertExec {
                             ))
                         })
                         .boxed();
-                    let count = table.bypass_insert(stream).await.map_err(|e| {
-                        DataFusionError::Execution(format!(
-                            "Failed to bypass insert into indexlake: {e}"
-                        ))
-                    })?;
+                    let count = table.bypass_insert(stream).await?;
                     make_result_batch(count as i64)
                 }
                 _ => {
@@ -158,15 +148,13 @@ impl ExecutionPlan for IndexLakeInsertExec {
 
                         table
                             .insert(TableInsertion::new(vec![batch]).with_try_dump(false))
-                            .await
-                            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+                            .await?;
                     }
 
                     // trigger dump
                     table
                         .insert(TableInsertion::new(vec![]).with_try_dump(true))
-                        .await
-                        .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+                        .await?;
 
                     make_result_batch(count)
                 }

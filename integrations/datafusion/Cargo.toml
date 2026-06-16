@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "IndexLake datafusion integration"
 
 [dependencies]
-indexlake = { workspace = true }
+indexlake = { workspace = true, features = ["datafusion"] }
 
 # Core DataFusion components (instead of full datafusion crate)
 arrow = { workspace = true }
