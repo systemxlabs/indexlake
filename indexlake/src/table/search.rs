@@ -580,7 +580,7 @@ async fn read_rows(
 
     // Read data file rows with bounded concurrency
     let max_concurrency = concurrency.min(data_file_row_ids.len().max(1));
-    let data_file_results = futures::stream::iter(data_file_row_ids.into_iter())
+    let data_file_results = futures::stream::iter(data_file_row_ids)
         .map(|(data_file_id, row_ids)| {
             let table = table.clone();
             let projection = projection.clone();
