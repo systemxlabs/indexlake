@@ -66,13 +66,13 @@ impl IndexKind for RStarIndexKind {
         None
     }
 
-    fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {
-        Ok(vec![
+    fn dynamic_fields(&self) -> Vec<FieldRef> {
+        vec![
             Arc::new(Field::new("xmin", DataType::Float64, false)),
             Arc::new(Field::new("ymin", DataType::Float64, false)),
             Arc::new(Field::new("xmax", DataType::Float64, false)),
             Arc::new(Field::new("ymax", DataType::Float64, false)),
-        ])
+        ]
     }
 
     fn supports_filter(

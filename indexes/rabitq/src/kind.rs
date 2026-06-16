@@ -94,12 +94,8 @@ impl IndexKind for RabitqIndexKind {
         Some(Arc::new(RabitqSearchQueryCodec))
     }
 
-    fn dynamic_fields(&self, _index_def: &IndexDefinition) -> ILResult<Vec<FieldRef>> {
-        Ok(vec![Arc::new(Field::new(
-            "score",
-            DataType::Float64,
-            false,
-        ))])
+    fn dynamic_fields(&self) -> Vec<FieldRef> {
+        vec![Arc::new(Field::new("score", DataType::Float64, false))]
     }
 
     fn supports_filter(
