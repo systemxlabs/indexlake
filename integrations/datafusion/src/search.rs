@@ -2,10 +2,9 @@ use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
-use datafusion_common::{DataFusionError, project_schema};
+use datafusion_common::DataFusionError;
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::EquivalenceProperties;
-use datafusion_physical_plan::display::ProjectSchemaDisplay;
 use datafusion_physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::{
@@ -15,7 +14,7 @@ use futures::TryStreamExt;
 use indexlake::index::SearchQuery;
 use indexlake::table::TableSearch;
 
-use crate::{LazyTable, schema_projection_equals};
+use crate::LazyTable;
 
 #[derive(Debug)]
 pub struct IndexLakeSearchExec {
@@ -30,21 +29,20 @@ pub struct IndexLakeSearchExec {
 impl IndexLakeSearchExec {
     pub fn try_new(
         lazy_table: LazyTable,
-        output_schema: SchemaRef,
+        exec_schema: SchemaRef,
         query: Arc<dyn SearchQuery>,
         dynamic_fields: Vec<String>,
         projection: Option<Vec<usize>>,
     ) -> Result<Self, DataFusionError> {
-        let projected_schema = project_schema(&output_schema, projection.as_ref())?;
         let properties = Arc::new(PlanProperties::new(
-            EquivalenceProperties::new(projected_schema),
+            EquivalenceProperties::new(exec_schema.clone()),
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
         ));
         Ok(Self {
             lazy_table,
-            output_schema,
+            output_schema: exec_schema,
             query,
             dynamic_fields,
             projection,
@@ -138,13 +136,8 @@ impl DisplayAs for IndexLakeSearchExec {
         if !self.dynamic_fields.is_empty() {
             write!(f, ", dynamic_fields=[{}]", self.dynamic_fields.join(", "))?;
         }
-        let projected_schema = self.schema();
-        if !schema_projection_equals(&projected_schema, &self.output_schema) {
-            write!(
-                f,
-                ", projection={}",
-                ProjectSchemaDisplay(&projected_schema)
-            )?;
+        if let Some(ref projection) = self.projection {
+            write!(f, ", projection={projection:?}")?;
         }
         if let Some(limit) = self.query.limit() {
             write!(f, ", limit={limit}")?;
