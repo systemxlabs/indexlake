@@ -208,11 +208,6 @@ async fn table_data_types(
             true,
         ),
         Field::new(
-            "fixed_size_list_float32_col",
-            DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, false)), 4),
-            true,
-        ),
-        Field::new(
             "large_list_int32_col",
             DataType::LargeList(Arc::new(Field::new("item", DataType::Int32, true))),
             true,
@@ -363,17 +358,6 @@ async fn table_data_types(
                 .into_iter(),
                 2,
             )),
-            Arc::new(
-                FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
-                    vec![
-                        Some(vec![Some(1.0f32), Some(2.0f32), Some(3.0f32), Some(4.0f32)]),
-                        Some(vec![Some(5.0f32), Some(6.0f32), Some(7.0f32), Some(8.0f32)]),
-                        None,
-                    ]
-                    .into_iter(),
-                    4,
-                ),
-            ),
             Arc::new(LargeListArray::from_iter_primitive::<Int32Type, _, _>(
                 vec![
                     Some(vec![Some(0i32), Some(1i32)]),

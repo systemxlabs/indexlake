@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, FixedSizeBinaryArray, FixedSizeListArray, Float32Array, ListArray};
+use arrow::array::{Array, FixedSizeBinaryArray, Float32Array, ListArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -16,7 +16,7 @@ use crate::{RabitqIndex, RabitqIndexParams, RabitqMetric};
 pub struct RabitqIndexBuilder {
     index_def: IndexDefinitionRef,
     params: RabitqIndexParams,
-    row_id_vector: Vec<(FixedSizeBinaryArray, ArrayRef)>,
+    row_id_vector: Vec<(FixedSizeBinaryArray, ListArray)>,
     loaded: Option<RabitqIndex>,
 }
 
@@ -46,11 +46,14 @@ impl RabitqIndexBuilder {
         let mut row_ids: Vec<Uuid> = Vec::new();
         let mut vectors: Vec<Vec<f32>> = Vec::new();
         for (row_id_array, key_column) in &self.row_id_vector {
-            let vector_options = extract_vectors(key_column)?;
-            for (row_id_bytes, vector_opt) in row_id_array.iter().zip(vector_options.iter()) {
+            for (row_id_bytes, vector_arr) in row_id_array.iter().zip(key_column.iter()) {
                 let row_id = Uuid::from_slice(row_id_bytes.expect("row id is null"))?;
-                if let Some(vector) = vector_opt {
-                    vectors.push(vector.clone());
+                if let Some(arr) = vector_arr {
+                    let float_arr = arr
+                        .as_any()
+                        .downcast_ref::<Float32Array>()
+                        .ok_or_else(|| ILError::index("Vector is not a float32 array"))?;
+                    vectors.push(float_arr.values().to_vec());
                     row_ids.push(row_id);
                 }
             }
@@ -67,50 +70,6 @@ impl RabitqIndexBuilder {
             row_ids,
             metric: self.params.metric.clone(),
         })
-    }
-}
-
-fn extract_vectors(key_column: &ArrayRef) -> ILResult<Vec<Option<Vec<f32>>>> {
-    match key_column.data_type() {
-        DataType::List(_) => {
-            let list = key_column
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .ok_or_else(|| ILError::index("Key column is not a list array"))?;
-            Ok(list
-                .iter()
-                .map(|opt| {
-                    opt.map(|arr| {
-                        arr.as_any()
-                            .downcast_ref::<Float32Array>()
-                            .expect("Vector is not a float32 array")
-                            .values()
-                            .to_vec()
-                    })
-                })
-                .collect())
-        }
-        DataType::FixedSizeList(_, _) => {
-            let fixed_size_list = key_column
-                .as_any()
-                .downcast_ref::<FixedSizeListArray>()
-                .ok_or_else(|| ILError::index("Key column is not a fixed size list array"))?;
-            Ok(fixed_size_list
-                .iter()
-                .map(|opt| {
-                    opt.map(|arr| {
-                        arr.as_any()
-                            .downcast_ref::<Float32Array>()
-                            .expect("Vector is not a float32 array")
-                            .values()
-                            .to_vec()
-                    })
-                })
-                .collect())
-        }
-        _ => Err(ILError::index(
-            "Key column must be a list or fixed size list of float32",
-        )),
     }
 }
 
@@ -172,22 +131,12 @@ impl IndexBuilder for RabitqIndexBuilder {
         let row_id_array = extract_row_id_array_from_record_batch(batch)?;
         let key_column_name = &self.index_def.key_columns[0];
         let key_column_index = batch.schema_ref().index_of(key_column_name)?;
-        let key_column = batch.column(key_column_index).clone();
-        match key_column.data_type() {
-            DataType::List(inner) | DataType::FixedSizeList(inner, _) => {
-                if !matches!(inner.data_type(), DataType::Float32) || inner.is_nullable() {
-                    return Err(ILError::index(
-                        "RaBitQ index key column must be a list of non-nullable float32",
-                    ));
-                }
-            }
-            _ => {
-                return Err(ILError::index(
-                    "RaBitQ index key column must be a list of non-nullable float32",
-                ));
-            }
-        }
-        self.row_id_vector.push((row_id_array, key_column));
+        let key_column = batch
+            .column(key_column_index)
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .ok_or_else(|| ILError::index("Key column is not a list array"))?;
+        self.row_id_vector.push((row_id_array, key_column.clone()));
         Ok(())
     }
 
@@ -216,9 +165,13 @@ impl IndexBuilder for RabitqIndexBuilder {
                 .as_any()
                 .downcast_ref::<FixedSizeBinaryArray>()
                 .ok_or_else(|| ILError::index("Row ID array is not a FixedSizeBinaryArray"))?;
-            let key_column = batch.column(1).clone();
+            let key_column = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<ListArray>()
+                .ok_or_else(|| ILError::index("Key column is not a list array"))?;
             self.row_id_vector
-                .push((row_id_array.clone(), key_column));
+                .push((row_id_array.clone(), key_column.clone()));
         }
         Ok(())
     }
@@ -229,7 +182,7 @@ impl IndexBuilder for RabitqIndexBuilder {
         for (row_id_array, key_column) in &self.row_id_vector {
             let batch = RecordBatch::try_new(
                 schema.clone(),
-                vec![Arc::new(row_id_array.clone()), key_column.clone()],
+                vec![Arc::new(row_id_array.clone()), Arc::new(key_column.clone())],
             )?;
             stream_writer.write(&batch)?;
         }
