@@ -35,7 +35,6 @@ indexlake-datafusion = { workspace = true }
 indexlake-index-bm25 = { workspace = true }
 indexlake-index-btree = { workspace = true }
 indexlake-index-hnsw = { workspace = true }
-indexlake-index-rabitq = { workspace = true }
 indexlake-index-rstar = { workspace = true }
 rstest = { workspace = true }
 
