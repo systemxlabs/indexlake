@@ -985,6 +985,16 @@ pub fn rows_to_record_batch(schema: &SchemaRef, rows: &[Row]) -> ILResult<Record
                                 *len
                             );
                         }
+                        DataType::Float32 => {
+                            fixed_size_list_values_builder_append!(
+                                v,
+                                builder,
+                                Float32Builder,
+                                inner_field,
+                                Float32Array,
+                                *len
+                            );
+                        }
                         _ => {
                             return Err(ILError::not_supported(format!(
                                 "Not supported data type: {}",
