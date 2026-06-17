@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, FixedSizeBinaryArray, FixedSizeListArray, Float32Array, ListArray};
+use arrow::array::{
+    Array, ArrayRef, FixedSizeBinaryArray, FixedSizeListArray, Float32Array, ListArray,
+};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -217,8 +219,7 @@ impl IndexBuilder for RabitqIndexBuilder {
                 .downcast_ref::<FixedSizeBinaryArray>()
                 .ok_or_else(|| ILError::index("Row ID array is not a FixedSizeBinaryArray"))?;
             let key_column = batch.column(1).clone();
-            self.row_id_vector
-                .push((row_id_array.clone(), key_column));
+            self.row_id_vector.push((row_id_array.clone(), key_column));
         }
         Ok(())
     }

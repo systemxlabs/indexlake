@@ -337,18 +337,23 @@ pub async fn prepare_simple_fixed_size_vector_table(
 
     let table = client.load_table(&namespace_name, &table_name).await?;
 
-    let mut fixed_size_list_builder = FixedSizeListBuilder::new(
-        Float32Builder::new(),
-        3,
-    )
-    .with_field(fixed_size_list_inner_field.clone());
-    fixed_size_list_builder.values().append_slice(&[10.0, 10.0, 10.0]);
+    let mut fixed_size_list_builder = FixedSizeListBuilder::new(Float32Builder::new(), 3)
+        .with_field(fixed_size_list_inner_field.clone());
+    fixed_size_list_builder
+        .values()
+        .append_slice(&[10.0, 10.0, 10.0]);
     fixed_size_list_builder.append(true);
-    fixed_size_list_builder.values().append_slice(&[20.0, 20.0, 20.0]);
+    fixed_size_list_builder
+        .values()
+        .append_slice(&[20.0, 20.0, 20.0]);
     fixed_size_list_builder.append(true);
-    fixed_size_list_builder.values().append_slice(&[30.0, 30.0, 30.0]);
+    fixed_size_list_builder
+        .values()
+        .append_slice(&[30.0, 30.0, 30.0]);
     fixed_size_list_builder.append(true);
-    fixed_size_list_builder.values().append_slice(&[40.0, 40.0, 40.0]);
+    fixed_size_list_builder
+        .values()
+        .append_slice(&[40.0, 40.0, 40.0]);
     fixed_size_list_builder.append(true);
     let fixed_size_list_array = fixed_size_list_builder.finish();
 
