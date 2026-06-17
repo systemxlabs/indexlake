@@ -2876,6 +2876,7 @@ dependencies = [
  "indexlake-index-bm25",
  "indexlake-index-btree",
  "indexlake-index-hnsw",
+ "indexlake-index-rabitq",
  "indexlake-index-rstar",
  "indexlake-storage-fs",
  "indexlake-storage-s3",
