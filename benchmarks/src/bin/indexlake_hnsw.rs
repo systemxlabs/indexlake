@@ -52,7 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         key_columns: vec!["vector".to_string()],
         params: Arc::new(HnswIndexParams {
             ef_construction: 400,
-            ef_search: 100,
         }),
         concurrency: 1,
         if_not_exists: false,
@@ -104,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let table_search = TableSearch {
         query: Arc::new(HnswSearchQuery {
             vector: vec![500.0; 1024],
+            ef_search: 100,
         }),
         projection: None,
         dynamic_fields: vec![],

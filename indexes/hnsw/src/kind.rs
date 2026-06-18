@@ -86,12 +86,6 @@ impl IndexKind for HnswIndexKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HnswIndexParams {
     pub ef_construction: usize,
-    #[serde(default = "default_ef_search")]
-    pub ef_search: usize,
-}
-
-fn default_ef_search() -> usize {
-    100
 }
 
 impl IndexParams for HnswIndexParams {
