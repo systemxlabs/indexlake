@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{FixedSizeBinaryArray, Float32Array, ListArray};
+use arrow::array::{ArrayRef, FixedSizeBinaryArray, FixedSizeListArray, Float32Array, ListArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use bytes::Bytes;
@@ -18,7 +18,7 @@ use crate::{Euclidean, HnswIndex, HnswIndexParams};
 pub struct HnswIndexBuilder {
     index_def: IndexDefinitionRef,
     params: HnswIndexParams,
-    row_id_vector: Vec<(FixedSizeBinaryArray, ListArray)>,
+    row_id_vector: Vec<(FixedSizeBinaryArray, ArrayRef)>,
     hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
     row_ids: Vec<Uuid>,
 }
@@ -53,15 +53,11 @@ impl HnswIndexBuilder {
     pub fn build_index(&mut self) -> ILResult<()> {
         let mut searcher = Searcher::default();
         for (row_id_array, key_column) in self.row_id_vector.iter() {
-            for (row_id, vector_arr) in row_id_array.iter().zip(key_column.iter()) {
+            let vector_options = extract_vectors(key_column)?;
+            for (row_id, vector_opt) in row_id_array.iter().zip(vector_options.iter()) {
                 let row_id = Uuid::from_slice(row_id.expect("row id is null"))?;
-                if let Some(arr) = vector_arr {
-                    let vector = arr
-                        .as_any()
-                        .downcast_ref::<Float32Array>()
-                        .ok_or_else(|| ILError::index("Vector is not a float32 array"))?;
-                    let vector = vector.values().to_vec();
-                    self.hnsw.insert(vector, &mut searcher);
+                if let Some(vector) = vector_opt {
+                    self.hnsw.insert(vector.clone(), &mut searcher);
                     self.row_ids.push(row_id);
                 }
             }
@@ -76,6 +72,50 @@ impl std::fmt::Debug for HnswIndexBuilder {
             .field("index_def", &self.index_def)
             .field("params", &self.params)
             .finish()
+    }
+}
+
+fn extract_vectors(key_column: &ArrayRef) -> ILResult<Vec<Option<Vec<f32>>>> {
+    match key_column.data_type() {
+        DataType::List(_) => {
+            let list = key_column
+                .as_any()
+                .downcast_ref::<ListArray>()
+                .ok_or_else(|| ILError::index("Key column is not a list array"))?;
+            Ok(list
+                .iter()
+                .map(|opt| {
+                    opt.map(|arr| {
+                        arr.as_any()
+                            .downcast_ref::<Float32Array>()
+                            .expect("Vector is not a float32 array")
+                            .values()
+                            .to_vec()
+                    })
+                })
+                .collect())
+        }
+        DataType::FixedSizeList(_, _) => {
+            let fixed_size_list = key_column
+                .as_any()
+                .downcast_ref::<FixedSizeListArray>()
+                .ok_or_else(|| ILError::index("Key column is not a fixed size list array"))?;
+            Ok(fixed_size_list
+                .iter()
+                .map(|opt| {
+                    opt.map(|arr| {
+                        arr.as_any()
+                            .downcast_ref::<Float32Array>()
+                            .expect("Vector is not a float32 array")
+                            .values()
+                            .to_vec()
+                    })
+                })
+                .collect())
+        }
+        _ => Err(ILError::index(
+            "Key column must be a list or fixed size list of float32",
+        )),
     }
 }
 
@@ -94,14 +134,22 @@ impl IndexBuilder for HnswIndexBuilder {
 
         let key_column_name = &self.index_def.key_columns[0];
         let key_column_index = batch.schema_ref().index_of(key_column_name)?;
-        let key_column = batch.column(key_column_index);
-
-        let key_column = key_column
-            .as_any()
-            .downcast_ref::<ListArray>()
-            .ok_or_else(|| ILError::index("Key column is not a list array"))?;
-
-        self.row_id_vector.push((row_id_array, key_column.clone()));
+        let key_column = batch.column(key_column_index).clone();
+        match key_column.data_type() {
+            DataType::List(inner) | DataType::FixedSizeList(inner, _) => {
+                if !matches!(inner.data_type(), DataType::Float32) || inner.is_nullable() {
+                    return Err(ILError::index(
+                        "Hnsw index key column must be a list of non-nullable float32",
+                    ));
+                }
+            }
+            _ => {
+                return Err(ILError::index(
+                    "Hnsw index key column must be a list of non-nullable float32",
+                ));
+            }
+        }
+        self.row_id_vector.push((row_id_array, key_column));
         Ok(())
     }
 
@@ -137,14 +185,9 @@ impl IndexBuilder for HnswIndexBuilder {
                 .as_any()
                 .downcast_ref::<FixedSizeBinaryArray>()
                 .ok_or_else(|| ILError::index("Row ID array is not a FixedSizeBinaryArray"))?;
-            let key_column = batch
-                .column(1)
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .ok_or_else(|| ILError::index("Key column is not a list array"))?;
+            let key_column = batch.column(1).clone();
 
-            self.row_id_vector
-                .push((row_id_array.clone(), key_column.clone()));
+            self.row_id_vector.push((row_id_array.clone(), key_column));
         }
         Ok(())
     }
@@ -155,7 +198,7 @@ impl IndexBuilder for HnswIndexBuilder {
         for (row_id_array, key_column) in self.row_id_vector.iter() {
             let batch = RecordBatch::try_new(
                 self.index_schema()?,
-                vec![Arc::new(row_id_array.clone()), Arc::new(key_column.clone())],
+                vec![Arc::new(row_id_array.clone()), key_column.clone()],
             )?;
             stream_writer.write(&batch)?;
         }
