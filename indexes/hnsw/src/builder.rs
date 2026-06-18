@@ -187,8 +187,7 @@ impl IndexBuilder for HnswIndexBuilder {
                 .ok_or_else(|| ILError::index("Row ID array is not a FixedSizeBinaryArray"))?;
             let key_column = batch.column(1).clone();
 
-            self.row_id_vector
-                .push((row_id_array.clone(), key_column));
+            self.row_id_vector.push((row_id_array.clone(), key_column));
         }
         Ok(())
     }
