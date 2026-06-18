@@ -52,7 +52,7 @@ crc32fast = "1.5"
 datafusion = { version = "53", default-features = false, features = ["sql"] }
 datafusion-catalog = "53"
 datafusion-common = "53"
-datafusion-execution = "53"
+datafusion-execution = "54"
 datafusion-expr = "53"
 datafusion-optimizer = "53"
 datafusion-physical-expr = "53"
