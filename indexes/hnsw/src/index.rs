@@ -14,14 +14,9 @@ use uuid::Uuid;
 
 use crate::Euclidean;
 
-fn default_ef_search() -> usize {
-    100
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HnswSearchQuery {
     pub vector: Vec<f32>,
-    #[serde(default = "default_ef_search")]
     pub ef_search: usize,
 }
 
