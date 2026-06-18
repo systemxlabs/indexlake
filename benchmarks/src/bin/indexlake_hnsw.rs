@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         key_columns: vec!["vector".to_string()],
         params: Arc::new(HnswIndexParams {
             ef_construction: 400,
+            ef_search: 100,
         }),
         concurrency: 1,
         if_not_exists: false,

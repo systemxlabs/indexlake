@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use arrow::array::Float64Array;
 use arrow::datatypes::{DataType, Field};
-use hnsw::Hnsw;
+use hnsw::{Hnsw, Searcher};
 use indexlake::expr::Expr;
 use indexlake::index::{
     DynamicColumn, FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
 use rand_pcg::Pcg64;
-use space::Knn;
+use space::Neighbor;
 use uuid::Uuid;
 
 use crate::Euclidean;
@@ -50,11 +50,20 @@ impl indexlake::index::SearchQueryCodec for HnswSearchQueryCodec {
 pub struct HnswIndex {
     hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
     row_ids: Vec<Uuid>,
+    ef_search: usize,
 }
 
 impl HnswIndex {
-    pub fn new(hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>, row_ids: Vec<Uuid>) -> Self {
-        Self { hnsw, row_ids }
+    pub fn new(
+        hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
+        row_ids: Vec<Uuid>,
+        ef_search: usize,
+    ) -> Self {
+        Self {
+            hnsw,
+            row_ids,
+            ef_search,
+        }
     }
 }
 
@@ -84,20 +93,35 @@ impl Index for HnswIndex {
         let mut row_ids = Vec::new();
         let mut scores = Vec::new();
         let total = self.hnsw.len();
+        // Use explicit ef_search to control search beam width independently
+        // from the number of requested results. hnsw::nearest() uses ef to
+        // bound the candidate pool, giving better recall than knn() which
+        // internally sets ef = num + 16.
+        let ef = self.ef_search.max(limit).min(total);
+        let mut searcher = Searcher::<u32>::default();
+        let mut dest: Vec<Neighbor<u32>> = vec![
+            Neighbor {
+                index: !0,
+                distance: 0
+            };
+            ef
+        ];
         let mut fetch_limit = limit.min(total);
         let mut scanned_count = 0;
         while row_ids.len() < limit && fetch_limit <= total {
-            let neighbors = self.hnsw.knn(&query.vector, fetch_limit);
-            for neighbor in &neighbors[scanned_count..] {
+            let found = self
+                .hnsw
+                .nearest(&query.vector, ef, &mut searcher, &mut dest);
+            for neighbor in &found[scanned_count..] {
                 if validity.is_valid(neighbor.index)? {
                     row_ids.push(self.row_ids[neighbor.index]);
-                    scores.push(neighbor.distance as f64);
+                    scores.push(f32::from_bits(neighbor.distance) as f64);
                     if row_ids.len() >= limit {
                         break;
                     }
                 }
             }
-            scanned_count = neighbors.len();
+            scanned_count = found.len();
             if fetch_limit >= total {
                 break;
             }
