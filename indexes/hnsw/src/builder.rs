@@ -211,7 +211,6 @@ impl IndexBuilder for HnswIndexBuilder {
         Ok(Box::new(HnswIndex::new(
             std::mem::take(&mut self.hnsw),
             std::mem::take(&mut self.row_ids),
-            self.params.ef_search,
         )))
     }
 }

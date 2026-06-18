@@ -44,7 +44,6 @@ async fn create_hnsw_index(
         key_columns: vec!["vector".to_string()],
         params: Arc::new(HnswIndexParams {
             ef_construction: 400,
-            ef_search: 100,
         }),
         concurrency: 1,
         if_not_exists: false,
@@ -54,6 +53,7 @@ async fn create_hnsw_index(
     let mut search = TableSearch {
         query: Arc::new(HnswSearchQuery {
             vector: vec![26.0, 26.0, 26.0],
+            ef_search: 100,
         }),
         projection: None,
         dynamic_fields: vec![],
@@ -120,7 +120,6 @@ async fn create_hnsw_index_fixed_size_list(
         key_columns: vec!["vector".to_string()],
         params: Arc::new(HnswIndexParams {
             ef_construction: 400,
-            ef_search: 100,
         }),
         concurrency: 1,
         if_not_exists: false,
@@ -130,6 +129,7 @@ async fn create_hnsw_index_fixed_size_list(
     let mut search = TableSearch {
         query: Arc::new(HnswSearchQuery {
             vector: vec![26.0, 26.0, 26.0],
+            ef_search: 100,
         }),
         projection: None,
         dynamic_fields: vec![],

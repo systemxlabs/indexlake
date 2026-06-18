@@ -14,9 +14,15 @@ use uuid::Uuid;
 
 use crate::Euclidean;
 
+fn default_ef_search() -> usize {
+    100
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HnswSearchQuery {
     pub vector: Vec<f32>,
+    #[serde(default = "default_ef_search")]
+    pub ef_search: usize,
 }
 
 impl SearchQuery for HnswSearchQuery {
@@ -50,20 +56,11 @@ impl indexlake::index::SearchQueryCodec for HnswSearchQueryCodec {
 pub struct HnswIndex {
     hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
     row_ids: Vec<Uuid>,
-    ef_search: usize,
 }
 
 impl HnswIndex {
-    pub fn new(
-        hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
-        row_ids: Vec<Uuid>,
-        ef_search: usize,
-    ) -> Self {
-        Self {
-            hnsw,
-            row_ids,
-            ef_search,
-        }
+    pub fn new(hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>, row_ids: Vec<Uuid>) -> Self {
+        Self { hnsw, row_ids }
     }
 }
 
@@ -97,7 +94,7 @@ impl Index for HnswIndex {
         // from the number of requested results. hnsw::nearest() uses ef to
         // bound the candidate pool, giving better recall than knn() which
         // internally sets ef = num + 16.
-        let ef = self.ef_search.max(limit).min(total);
+        let ef = query.ef_search.max(limit).min(total);
         let mut searcher = Searcher::<u32>::default();
         let mut dest: Vec<Neighbor<u32>> = vec![
             Neighbor {
