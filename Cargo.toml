@@ -49,7 +49,7 @@ bm25 = "2.3"
 bytes = "1"
 comfy-table = "7.2"
 crc32fast = "1.5"
-datafusion = { version = "53", default-features = false, features = ["sql"] }
+datafusion = { version = "54", default-features = false, features = ["sql"] }
 datafusion-catalog = "53"
 datafusion-common = "53"
 datafusion-execution = "53"
