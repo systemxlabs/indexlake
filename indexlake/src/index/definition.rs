@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::catalog::IndexRecord;
 use crate::index::{IndexKind, IndexParams};
 use crate::table::TableSchemaRef;
@@ -9,6 +11,14 @@ use uuid::Uuid;
 
 pub type IndexDefinitionRef = Arc<IndexDefinition>;
 
+/// Per-index configuration persisted as JSON in the catalog.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IndexConfig {
+    /// Number of rows per inline index segment.
+    /// `None` means use the [`IndexKind::inline_index_segment_row_count`] default.
+    pub inline_index_segment_row_count: Option<usize>,
+}
+
 #[derive(Debug, Clone)]
 pub struct IndexDefinition {
     pub index_id: Uuid,
@@ -19,6 +29,18 @@ pub struct IndexDefinition {
     pub table_schema: TableSchemaRef,
     pub key_columns: Vec<String>,
     pub params: Arc<dyn IndexParams>,
+    pub config: IndexConfig,
+}
+
+impl IndexDefinition {
+    /// Resolved inline index segment row count.
+    /// When [`IndexConfig::inline_index_segment_row_count`] is `None`,
+    /// falls back to the [`IndexKind`] dynamic default.
+    pub fn inline_index_segment_row_count(&self, index_kind: &dyn IndexKind) -> usize {
+        self.config
+            .inline_index_segment_row_count
+            .unwrap_or_else(|| index_kind.inline_index_segment_row_count(self))
+    }
 }
 
 impl IndexDefinition {
@@ -77,6 +99,7 @@ impl IndexDefinition {
             table_schema: table_schema.clone(),
             key_columns,
             params,
+            config: index_record.config.clone(),
         })
     }
 }

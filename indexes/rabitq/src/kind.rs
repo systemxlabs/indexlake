@@ -105,4 +105,18 @@ impl IndexKind for RabitqIndexKind {
     ) -> ILResult<FilterSupport> {
         Ok(FilterSupport::Unsupported)
     }
+
+    fn inline_index_segment_row_count(&self, index_def: &IndexDefinition) -> usize {
+        let dim = index_def
+            .table_schema
+            .arrow_schema
+            .field_with_name(&index_def.key_columns[0])
+            .ok()
+            .and_then(|field| match field.data_type() {
+                DataType::FixedSizeList(_, len) => Some(*len as usize),
+                _ => None,
+            })
+            .unwrap_or(128);
+        ((1024 / dim).max(1) * 800).max(100)
+    }
 }

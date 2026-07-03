@@ -50,6 +50,7 @@ async fn create_rstar_index_on_existing_table(
         }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation).await?;
 

@@ -239,6 +239,7 @@ async fn rebuild_inline_indexes(
         params: Arc::new(indexlake_index_btree::BTreeIndexParams {}),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation).await?;
 

@@ -295,11 +295,14 @@ pub(crate) async fn rebuild_inline_indexes(
     index_manager: &IndexManager,
     index_ids: Option<&[Uuid]>,
 ) -> ILResult<()> {
-    let inline_index_records =
-        full_build_inline_index_records(tx_helper, table_id, table_schema, || {
-            index_manager.new_index_builders(index_ids)
-        })
-        .await?;
+    let inline_index_records = full_build_inline_index_records(
+        tx_helper,
+        table_id,
+        table_schema,
+        index_manager,
+        index_ids,
+    )
+    .await?;
 
     // delete old inline index records
     let ids_to_delete = index_ids.map_or_else(|| index_manager.index_ids(), |ids| ids.to_vec());
@@ -317,7 +320,8 @@ async fn full_build_inline_index_records(
     tx_helper: &mut TransactionHelper,
     table_id: &Uuid,
     table_schema: &TableSchemaRef,
-    mut new_index_builders: impl FnMut() -> ILResult<Vec<Box<dyn IndexBuilder>>>,
+    index_manager: &IndexManager,
+    index_ids: Option<&[Uuid]>,
 ) -> ILResult<Vec<InlineIndexRecord>> {
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
@@ -325,63 +329,77 @@ async fn full_build_inline_index_records(
         .await?;
     let mut chunk_stream = row_stream.chunks(100);
 
+    struct BuilderState {
+        builder: Box<dyn IndexBuilder>,
+        row_count: usize,
+        row_ids: Vec<Uuid>,
+    }
+
     let mut inline_index_records = Vec::new();
-    let mut index_builders = new_index_builders()?;
-    let mut counter = 0;
-    let mut all_row_ids: Vec<Uuid> = Vec::new();
+    let mut states: Vec<BuilderState> = index_manager
+        .new_index_builders(index_ids)?
+        .into_iter()
+        .map(|builder| BuilderState {
+            builder,
+            row_count: 0,
+            row_ids: Vec::new(),
+        })
+        .collect();
 
     while let Some(row_chunk) = chunk_stream.next().await {
         let rows = row_chunk.into_iter().collect::<ILResult<Vec<_>>>()?;
+        let mut chunk_row_ids = Vec::with_capacity(rows.len());
         for row in &rows {
             if let Some(row_id) = row.get_row_id()? {
-                all_row_ids.push(row_id);
+                chunk_row_ids.push(row_id);
             }
         }
-        counter += rows.len();
         let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
-        for index_builder in index_builders.iter_mut() {
-            index_builder.append(&record_batch)?;
+
+        for state in states.iter_mut() {
+            state.builder.append(&record_batch)?;
+            state.row_count += chunk_row_ids.len();
+            state.row_ids.extend(chunk_row_ids.clone());
+
+            let segment_limit =
+                index_manager.inline_index_segment_row_count(state.builder.index_def())?;
+
+            if state.row_count >= segment_limit {
+                if !state.builder.is_empty() {
+                    let mut index_data = Vec::new();
+                    state.builder.write_bytes(&mut index_data)?;
+                    inline_index_records.push(InlineIndexRecord {
+                        index_id: state.builder.index_def().index_id,
+                        created_at: timestamp_ms_from_now(Duration::ZERO),
+                        row_ids: std::mem::take(&mut state.row_ids),
+                        validity: RowValidity::new(state.row_count),
+                        index_data,
+                    });
+                }
+                state.builder =
+                    index_manager.new_index_builder(&state.builder.index_def().index_id)?;
+                state.row_count = 0;
+            }
         }
 
-        if counter >= 1000 {
-            flush_index_builders(&mut index_builders, &mut inline_index_records, &all_row_ids)
-                .await?;
-            tokio::time::sleep(Duration::from_millis(1)).await;
-            counter = 0;
-            all_row_ids.clear();
-            index_builders = new_index_builders()?;
-        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
     }
     drop(chunk_stream);
 
-    // build inline index records for left rows
-    if counter > 0 {
-        flush_index_builders(&mut index_builders, &mut inline_index_records, &all_row_ids).await?;
+    // Flush remaining rows for each builder
+    for state in states.iter_mut() {
+        if !state.builder.is_empty() && state.row_count > 0 {
+            let mut index_data = Vec::new();
+            state.builder.write_bytes(&mut index_data)?;
+            inline_index_records.push(InlineIndexRecord {
+                index_id: state.builder.index_def().index_id,
+                created_at: timestamp_ms_from_now(Duration::ZERO),
+                row_ids: std::mem::take(&mut state.row_ids),
+                validity: RowValidity::new(state.row_count),
+                index_data,
+            });
+        }
     }
 
     Ok(inline_index_records)
-}
-
-async fn flush_index_builders(
-    index_builders: &mut [Box<dyn IndexBuilder>],
-    inline_index_records: &mut Vec<InlineIndexRecord>,
-    row_ids: &[Uuid],
-) -> ILResult<()> {
-    for index_builder in index_builders.iter_mut() {
-        if index_builder.is_empty() {
-            continue;
-        }
-        let mut index_data = Vec::new();
-        index_builder.write_bytes(&mut index_data)?;
-        let index_id = index_builder.index_def().index_id;
-        let row_ids_vec = row_ids.to_vec();
-        inline_index_records.push(InlineIndexRecord {
-            index_id,
-            created_at: timestamp_ms_from_now(Duration::ZERO),
-            row_ids: row_ids_vec.clone(),
-            validity: RowValidity::new(row_ids_vec.len()),
-            index_data,
-        });
-    }
-    Ok(())
 }

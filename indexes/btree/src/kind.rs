@@ -102,6 +102,35 @@ impl IndexKind for BTreeIndexKind {
             _ => Ok(FilterSupport::Unsupported),
         }
     }
+
+    fn inline_index_segment_row_count(&self, index_def: &IndexDefinition) -> usize {
+        let Ok(key_field) = index_def
+            .table_schema
+            .arrow_schema
+            .field_with_name(&index_def.key_columns[0])
+        else {
+            return 1000;
+        };
+        match key_field.data_type() {
+            // Compact fixed-size keys: more rows per segment
+            DataType::Int8 | DataType::UInt8 => 5000,
+            DataType::Int16 | DataType::UInt16 => 4000,
+            DataType::Int32
+            | DataType::UInt32
+            | DataType::Float32
+            | DataType::Date32
+            | DataType::Time32(_) => 3000,
+            DataType::Int64
+            | DataType::UInt64
+            | DataType::Float64
+            | DataType::Date64
+            | DataType::Time64(_)
+            | DataType::Timestamp(..) => 2000,
+            // Variable-size keys: fewer rows, strings can be arbitrarily long
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => 1000,
+            _ => 1000,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

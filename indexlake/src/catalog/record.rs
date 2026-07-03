@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::catalog::{Catalog, CatalogDataType, CatalogSchema, Column, Row};
 use crate::expr::{Expr, deserialize_expr, serialize_expr};
+use crate::index::IndexConfig;
 use crate::storage::DataFileFormat;
 use crate::table::TableConfig;
 use crate::{ILError, ILResult};
@@ -391,6 +392,7 @@ pub(crate) struct IndexRecord {
     pub(crate) index_kind: String,
     pub(crate) key_field_ids: Vec<Uuid>,
     pub(crate) params: String,
+    pub(crate) config: IndexConfig,
 }
 
 impl IndexRecord {
@@ -401,14 +403,18 @@ impl IndexRecord {
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",");
+        let config_str = serde_json::to_string(&self.config)
+            .map_err(|e| ILError::internal(format!("Failed to serialize index config: {e:?}")))
+            .unwrap();
         format!(
-            "({}, {}, '{}', '{}', '{}', '{}')",
+            "({}, {}, '{}', '{}', '{}', '{}', '{}')",
             catalog.sql_uuid_literal(&self.index_id),
             catalog.sql_uuid_literal(&self.table_id),
             self.index_name,
             self.index_kind,
             key_field_ids_str,
-            self.params
+            self.params,
+            config_str,
         )
     }
 
@@ -420,6 +426,7 @@ impl IndexRecord {
             Column::new("index_kind", CatalogDataType::Utf8, false),
             Column::new("key_field_ids", CatalogDataType::Utf8, false),
             Column::new("params", CatalogDataType::Utf8, false),
+            Column::new("config", CatalogDataType::Utf8, false),
         ])
     }
 
@@ -435,6 +442,9 @@ impl IndexRecord {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| ILError::internal(format!("Failed to parse key field ids: {e:?}")))?;
         let params = row.utf8_owned(5)?.expect("params is not null");
+        let config_str = row.utf8(6)?.expect("config is not null");
+        let config: IndexConfig = serde_json::from_str(config_str)
+            .map_err(|e| ILError::internal(format!("Failed to deserialize index config: {e:?}")))?;
         Ok(IndexRecord {
             index_id,
             index_name,
@@ -442,6 +452,7 @@ impl IndexRecord {
             table_id,
             key_field_ids,
             params,
+            config,
         })
     }
 }

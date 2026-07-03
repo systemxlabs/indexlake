@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::catalog::{
     Catalog, DataFileRecord, IndexFileRecord, InlineIndexRecord, RowValidity, TransactionHelper,
 };
-use crate::index::IndexBuilder;
+use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, OutputFile, build_parquet_writer};
 use crate::table::Table;
 use crate::utils::{rewrite_batch_schema, serialize_array, timestamp_ms_from_now};
@@ -52,8 +52,7 @@ pub(crate) async fn process_insert_into_inline_rows_without_tx(
         return Ok(());
     }
 
-    let index_builders = table.index_manager.new_index_builders(None)?;
-    let inline_index_records = build_inline_indexes(batches, index_builders)?;
+    let inline_index_records = build_inline_indexes(batches, table.index_manager.as_ref())?;
 
     // insert inline rows
     let inline_field_names = batches[0]
@@ -87,8 +86,7 @@ pub(crate) async fn process_insert_into_inline_rows_with_tx(
         return Ok(());
     }
 
-    let index_builders = table.index_manager.new_index_builders(None)?;
-    let inline_index_records = build_inline_indexes(batches, index_builders)?;
+    let inline_index_records = build_inline_indexes(batches, table.index_manager.as_ref())?;
 
     // insert inline rows
     let inline_field_names = batches[0]
@@ -136,37 +134,81 @@ pub(crate) async fn process_bypass_insert(
 
 pub(crate) fn build_inline_indexes(
     batches: &[RecordBatch],
-    mut index_builders: Vec<Box<dyn IndexBuilder>>,
+    index_manager: &IndexManager,
 ) -> ILResult<Vec<InlineIndexRecord>> {
+    if batches.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut records = Vec::new();
+
+    struct BuilderState {
+        builder: Box<dyn IndexBuilder>,
+        row_count: usize,
+        row_ids: Vec<Uuid>,
+    }
+
+    let mut states: Vec<BuilderState> = index_manager
+        .new_index_builders(None)?
+        .into_iter()
+        .map(|builder| BuilderState {
+            builder,
+            row_count: 0,
+            row_ids: Vec::new(),
+        })
+        .collect();
+
+    if states.is_empty() {
+        return Ok(Vec::new());
+    }
+
     for batch in batches {
-        for builder in index_builders.iter_mut() {
-            builder.append(batch)?;
+        let batch_row_ids = crate::utils::extract_row_ids_from_record_batch(batch)?;
+        let batch_rows = batch.num_rows();
+
+        for state in states.iter_mut() {
+            state.builder.append(batch)?;
+            state.row_count += batch_rows;
+            state.row_ids.extend(batch_row_ids.clone());
+
+            let segment_limit =
+                index_manager.inline_index_segment_row_count(state.builder.index_def())?;
+
+            if state.row_count >= segment_limit {
+                if !state.builder.is_empty() {
+                    let mut index_data = Vec::new();
+                    state.builder.write_bytes(&mut index_data)?;
+                    records.push(InlineIndexRecord {
+                        index_id: state.builder.index_def().index_id,
+                        created_at: timestamp_ms_from_now(Duration::ZERO),
+                        row_ids: std::mem::take(&mut state.row_ids),
+                        validity: RowValidity::new(state.row_count),
+                        index_data,
+                    });
+                }
+                state.builder =
+                    index_manager.new_index_builder(&state.builder.index_def().index_id)?;
+                state.row_count = 0;
+            }
         }
     }
 
-    // collect row_ids from all batches
-    let mut all_row_ids: Vec<Uuid> = Vec::new();
-    for batch in batches {
-        let row_ids = crate::utils::extract_row_ids_from_record_batch(batch)?;
-        all_row_ids.extend(row_ids);
+    // Flush remaining rows for each builder
+    for state in states.iter_mut() {
+        if !state.builder.is_empty() && state.row_count > 0 {
+            let mut index_data = Vec::new();
+            state.builder.write_bytes(&mut index_data)?;
+            records.push(InlineIndexRecord {
+                index_id: state.builder.index_def().index_id,
+                created_at: timestamp_ms_from_now(Duration::ZERO),
+                row_ids: std::mem::take(&mut state.row_ids),
+                validity: RowValidity::new(state.row_count),
+                index_data,
+            });
+        }
     }
 
-    let mut inline_index_records = Vec::new();
-    for builder in index_builders.iter_mut() {
-        if builder.is_empty() {
-            continue;
-        }
-        let mut index_data = Vec::new();
-        builder.write_bytes(&mut index_data)?;
-        inline_index_records.push(InlineIndexRecord {
-            index_id: builder.index_def().index_id,
-            created_at: timestamp_ms_from_now(Duration::ZERO),
-            row_ids: all_row_ids.clone(),
-            validity: RowValidity::new(all_row_ids.len()),
-            index_data,
-        });
-    }
-    Ok(inline_index_records)
+    Ok(records)
 }
 
 async fn write_parquet_files(

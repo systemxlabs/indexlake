@@ -54,6 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         params: Arc::new(BM25IndexParams { avgdl: 256. }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     let table = client.load_table(namespace_name, &table_name).await?;
     table.create_index(index_creation).await?;

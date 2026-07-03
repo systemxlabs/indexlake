@@ -94,6 +94,12 @@ impl IndexKind for RStarIndexKind {
             _ => Ok(FilterSupport::Unsupported),
         }
     }
+
+    fn inline_index_segment_row_count(&self, _index_def: &IndexDefinition) -> usize {
+        // RSTAR_INDEX_SCHEMA stores only row_id (16B) + bbox (4×Float64=32B)
+        // per row, very compact (~48B + arrow overhead).
+        5000
+    }
 }
 
 fn check_intersects_function(
