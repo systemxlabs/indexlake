@@ -14,7 +14,7 @@ use crate::catalog::{
     TableRecord, TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::Expr;
-use crate::index::{IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams};
+use crate::index::{IndexConfig, IndexDefinition, IndexDefinitionRef, IndexKind, IndexParams};
 use crate::storage::read_data_file_by_record;
 use crate::table::{Table, TableConfig, TableSchemaRef, check_default_expr};
 use crate::{ILError, ILResult, check_schema_contains_system_column};
@@ -147,6 +147,7 @@ pub struct IndexCreation {
     /// - Must be `>= 1`
     pub concurrency: usize,
     pub if_not_exists: bool,
+    pub config: IndexConfig,
 }
 
 impl IndexCreation {
@@ -175,6 +176,16 @@ pub(crate) async fn process_create_index(
     creation: IndexCreation,
 ) -> ILResult<Uuid> {
     let index_id = Uuid::now_v7();
+
+    let index_kind = table
+        .index_manager
+        .get_index_kind(&creation.kind)
+        .ok_or_else(|| {
+            ILError::invalid_input(format!("Index kind {} not registered", creation.kind))
+        })?;
+
+    // Build a temporary definition so IndexKind can inspect key column types
+    // when computing the default inline_index_segment_row_count.
     let index_def = Arc::new(IndexDefinition {
         index_id,
         name: creation.name.clone(),
@@ -184,14 +195,9 @@ pub(crate) async fn process_create_index(
         table_schema: table.table_schema.clone(),
         key_columns: creation.key_columns.clone(),
         params: creation.params.clone(),
+        config: creation.config.clone(),
     });
 
-    let index_kind = table
-        .index_manager
-        .get_index_kind(&creation.kind)
-        .ok_or_else(|| {
-            ILError::invalid_input(format!("Index kind {} not registered", creation.kind))
-        })?;
     index_kind.supports(&index_def)?;
 
     if let Some(index_id) = tx_helper
@@ -309,6 +315,7 @@ pub(crate) async fn process_create_index(
             table_id: table.table_id,
             key_field_ids,
             params: creation.params.encode()?,
+            config: creation.config.clone(),
         })
         .await?;
 
@@ -322,6 +329,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
     index_kind: &Arc<dyn IndexKind>,
     index_def: &IndexDefinitionRef,
 ) -> ILResult<Vec<InlineIndexRecord>> {
+    let segment_row_count = index_def.inline_index_segment_row_count(index_kind.as_ref());
     let catalog_schema = Arc::new(CatalogSchema::from_arrow(&table_schema.arrow_schema)?);
     let row_stream = tx_helper
         .scan_inline_rows(table_id, &catalog_schema, &[], None, None)
@@ -344,7 +352,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
         let record_batch = rows_to_record_batch(&table_schema.arrow_schema, &rows)?;
         index_builder.append(&record_batch)?;
 
-        if counter >= 1000 && !index_builder.is_empty() {
+        if counter >= segment_row_count && !index_builder.is_empty() {
             let mut index_data = Vec::new();
             index_builder.write_bytes(&mut index_data)?;
             inline_index_records.push(InlineIndexRecord {

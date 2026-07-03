@@ -68,6 +68,14 @@ impl IndexKind for BM25IndexKind {
     fn supports_filter(&self, _: &IndexDefinition, _: &Expr) -> ILResult<FilterSupport> {
         Ok(FilterSupport::Unsupported)
     }
+
+    fn inline_index_segment_row_count(&self, _index_def: &IndexDefinition) -> usize {
+        // BM25 stores inverted posting lists (token_indices, doc_ids, values)
+        // and document frequencies. Data size depends on vocabulary size more
+        // than row count, 5000 is a reasonable balance between segment
+        // granularity and catalog BLOB size.
+        5000
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

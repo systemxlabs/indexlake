@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS indexlake_index (
     index_name VARCHAR NOT NULL,
     index_kind VARCHAR NOT NULL,
     key_field_ids VARCHAR NOT NULL,
-    params VARCHAR NOT NULL
+    params VARCHAR NOT NULL,
+    config VARCHAR NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS indexlake_index_file (

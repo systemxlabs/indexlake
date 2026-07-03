@@ -95,6 +95,7 @@ async fn benchmark_rstar(
         }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     let table = client.load_table(&namespace_name, &table_name).await?;
     let index_start = Instant::now();

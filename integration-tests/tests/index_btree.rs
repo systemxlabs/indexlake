@@ -43,6 +43,7 @@ async fn create_btree_index_integer(
         params: Arc::new(BTreeIndexParams {}),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation.clone()).await?;
 
@@ -119,6 +120,7 @@ async fn create_btree_index_string(
         params: Arc::new(BTreeIndexParams {}),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation.clone()).await?;
 

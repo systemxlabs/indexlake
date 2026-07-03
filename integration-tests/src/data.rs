@@ -505,6 +505,7 @@ pub async fn prepare_table_with_two_btree_indexes(
         params: Arc::new(BTreeIndexParams {}),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(name_index_creation).await?;
 
@@ -519,6 +520,7 @@ pub async fn prepare_table_with_two_btree_indexes(
         params: Arc::new(BTreeIndexParams {}),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(age_index_creation).await?;
 

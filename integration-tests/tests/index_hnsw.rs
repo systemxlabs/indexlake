@@ -47,6 +47,7 @@ async fn create_hnsw_index(
         }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation.clone()).await?;
 
@@ -123,6 +124,7 @@ async fn create_hnsw_index_fixed_size_list(
         }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation.clone()).await?;
 

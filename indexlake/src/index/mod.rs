@@ -40,6 +40,11 @@ pub trait IndexKind: Debug + Send + Sync {
         index_def: &IndexDefinition,
         filter: &Expr,
     ) -> ILResult<FilterSupport>;
+
+    /// Number of rows per inline index segment for this index kind.
+    /// Implementations should inspect [`IndexDefinition`] (e.g. key column type,
+    /// vector dimension) to produce a reasonable value.
+    fn inline_index_segment_row_count(&self, index_def: &IndexDefinition) -> usize;
 }
 
 #[async_trait::async_trait]

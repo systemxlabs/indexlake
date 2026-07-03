@@ -40,6 +40,7 @@ async fn duplicated_index_name(
         }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
 
     table.create_index(index_creation.clone()).await?;
@@ -83,6 +84,7 @@ async fn unsupported_index_kind(
         }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
 
     let result = table.create_index(index_creation).await;
@@ -122,6 +124,7 @@ async fn drop_index(
         }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
 
     table.create_index(index_creation.clone()).await?;

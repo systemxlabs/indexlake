@@ -816,6 +816,7 @@ async fn datafusion_search_exec(
         params: Arc::new(indexlake_index_bm25::BM25IndexParams { avgdl: 256. }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation).await?;
 
@@ -922,6 +923,7 @@ async fn datafusion_search_exec_serialization(
         params: Arc::new(indexlake_index_bm25::BM25IndexParams { avgdl: 256. }),
         concurrency: 1,
         if_not_exists: false,
+        config: Default::default(),
     };
     table.create_index(index_creation).await?;
 

@@ -186,6 +186,7 @@ impl BenchmarkContext {
             params: Arc::new(BTreeIndexParams {}),
             concurrency: 1,
             if_not_exists: false,
+            config: Default::default(),
         };
         let table = self.client.load_table(&namespace_name, &table_name).await?;
         table.create_index(index_creation).await?;

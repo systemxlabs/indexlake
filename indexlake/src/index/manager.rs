@@ -96,12 +96,35 @@ impl IndexManager {
             .iter()
             .filter(|index_def| index_ids.is_none_or(|ids| ids.contains(&index_def.index_id)))
             .map(|index_def| {
-                let index_kind = self
-                    .kinds
-                    .get(&index_def.kind)
-                    .expect("Index kind not found");
+                let index_kind = self.kinds.get(&index_def.kind).ok_or_else(|| {
+                    ILError::internal(format!("Index kind {} not found", index_def.kind))
+                })?;
                 index_kind.builder(index_def)
             })
             .collect()
+    }
+
+    pub(crate) fn new_index_builder(&self, index_id: &Uuid) -> ILResult<Box<dyn IndexBuilder>> {
+        let index_def = self
+            .indexes
+            .iter()
+            .find(|def| &def.index_id == index_id)
+            .ok_or_else(|| ILError::internal(format!("Index {index_id} not found")))?;
+        let index_kind = self
+            .kinds
+            .get(&index_def.kind)
+            .ok_or_else(|| ILError::internal(format!("Index kind {} not found", index_def.kind)))?;
+        index_kind.builder(index_def)
+    }
+
+    pub(crate) fn inline_index_segment_row_count(
+        &self,
+        index_def: &IndexDefinitionRef,
+    ) -> ILResult<usize> {
+        let index_kind = self
+            .kinds
+            .get(&index_def.kind)
+            .ok_or_else(|| ILError::internal(format!("Index kind {} not found", index_def.kind)))?;
+        Ok(index_def.inline_index_segment_row_count(index_kind.as_ref()))
     }
 }
