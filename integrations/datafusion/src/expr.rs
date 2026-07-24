@@ -128,14 +128,14 @@ pub fn datafusion_expr_to_indexlake_expr(
             let expr = Box::new(datafusion_expr_to_indexlake_expr(&cast.expr, schema)?);
             Ok(ILExpr::Cast(indexlake::expr::Cast {
                 expr,
-                cast_type: cast.data_type.clone(),
+                cast_type: cast.field.data_type().clone(),
             }))
         }
         Expr::TryCast(try_cast) => {
             let expr = Box::new(datafusion_expr_to_indexlake_expr(&try_cast.expr, schema)?);
             Ok(ILExpr::TryCast(indexlake::expr::TryCast {
                 expr,
-                cast_type: try_cast.data_type.clone(),
+                cast_type: try_cast.field.data_type().clone(),
             }))
         }
         Expr::Negative(expr) => {
@@ -343,14 +343,14 @@ pub fn indexlake_expr_to_datafusion_expr(expr: &ILExpr) -> Result<Expr, DataFusi
             escape_char: None,
             case_insensitive: like.case_insensitive,
         })),
-        ILExpr::Cast(cast) => Ok(Expr::Cast(datafusion_expr::expr::Cast {
-            expr: Box::new(indexlake_expr_to_datafusion_expr(&cast.expr)?),
-            data_type: cast.cast_type.clone(),
-        })),
-        ILExpr::TryCast(try_cast) => Ok(Expr::TryCast(datafusion_expr::expr::TryCast {
-            expr: Box::new(indexlake_expr_to_datafusion_expr(&try_cast.expr)?),
-            data_type: try_cast.cast_type.clone(),
-        })),
+        ILExpr::Cast(cast) => Ok(Expr::Cast(datafusion_expr::expr::Cast::new(
+            Box::new(indexlake_expr_to_datafusion_expr(&cast.expr)?),
+            cast.cast_type.clone(),
+        ))),
+        ILExpr::TryCast(try_cast) => Ok(Expr::TryCast(datafusion_expr::expr::TryCast::new(
+            Box::new(indexlake_expr_to_datafusion_expr(&try_cast.expr)?),
+            try_cast.cast_type.clone(),
+        ))),
         ILExpr::Negative(expr) => Ok(Expr::Negative(Box::new(indexlake_expr_to_datafusion_expr(
             expr,
         )?))),

@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use arrow::datatypes::SchemaRef;
@@ -60,10 +59,6 @@ impl IndexLakeSearchExec {
 impl ExecutionPlan for IndexLakeSearchExec {
     fn name(&self) -> &str {
         "IndexLakeSearchExec"
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn properties(&self) -> &Arc<PlanProperties> {

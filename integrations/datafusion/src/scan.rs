@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -97,10 +96,6 @@ impl ExecutionPlan for IndexLakeScanExec {
         "IndexLakeScanExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
@@ -161,7 +156,7 @@ impl ExecutionPlan for IndexLakeScanExec {
     fn partition_statistics(
         &self,
         partition: Option<usize>,
-    ) -> Result<Statistics, DataFusionError> {
+    ) -> Result<Arc<Statistics>, DataFusionError> {
         let row_count = if let Some(partition) = partition {
             *self.partition_row_counts.get(partition).ok_or_else(|| {
                 DataFusionError::Plan(format!(
@@ -175,24 +170,24 @@ impl ExecutionPlan for IndexLakeScanExec {
 
         if self.filters.is_empty() {
             if let Some(limit) = self.limit {
-                Ok(Statistics {
+                Ok(Arc::new(Statistics {
                     num_rows: Precision::Exact(std::cmp::min(row_count, limit)),
                     total_byte_size: Precision::Absent,
                     column_statistics: Statistics::unknown_column(&self.schema()),
-                })
+                }))
             } else {
-                Ok(Statistics {
+                Ok(Arc::new(Statistics {
                     num_rows: Precision::Exact(row_count),
                     total_byte_size: Precision::Absent,
                     column_statistics: Statistics::unknown_column(&self.schema()),
-                })
+                }))
             }
         } else {
-            Ok(Statistics {
+            Ok(Arc::new(Statistics {
                 num_rows: Precision::Inexact(row_count),
                 total_byte_size: Precision::Absent,
                 column_statistics: Statistics::unknown_column(&self.schema()),
-            })
+            }))
         }
     }
 
