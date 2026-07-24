@@ -413,7 +413,7 @@ async fn index_scan_inline_rows(
     non_index_filters: &[Expr],
 ) -> ILResult<RecordBatchStream> {
     let mut index_ids = Vec::new();
-    for (index_name, _) in index_filter_assignment.iter() {
+    for index_name in index_filter_assignment.keys() {
         let index_def = table
             .index_manager
             .get_index(index_name)

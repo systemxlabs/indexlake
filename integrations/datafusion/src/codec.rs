@@ -179,7 +179,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
         node: Arc<dyn ExecutionPlan>,
         buf: &mut Vec<u8>,
     ) -> Result<(), DataFusionError> {
-        if let Some(exec) = node.as_any().downcast_ref::<IndexLakeScanExec>() {
+        if let Some(exec) = node.downcast_ref::<IndexLakeScanExec>() {
             let projection = serialize_projection(exec.projection.as_ref());
 
             let filters = serialize_exprs(&exec.filters, &DefaultLogicalExtensionCodec {})?;
@@ -217,7 +217,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             })?;
 
             Ok(())
-        } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeInsertExec>() {
+        } else if let Some(exec) = node.downcast_ref::<IndexLakeInsertExec>() {
             let insert_op = serialize_insert_op(exec.insert_op);
 
             let proto = IndexLakePhysicalPlanNode {
@@ -238,7 +238,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             })?;
 
             Ok(())
-        } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeSearchExec>() {
+        } else if let Some(exec) = node.downcast_ref::<IndexLakeSearchExec>() {
             let schema = serialize_schema(&exec.output_schema)?;
             let projection = serialize_projection(exec.projection.as_ref());
 
@@ -286,7 +286,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             })?;
 
             Ok(())
-        } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeUpdateExec>() {
+        } else if let Some(exec) = node.downcast_ref::<IndexLakeUpdateExec>() {
             let condition_node = serialize_il_expr(&exec.update.condition)?;
 
             let assignments = exec
@@ -320,7 +320,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
             })?;
 
             Ok(())
-        } else if let Some(exec) = node.as_any().downcast_ref::<IndexLakeDeleteExec>() {
+        } else if let Some(exec) = node.downcast_ref::<IndexLakeDeleteExec>() {
             let condition_node = serialize_il_expr(&exec.condition)?;
 
             let proto = IndexLakePhysicalPlanNode {

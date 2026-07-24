@@ -88,10 +88,6 @@ impl IndexLakeTable {
 
 #[async_trait::async_trait]
 impl TableProvider for IndexLakeTable {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         if self.hide_row_id {
             Arc::new(schema_without_row_id(&self.table.output_schema))
