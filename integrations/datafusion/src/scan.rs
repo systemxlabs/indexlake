@@ -4,10 +4,11 @@ use std::sync::Arc;
 use arrow::array::{RecordBatch, RecordBatchOptions};
 use arrow::datatypes::{Schema, SchemaRef};
 use datafusion_common::stats::Precision;
+use datafusion_common::tree_node::TreeNodeRecursion;
 use datafusion_common::{DFSchema, DataFusionError, Statistics, project_schema};
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_expr::Expr;
-use datafusion_physical_expr::EquivalenceProperties;
+use datafusion_physical_expr::{EquivalenceProperties, PhysicalExpr};
 use datafusion_physical_plan::display::ProjectSchemaDisplay;
 use datafusion_physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
@@ -109,6 +110,14 @@ impl ExecutionPlan for IndexLakeScanExec {
         _children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         Ok(self)
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion, DataFusionError>,
+    ) -> Result<TreeNodeRecursion, DataFusionError> {
+        // Filters are logical `datafusion_expr::Expr`, not physical expressions.
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn execute(

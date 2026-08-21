@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arrow::datatypes::{DataType, Field, Schema};
+use datafusion::common::TableReference;
 use datafusion::datasource::listing::{
     ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
 };
 use datafusion::prelude::SessionContext;
-use datafusion::sql::TableReference;
 use futures::StreamExt;
 use indexlake::Client;
 use indexlake::table::{TableConfig, TableCreation, TableInsertion, TableScan, TableScanPartition};

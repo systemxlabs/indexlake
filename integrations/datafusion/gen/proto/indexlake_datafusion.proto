@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package indexlake_datafusion;
 
-import "datafusion_common.proto";
-import "datafusion.proto";
+import "datafusion/proto-common/proto/datafusion_common.proto";
+import "datafusion/proto-models/proto/datafusion.proto";
 
 message IndexLakePhysicalPlanNode {
   oneof IndexLakePhysicalPlanType {

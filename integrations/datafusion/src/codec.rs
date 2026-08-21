@@ -10,6 +10,7 @@ use datafusion_proto::logical_plan::DefaultLogicalExtensionCodec;
 use datafusion_proto::logical_plan::from_proto::parse_exprs;
 use datafusion_proto::logical_plan::to_proto::serialize_exprs;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
+use datafusion_proto::physical_plan::PhysicalProtoConverterExtension;
 use datafusion_proto::protobuf::Schema as ProtoSchema;
 use indexlake::catalog::{DataFileRecord, RowValidity};
 use indexlake::storage::DataFileFormat;
@@ -43,6 +44,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
         buf: &[u8],
         inputs: &[Arc<dyn ExecutionPlan>],
         ctx: &TaskContext,
+        _proto_converter: &dyn PhysicalProtoConverterExtension,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         let indexlake_node = IndexLakePhysicalPlanNode::decode(buf).map_err(|e| {
             DataFusionError::Internal(format!(
@@ -178,6 +180,7 @@ impl PhysicalExtensionCodec for IndexLakePhysicalCodec {
         &self,
         node: Arc<dyn ExecutionPlan>,
         buf: &mut Vec<u8>,
+        _proto_converter: &dyn PhysicalProtoConverterExtension,
     ) -> Result<(), DataFusionError> {
         if let Some(exec) = node.downcast_ref::<IndexLakeScanExec>() {
             let projection = serialize_projection(exec.projection.as_ref());
