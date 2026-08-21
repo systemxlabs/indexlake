@@ -62,7 +62,7 @@ pub mod table_scan_partition {
         Provided(super::TableScanPartitionProvided),
     }
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TableScanPartitionAuto {
     #[prost(uint32, tag = "1")]
     pub partition_idx: u32,
@@ -76,7 +76,7 @@ pub struct TableScanPartitionProvided {
     #[prost(message, repeated, tag = "2")]
     pub data_file_records: ::prost::alloc::vec::Vec<DataFile>,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IndexLakeInsertExecNode {
     #[prost(string, tag = "1")]
     pub namespace_name: ::prost::alloc::string::String,
@@ -87,12 +87,12 @@ pub struct IndexLakeInsertExecNode {
     #[prost(uint32, tag = "4")]
     pub bypass_insert_threshold: u32,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Projection {
     #[prost(uint32, repeated, tag = "1")]
     pub projection: ::prost::alloc::vec::Vec<u32>,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DataFile {
     #[prost(bytes = "vec", tag = "1")]
     pub data_file_id: ::prost::alloc::vec::Vec<u8>,
@@ -111,11 +111,10 @@ pub struct DataFile {
     #[prost(int64, tag = "8")]
     pub valid_record_count: i64,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum DataFileFormat {
-    ParquetV1 = 0,
-    ParquetV2 = 1,
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IndexLakeExprNode {
+    #[prost(string, tag = "1")]
+    pub json: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IndexLakeSearchExecNode {
@@ -136,13 +135,6 @@ pub struct IndexLakeSearchExecNode {
     #[prost(bytes = "vec", tag = "8")]
     pub query_data: ::prost::alloc::vec::Vec<u8>,
 }
-
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct IndexLakeExprNode {
-    #[prost(string, tag = "1")]
-    pub json: ::prost::alloc::string::String,
-}
-
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IndexLakeUpdateExecNode {
     #[prost(string, tag = "1")]
@@ -154,16 +146,14 @@ pub struct IndexLakeUpdateExecNode {
     #[prost(message, repeated, tag = "4")]
     pub assignments: ::prost::alloc::vec::Vec<ExprColumnAssignment>,
 }
-
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExprColumnAssignment {
     #[prost(string, tag = "1")]
     pub column: ::prost::alloc::string::String,
     #[prost(message, optional, tag = "2")]
     pub value: ::core::option::Option<IndexLakeExprNode>,
 }
-
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IndexLakeDeleteExecNode {
     #[prost(string, tag = "1")]
     pub namespace_name: ::prost::alloc::string::String,
@@ -172,7 +162,12 @@ pub struct IndexLakeDeleteExecNode {
     #[prost(message, optional, tag = "3")]
     pub condition: ::core::option::Option<IndexLakeExprNode>,
 }
-
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum DataFileFormat {
+    ParquetV1 = 0,
+    ParquetV2 = 1,
+}
 impl DataFileFormat {
     /// String value of the enum field names used in the ProtoBuf definition.
     ///

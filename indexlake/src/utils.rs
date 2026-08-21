@@ -239,7 +239,7 @@ pub fn deserialize_row_ids(bytes: &[u8]) -> ILResult<Vec<Uuid>> {
         )));
     }
     let mut row_ids = Vec::with_capacity(bytes.len() / 16);
-    for chunk in bytes.chunks_exact(16) {
+    for chunk in bytes.as_chunks::<16>().0 {
         row_ids.push(Uuid::from_slice(chunk)?);
     }
     Ok(row_ids)

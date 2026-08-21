@@ -4,13 +4,14 @@ use arrow::array::{ArrayRef, Int64Array, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion_common::DataFusionError;
 use datafusion_common::stats::Precision;
+use datafusion_common::tree_node::TreeNodeRecursion;
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_expr::dml::InsertOp;
-use datafusion_physical_expr::EquivalenceProperties;
+use datafusion_physical_expr::{EquivalenceProperties, PhysicalExpr};
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
-    Partitioning, PlanProperties,
+    Partitioning, PlanProperties, StatisticsArgs, StatisticsContext,
 };
 use futures::{StreamExt, TryStreamExt};
 use indexlake::ILError;
@@ -90,6 +91,13 @@ impl ExecutionPlan for IndexLakeInsertExec {
         Ok(Arc::new(exec))
     }
 
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion, DataFusionError>,
+    ) -> Result<TreeNodeRecursion, DataFusionError> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+
     fn execute(
         &self,
         partition: usize,
@@ -122,7 +130,8 @@ impl ExecutionPlan for IndexLakeInsertExec {
                 }
             }
 
-            match input.partition_statistics(None).map(|stat| stat.num_rows) {
+            let stats = StatisticsContext::new().compute(input.as_ref(), &StatisticsArgs::new());
+            match stats.map(|stat| stat.num_rows) {
                 Ok(Precision::Exact(num_rows)) | Ok(Precision::Inexact(num_rows))
                     if num_rows > bypass_insert_threshold =>
                 {
@@ -187,7 +196,9 @@ impl DisplayAs for IndexLakeInsertExec {
             "IndexLakeInsertExec: table={}.{}",
             self.lazy_table.namespace_name, self.lazy_table.table_name
         )?;
-        if let Ok(stats) = self.input.partition_statistics(None) {
+        if let Ok(stats) =
+            StatisticsContext::new().compute(self.input.as_ref(), &StatisticsArgs::new())
+        {
             match stats.num_rows {
                 Precision::Exact(rows) => write!(f, ", rows={rows}")?,
                 Precision::Inexact(rows) => write!(f, ", rows~={rows}")?,

@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use datafusion_common::DataFusionError;
+use datafusion_common::tree_node::TreeNodeRecursion;
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
-use datafusion_physical_expr::EquivalenceProperties;
+use datafusion_physical_expr::{EquivalenceProperties, PhysicalExpr};
 use datafusion_physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion_physical_plan::{
@@ -55,6 +56,13 @@ impl ExecutionPlan for IndexLakeUpdateExec {
         _children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         Ok(self)
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion, DataFusionError>,
+    ) -> Result<TreeNodeRecursion, DataFusionError> {
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn execute(

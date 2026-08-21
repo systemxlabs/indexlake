@@ -28,20 +28,20 @@ pub fn scatter(mask: &BooleanArray, truthy: &dyn Array) -> ILResult<ArrayRef> {
     // keep track of current position we have in truthy array
     let mut true_pos = 0;
 
-    SlicesIterator::new(&mask).for_each(|(start, end)| {
+    for (start, end) in SlicesIterator::new(&mask) {
         // the gap needs to be filled with nulls
         if start > filled {
-            mutable.extend_nulls(start - filled);
+            mutable.try_extend_nulls(start - filled)?;
         }
         // fill with truthy values
         let len = end - start;
-        mutable.extend(0, true_pos, true_pos + len);
+        mutable.try_extend(0, true_pos, true_pos + len)?;
         true_pos += len;
         filled = end;
-    });
+    }
     // the remaining part is falsy
     if filled < mask.len() {
-        mutable.extend_nulls(mask.len() - filled);
+        mutable.try_extend_nulls(mask.len() - filled)?;
     }
 
     let data = mutable.freeze();
