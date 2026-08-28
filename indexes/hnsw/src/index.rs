@@ -81,14 +81,13 @@ impl Index for HnswIndex {
         })?;
 
         let limit = limit.unwrap_or(usize::MAX);
-        // Keep fetching until we get enough valid rows or exhaust the index
         let mut row_ids = Vec::new();
         let mut scores = Vec::new();
         let total = self.hnsw.len();
-        // Use explicit ef_search to control search beam width independently
-        // from the number of requested results. hnsw::nearest() uses ef to
-        // bound the candidate pool, giving better recall than knn() which
-        // internally sets ef = num + 16.
+        // hnsw::nearest() requires dest.len() == ef to avoid copy_from_slice
+        // panic inside search_layer. Use ef = total (capped at limit) to request
+        // all reachable nodes in a single call; validity filtering below trims
+        // to the requested limit.
         let ef = query.ef_search.max(limit).min(total);
         let mut searcher = Searcher::<u32>::default();
         let mut dest: Vec<Neighbor<u32>> = vec![
@@ -98,26 +97,17 @@ impl Index for HnswIndex {
             };
             ef
         ];
-        let mut fetch_limit = limit.min(total);
-        let mut scanned_count = 0;
-        while row_ids.len() < limit && fetch_limit <= total {
-            let found = self
-                .hnsw
-                .nearest(&query.vector, ef, &mut searcher, &mut dest);
-            for neighbor in &found[scanned_count..] {
-                if validity.is_valid(neighbor.index)? {
-                    row_ids.push(self.row_ids[neighbor.index]);
-                    scores.push(f32::from_bits(neighbor.distance) as f64);
-                    if row_ids.len() >= limit {
-                        break;
-                    }
+        let found = self
+            .hnsw
+            .nearest(&query.vector, ef, &mut searcher, &mut dest);
+        for neighbor in found {
+            if validity.is_valid(neighbor.index)? {
+                if row_ids.len() >= limit {
+                    break;
                 }
+                row_ids.push(self.row_ids[neighbor.index]);
+                scores.push(f32::from_bits(neighbor.distance) as f64);
             }
-            scanned_count = found.len();
-            if fetch_limit >= total {
-                break;
-            }
-            fetch_limit = (fetch_limit * 2).min(total);
         }
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
