@@ -322,37 +322,24 @@ fn calc_data_file_partition_ranges(
     partition_count: usize,
     data_file_count: usize,
 ) -> Vec<Option<Range<usize>>> {
-    let mut partition_allocations = vec![0; partition_count];
-
-    if partition_count > data_file_count {
-        for partition_allocation in partition_allocations.iter_mut().take(data_file_count) {
-            *partition_allocation = 1;
-        }
-    } else {
-        let partition_size = data_file_count / partition_count;
-        for partition_allocation in partition_allocations.iter_mut() {
-            *partition_allocation = partition_size;
-        }
-
-        let left = data_file_count - partition_count * partition_size;
-        for partition_allocation in partition_allocations.iter_mut().take(left) {
-            *partition_allocation += 1;
-        }
+    if partition_count == 0 {
+        return vec![None];
     }
 
-    let mut ranges = Vec::with_capacity(partition_count);
-    let mut start = 0usize;
-    for partition_allocation in partition_allocations.iter() {
-        if *partition_allocation == 0 {
-            ranges.push(None);
-        } else {
-            let partition_range = start..start + *partition_allocation;
-            ranges.push(Some(partition_range));
-            start += *partition_allocation;
-        }
-    }
+    // Each partition owns `base` files, and the first `extras` partitions each
+    // take one extra. Partition i's range starts after i*base evenly-divided
+    // files plus min(i, extras) extras already handed to earlier partitions,
+    // so partition sizes differ by at most 1.
+    let base = data_file_count / partition_count;
+    let extras = data_file_count % partition_count;
 
-    ranges
+    (0..partition_count)
+        .map(|i| {
+            let len = base + usize::from(i < extras);
+            let start = i * base + i.min(extras);
+            (len != 0).then(|| start..start + len)
+        })
+        .collect()
 }
 
 #[cfg(test)]
