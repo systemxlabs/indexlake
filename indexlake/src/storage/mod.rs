@@ -1,4 +1,5 @@
 mod parquet;
+mod prune;
 
 use arrow::array::FixedSizeBinaryArray;
 use bytes::Bytes;
