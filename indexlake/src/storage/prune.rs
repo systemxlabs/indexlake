@@ -325,21 +325,19 @@ pub(crate) async fn read_footer_metadata(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
     use std::sync::Arc;
 
     use arrow::array::{Int64Array, RecordBatch};
     use arrow::datatypes::{DataType, Field, Schema};
     use parquet::arrow::arrow_reader::RowSelection;
     use parquet::arrow::arrow_writer::ArrowWriter;
-    use parquet::file::metadata::ParquetMetaDataReader;
     use parquet::file::properties::WriterProperties;
 
     use super::*;
     use crate::expr::{col, lit};
 
     /// Write one int64 column ("grp") into an in-memory parquet file with the
-    /// given rows per row group and decode its footer metadata.
+    /// given rows per row group and return its footer metadata.
     fn write_test_parquet(values: &[i64], rows_per_row_group: usize) -> ParquetMetaData {
         let schema = Arc::new(Schema::new(vec![Field::new("grp", DataType::Int64, false)]));
         let batch = RecordBatch::try_new(
@@ -350,13 +348,9 @@ mod tests {
         let props = WriterProperties::builder()
             .set_max_row_group_row_count(Some(rows_per_row_group))
             .build();
-        let mut cursor = Cursor::new(Vec::new());
-        {
-            let mut writer = ArrowWriter::try_new(&mut cursor, schema, Some(props)).unwrap();
-            writer.write(&batch).unwrap();
-            writer.close().unwrap();
-        }
-        ParquetMetaDataReader::decode_metadata(cursor.into_inner().as_slice()).unwrap()
+        let mut writer = ArrowWriter::try_new(Vec::<u8>::new(), schema, Some(props)).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap()
     }
 
     fn eq_predicates(value: i64) -> Vec<StatsPredicate> {
