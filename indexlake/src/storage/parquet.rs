@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use arrow::array::{AsArray, BooleanArray, FixedSizeBinaryArray, RecordBatch};
 use arrow::datatypes::SchemaRef;
@@ -336,18 +336,24 @@ pub(crate) async fn read_data_files_by_record(
 /// Cross-file scan concurrency: `IL_SCAN_CONCURRENCY` overrides, defaulting
 /// to the CPU count clamped to [4, 16] — decoding is CPU-bound so extra
 /// concurrency mostly adds memory and scheduling overhead.
+///
+/// Resolved once per process: scans run per-scan-call, so an uncached env
+/// read would repeat the lookup (and re-parse) on every scan.
 fn scan_concurrency() -> usize {
-    if let Some(n) = std::env::var("IL_SCAN_CONCURRENCY")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-    {
-        return n;
-    }
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .clamp(4, 16)
+    static SCAN_CONCURRENCY: OnceLock<usize> = OnceLock::new();
+    *SCAN_CONCURRENCY.get_or_init(|| {
+        if let Some(n) = std::env::var("IL_SCAN_CONCURRENCY")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|n| *n > 0)
+        {
+            return n;
+        }
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(4, 16)
+    })
 }
 
 pub(crate) async fn find_matched_row_ids_from_parquet_file(
