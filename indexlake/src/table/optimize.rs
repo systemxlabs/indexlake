@@ -303,7 +303,6 @@ async fn stream_merge_group_files(
             None,
             vec![],
             1,
-            None,
         )
         .await?;
         streams.push(stream);

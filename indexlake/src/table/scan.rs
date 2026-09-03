@@ -18,7 +18,10 @@ use crate::catalog::{
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
 use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
 use crate::storage::prune::{RowGroupPruner, build_row_group_pruner};
-use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
+use crate::storage::{
+    Storage, count_data_file_by_record, read_data_file_by_record,
+    read_parquet_file_with_row_group_pruner,
+};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -551,9 +554,6 @@ async fn index_scan_data_file(
     let row_id_filter = row_ids_in_list_expr(row_ids.into_iter().collect());
     left_filters.push(row_id_filter);
 
-    // The per-file row-id filter differs per file, so the pruner cannot be
-    // shared across files here; build it from this file's filters.
-    let row_group_pruner = build_row_group_pruner(&left_filters, &table.table_schema.arrow_schema);
     read_data_file_by_record(
         table.storage.as_ref(),
         &table.table_schema,
@@ -561,7 +561,6 @@ async fn index_scan_data_file(
         scan_projection,
         left_filters,
         scan_batch_size,
-        row_group_pruner.as_ref(),
     )
     .await
 }
@@ -797,7 +796,11 @@ impl TablePartitionScanner {
                     }
                 }
 
-                let stream = read_data_file_by_record(
+                // Only parquet data files exist today
+                // (DataFileFormat::ParquetV1/V2), so the format dispatch in
+                // read_data_file_by_record is skipped to pass the scan-built
+                // pruner through.
+                let stream = read_parquet_file_with_row_group_pruner(
                     storage.as_ref(),
                     &table_schema,
                     &record,

@@ -298,7 +298,6 @@ pub(crate) async fn update_data_file_rows_by_condition(
         None,
         vec![condition.clone()],
         1024,
-        None,
     )
     .await?;
 
@@ -350,7 +349,6 @@ pub(crate) async fn parallel_find_matched_data_file_rows(
                 None,
                 vec![condition],
                 1024,
-                None,
             )
             .await?;
 

@@ -223,7 +223,6 @@ async fn rewrite_data_files_add_column(
                 None,
                 vec![],
                 1024,
-                None,
             )
             .await?;
             let mut record_count = 0usize;

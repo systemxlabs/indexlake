@@ -22,7 +22,8 @@ use uuid::Uuid;
 use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME};
 use crate::expr::{Expr, merge_filters, visited_columns};
 use crate::storage::prune::{
-    PruneOutcome, RowGroupPruner, prune_file_row_groups, read_footer_metadata,
+    PruneOutcome, RowGroupPruner, build_row_group_pruner, prune_file_row_groups,
+    read_footer_metadata,
 };
 use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
 use crate::table::TableSchemaRef;
@@ -156,6 +157,35 @@ pub(crate) async fn read_parquet_file_by_record(
     projection: Option<Vec<usize>>,
     filters: Vec<Expr>,
     batch_size: usize,
+) -> ILResult<RecordBatchStream> {
+    // Single-file callers build the pruner on the spot: the construction
+    // cost only matters when the same pruner can be shared across files,
+    // which is the scanner's job (see
+    // [`read_parquet_file_with_row_group_pruner`]).
+    let row_group_pruner = build_row_group_pruner(&filters, &table_schema.arrow_schema);
+    read_parquet_file_with_row_group_pruner(
+        storage,
+        table_schema,
+        data_file_record,
+        projection,
+        filters,
+        batch_size,
+        row_group_pruner.as_ref(),
+    )
+    .await
+}
+
+/// Same as [`read_parquet_file_by_record`], but takes a row-group pruner
+/// prebuilt from the scan filters so multi-file scans can build it once and
+/// share it across files (rebuilding it per file costs ~25us and dominates
+/// scans over many small files).
+pub(crate) async fn read_parquet_file_with_row_group_pruner(
+    storage: &dyn Storage,
+    table_schema: &TableSchemaRef,
+    data_file_record: &DataFileRecord,
+    projection: Option<Vec<usize>>,
+    filters: Vec<Expr>,
+    batch_size: usize,
     row_group_pruner: Option<&RowGroupPruner>,
 ) -> ILResult<RecordBatchStream> {
     let mut input_file = storage.open(&data_file_record.relative_path).await?;
@@ -278,7 +308,6 @@ pub(crate) async fn find_matched_row_ids_from_parquet_file(
         Some(projection),
         vec![condition.clone()],
         1024,
-        None,
     )
     .await?;
 
