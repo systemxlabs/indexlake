@@ -2,6 +2,7 @@ mod binary;
 mod builder;
 mod case;
 mod compute;
+pub mod datafusion;
 mod like;
 mod utils;
 mod visitor;

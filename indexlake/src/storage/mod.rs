@@ -1,4 +1,7 @@
 mod parquet;
+pub(crate) mod prune;
+
+use prune::RowGroupPruner;
 
 use arrow::array::FixedSizeBinaryArray;
 use bytes::Bytes;
@@ -128,6 +131,7 @@ pub(crate) async fn read_data_file_by_record(
     projection: Option<Vec<usize>>,
     filters: Vec<Expr>,
     batch_size: usize,
+    row_group_pruner: Option<&RowGroupPruner>,
 ) -> ILResult<RecordBatchStream> {
     match data_file_record.format {
         DataFileFormat::ParquetV1 | DataFileFormat::ParquetV2 => {
@@ -138,6 +142,7 @@ pub(crate) async fn read_data_file_by_record(
                 projection,
                 filters,
                 batch_size,
+                row_group_pruner,
             )
             .await
         }
@@ -153,9 +158,16 @@ pub(crate) async fn count_data_file_by_record(
     if filters.is_empty() {
         Ok(data_file_record.valid_row_count())
     } else {
-        let stream =
-            read_data_file_by_record(storage, table_schema, data_file_record, None, filters, 8096)
-                .await?;
+        let stream = read_data_file_by_record(
+            storage,
+            table_schema,
+            data_file_record,
+            None,
+            filters,
+            8096,
+            None,
+        )
+        .await?;
         let count: usize = stream
             .map(|batch| {
                 let batch = batch?;

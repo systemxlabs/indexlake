@@ -607,6 +607,7 @@ async fn read_rows(
                     projection,
                     vec![row_ids_in_list_expr(row_ids)],
                     1024,
+                    None,
                 )
                 .await?;
 

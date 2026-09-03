@@ -266,6 +266,7 @@ pub(crate) async fn process_create_index(
                     Some(projection),
                     vec![],
                     1024,
+                    None,
                 )
                 .await?;
                 while let Some(batch) = stream.next().await {
