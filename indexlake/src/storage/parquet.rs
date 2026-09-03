@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::ops::Range;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use arrow::array::{AsArray, BooleanArray, FixedSizeBinaryArray, RecordBatch};
 use arrow::datatypes::SchemaRef;
@@ -149,28 +149,30 @@ pub(crate) fn build_parquet_writer<W: AsyncFileWriter>(
     )?)
 }
 
-/// Assemble the record batch stream for a single data file. The file's footer
-/// is read exactly once and injected into the reader builder, so row-group
-/// statistics pruning and decoding share the same metadata without a second
-/// metadata read.
-///
-/// Returns `Ok(None)` when statistics pruning proved that the file cannot
-/// contain any matching row (all row groups pruned); the caller should skip
-/// the file entirely.
-async fn open_parquet_file_stream(
-    mut input_file: Box<dyn InputFile>,
+pub(crate) async fn read_parquet_file_by_record(
+    storage: &dyn Storage,
     table_schema: &TableSchemaRef,
-    record: &DataFileRecord,
+    data_file_record: &DataFileRecord,
     projection: Option<Vec<usize>>,
     filters: Vec<Expr>,
     batch_size: usize,
-) -> ILResult<Option<RecordBatchStream>> {
+) -> ILResult<RecordBatchStream> {
+    let mut input_file = storage.open(&data_file_record.relative_path).await?;
+
     // The footer suffix is located from `record.size` as recorded in the
     // catalog (written by fstat at commit time), avoiding a metadata stat per
     // file. A file rewritten out-of-band therefore fails loudly here instead
-    // of being read with a misaligned row grid.
+    // of being read with a misaligned row grid. The footer is read exactly
+    // once and injected into the reader builder, so row-group statistics
+    // pruning and decoding share the same metadata without a second metadata
+    // read.
     let metadata = Arc::new(
-        read_footer_metadata(&mut *input_file, &record.relative_path, record.size as u64).await?,
+        read_footer_metadata(
+            &mut *input_file,
+            &data_file_record.relative_path,
+            data_file_record.size as u64,
+        )
+        .await?,
     );
     let arrow_reader_metadata =
         ArrowReaderMetadata::try_new(metadata.clone(), ArrowReaderOptions::default())?;
@@ -192,7 +194,7 @@ async fn open_parquet_file_stream(
         } else {
             return Err(ILError::internal(format!(
                 "Data file {} doesn't contain internal field name {internal_field_name}",
-                record.data_file_id
+                data_file_record.data_file_id
             )));
         }
     }
@@ -229,14 +231,19 @@ async fn open_parquet_file_stream(
     // footer row total doesn't match the catalog record count, so the two
     // selections are always aligned on the same row grid here.
     let row_selection = if stats_predicates.is_empty() {
-        record.row_selection()
+        data_file_record.row_selection()
     } else {
-        match prune_file_row_groups(&metadata, &stats_predicates, record.record_count as usize) {
-            Some(PruneOutcome::Skip) => return Ok(None),
-            Some(PruneOutcome::Partial(row_group_selection)) => {
-                record.row_selection().intersection(&row_group_selection)
-            }
-            None => record.row_selection(),
+        match prune_file_row_groups(
+            &metadata,
+            &stats_predicates,
+            data_file_record.record_count as usize,
+        ) {
+            // All row groups pruned: the file cannot contain any matching row.
+            Some(PruneOutcome::Skip) => return Ok(Box::pin(futures::stream::empty())),
+            Some(PruneOutcome::Partial(row_group_selection)) => data_file_record
+                .row_selection()
+                .intersection(&row_group_selection),
+            None => data_file_record.row_selection(),
         }
     };
 
@@ -252,108 +259,7 @@ async fn open_parquet_file_stream(
         .build()?
         .map(|batch| Ok::<_, ILError>(batch?));
 
-    Ok(Some(Box::pin(stream)))
-}
-
-pub(crate) async fn read_parquet_file_by_record(
-    storage: &dyn Storage,
-    table_schema: &TableSchemaRef,
-    data_file_record: &DataFileRecord,
-    projection: Option<Vec<usize>>,
-    filters: Vec<Expr>,
-    batch_size: usize,
-) -> ILResult<RecordBatchStream> {
-    let input_file = storage.open(&data_file_record.relative_path).await?;
-    match open_parquet_file_stream(
-        input_file,
-        table_schema,
-        data_file_record,
-        projection,
-        filters,
-        batch_size,
-    )
-    .await?
-    {
-        Some(stream) => Ok(stream),
-        None => Ok(Box::pin(futures::stream::empty())),
-    }
-}
-
-/// Read data files as one ordered record batch stream with bounded
-/// cross-file concurrency. Each file's whole assembly (open + footer read +
-/// builder construction) runs as one future, so `buffered(concurrency)`
-/// overlaps file N+1's assembly with file N's decoding. Output order equals
-/// the input record order.
-pub(crate) async fn read_data_files_by_record(
-    storage: Arc<dyn Storage>,
-    table_schema: TableSchemaRef,
-    data_file_records: &[DataFileRecord],
-    projection: Option<Vec<usize>>,
-    filters: Vec<Expr>,
-    batch_size: usize,
-) -> ILResult<RecordBatchStream> {
-    if data_file_records.is_empty() {
-        return Ok(Box::pin(futures::stream::empty()));
-    }
-    let concurrency = scan_concurrency().min(data_file_records.len());
-
-    // Keep the per-file future's captured data owned: closures capturing
-    // references inside this future trip rustc's higher-ranked lifetime
-    // inference when the enclosing future is stored in the scan machinery.
-    // The stream must own the records: the boxed stream is 'static.
-    let records = data_file_records.to_vec();
-    let futures = records.into_iter().map(move |record| {
-        let storage = storage.clone();
-        let table_schema = table_schema.clone();
-        let projection = projection.clone();
-        let filters = filters.clone();
-        async move {
-            let input_file = storage.open(&record.relative_path).await?;
-            // Format dispatch: only parquet data files exist today
-            // (DataFileFormat::ParquetV1/V2); a non-parquet format must not
-            // go through open_parquet_file_stream.
-            open_parquet_file_stream(
-                input_file,
-                &table_schema,
-                &record,
-                projection,
-                filters,
-                batch_size,
-            )
-            .await
-        }
-    });
-
-    let stream = futures::stream::iter(futures)
-        .buffered(concurrency)
-        // Drop files that were fully pruned; propagate errors.
-        .try_filter_map(|stream| async move { Ok(stream) })
-        .try_flatten();
-
     Ok(Box::pin(stream))
-}
-
-/// Cross-file scan concurrency: `IL_SCAN_CONCURRENCY` overrides, defaulting
-/// to the CPU count clamped to [4, 16] — decoding is CPU-bound so extra
-/// concurrency mostly adds memory and scheduling overhead.
-///
-/// Resolved once per process: scans run per-scan-call, so an uncached env
-/// read would repeat the lookup (and re-parse) on every scan.
-fn scan_concurrency() -> usize {
-    static SCAN_CONCURRENCY: OnceLock<usize> = OnceLock::new();
-    *SCAN_CONCURRENCY.get_or_init(|| {
-        if let Some(n) = std::env::var("IL_SCAN_CONCURRENCY")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|n| *n > 0)
-        {
-            return n;
-        }
-        std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .clamp(4, 16)
-    })
 }
 
 pub(crate) async fn find_matched_row_ids_from_parquet_file(

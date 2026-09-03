@@ -17,9 +17,7 @@ use crate::catalog::{
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
 use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
-use crate::storage::{
-    Storage, count_data_file_by_record, read_data_file_by_record, read_data_files_by_record,
-};
+use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -664,13 +662,6 @@ enum ScanState {
         idx: usize,
         stream: RecordBatchStream,
     },
-    /// Assembling the ordered cross-file stream over all remaining data
-    /// files. Only used when the scan has no offset/limit, so no per-file
-    /// row counting is needed.
-    GettingBatchedDataStream {
-        fut: GettingDataFileStreamFut,
-    },
-    DataFileBatchedStreaming(RecordBatchStream),
     Done,
 }
 
@@ -719,30 +710,6 @@ impl TablePartitionScanner {
     /// Check if the limit has been reached.
     fn is_limit_reached(&self) -> bool {
         self.row_pointer >= self.query_window.end
-    }
-
-    /// Assemble one ordered stream over all data files. Only valid without
-    /// offset/limit: the windowed path needs per-file row counting instead.
-    fn get_batched_data_files_future(&self) -> GettingDataFileStreamFut {
-        let storage = Arc::clone(&self.storage);
-        let table_schema = Arc::clone(&self.table_schema);
-        let data_file_records = self.partitioned_data_file_records.clone();
-        let projection = self.scan.projection.clone();
-        let filters = self.scan.filters.clone();
-        let batch_size = self.scan.batch_size;
-
-        Box::pin(async move {
-            let stream = read_data_files_by_record(
-                storage,
-                table_schema,
-                &data_file_records,
-                projection,
-                filters,
-                batch_size,
-            )
-            .await?;
-            Ok(GettingDataFileStreamResult::Streaming(stream))
-        })
     }
 
     /// Apply offset and limit to a batch using Range operations.
@@ -860,18 +827,11 @@ impl Stream for TablePartitionScanner {
                             // Inline rows done, transition to Done or data files
                             if self.is_limit_reached() || data_file_records_count == 0 {
                                 self.state = ScanState::Done;
-                            } else if self.scan.offset_limit_required() {
-                                // Windowed query: per-file row counting is
-                                // required to skip whole files.
+                            } else {
                                 let first_data_file_record =
                                     self.partitioned_data_file_records[0].clone();
                                 let fut = self.get_stream_future(first_data_file_record);
                                 self.state = ScanState::GettingDataFileStream { idx: 0, fut };
-                            } else {
-                                // No window: stream all data files through one
-                                // ordered cross-file pipeline.
-                                let fut = self.get_batched_data_files_future();
-                                self.state = ScanState::GettingBatchedDataStream { fut };
                             }
                             continue;
                         }
@@ -939,37 +899,6 @@ impl Stream for TablePartitionScanner {
                                     ScanState::GettingDataFileStream { idx: next_idx, fut };
                             }
                             continue;
-                        }
-                        Poll::Pending => return Poll::Pending,
-                    }
-                }
-                ScanState::GettingBatchedDataStream { fut } => {
-                    let mut fut = Pin::new(fut);
-                    match fut.as_mut().poll(cx) {
-                        Poll::Ready(Ok(result)) => match result {
-                            GettingDataFileStreamResult::Streaming(stream) => {
-                                self.state = ScanState::DataFileBatchedStreaming(stream);
-                            }
-                            GettingDataFileStreamResult::Skip(_) => {
-                                // Unreachable: the batched path never skips.
-                                self.state = ScanState::Done;
-                            }
-                        },
-                        Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
-                        Poll::Pending => return Poll::Pending,
-                    }
-                }
-                ScanState::DataFileBatchedStreaming(stream) => {
-                    let stream = Pin::new(stream);
-                    match stream.poll_next(cx) {
-                        Poll::Ready(Some(Ok(batch))) => {
-                            if batch.num_rows() > 0 {
-                                return Poll::Ready(Some(Ok(batch)));
-                            }
-                        }
-                        Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
-                        Poll::Ready(None) => {
-                            self.state = ScanState::Done;
                         }
                         Poll::Pending => return Poll::Pending,
                     }
