@@ -91,7 +91,6 @@ impl From<uuid::Error> for ILError {
     }
 }
 
-#[cfg(feature = "datafusion")]
 impl From<ILError> for datafusion_common::DataFusionError {
     fn from(err: ILError) -> Self {
         datafusion_common::DataFusionError::External(Box::new(err))
