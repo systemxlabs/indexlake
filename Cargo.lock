@@ -2720,6 +2720,7 @@ dependencies = [
  "geo",
  "geozero",
  "indexlake",
+ "indexlake-catalog-postgres",
  "indexlake-index-bm25",
  "indexlake-index-btree",
  "indexlake-index-hnsw",
