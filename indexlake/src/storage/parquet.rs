@@ -22,7 +22,8 @@ use uuid::Uuid;
 use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME};
 use crate::expr::{Expr, merge_filters, visited_columns};
 use crate::storage::prune::{
-    PruneOutcome, extract_stats_predicates, prune_file_row_groups, read_footer_metadata,
+    PruneOutcome, RowGroupPruner, build_row_group_pruner, prune_file_row_groups,
+    read_footer_metadata,
 };
 use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
 use crate::table::TableSchemaRef;
@@ -157,6 +158,36 @@ pub(crate) async fn read_parquet_file_by_record(
     filters: Vec<Expr>,
     batch_size: usize,
 ) -> ILResult<RecordBatchStream> {
+    // Single-file callers build the pruner on the spot: the construction
+    // cost only matters when the same pruner can be shared across files,
+    // which is the scanner's job (see
+    // [`read_parquet_file_with_row_group_pruner`]).
+    let row_group_pruner = build_row_group_pruner(&filters, &table_schema.arrow_schema);
+    read_parquet_file_with_row_group_pruner(
+        storage,
+        table_schema,
+        data_file_record,
+        projection,
+        filters,
+        batch_size,
+        row_group_pruner.as_ref(),
+    )
+    .await
+}
+
+/// Same as [`read_parquet_file_by_record`], but takes a row-group pruner
+/// prebuilt from the scan filters so multi-file scans can build it once and
+/// share it across files (rebuilding it per file costs ~25us and dominates
+/// scans over many small files).
+pub(crate) async fn read_parquet_file_with_row_group_pruner(
+    storage: &dyn Storage,
+    table_schema: &TableSchemaRef,
+    data_file_record: &DataFileRecord,
+    projection: Option<Vec<usize>>,
+    filters: Vec<Expr>,
+    batch_size: usize,
+    row_group_pruner: Option<&RowGroupPruner>,
+) -> ILResult<RecordBatchStream> {
     let mut input_file = storage.open(&data_file_record.relative_path).await?;
 
     // The footer suffix is located from `record.size` as recorded in the
@@ -200,9 +231,27 @@ pub(crate) async fn read_parquet_file_by_record(
     }
     let projection_mask = ProjectionMask::roots(parquet_schema, parquet_projection);
 
-    // Statistics pruning is judged against the table schema before the
-    // filters are consumed by the row filter below.
-    let stats_predicates = extract_stats_predicates(&filters, &table_schema.arrow_schema);
+    // Row-group pruning: pure in-memory judgment over the footer already in
+    // hand, using the local conservative pruning predicate built once per
+    // scan and shared across files. Intersect the row-group selection with
+    // the validity (delete bitmap) selection; `prune_file_row_groups`
+    // abandons pruning when the footer row total doesn't match the catalog
+    // record count, so the two selections are always aligned on the same row
+    // grid here.
+    let row_selection = {
+        match prune_file_row_groups(
+            &metadata,
+            row_group_pruner,
+            data_file_record.record_count as usize,
+        ) {
+            // All row groups pruned: the file cannot contain any matching row.
+            Some(PruneOutcome::Skip) => return Ok(Box::pin(futures::stream::empty())),
+            Some(PruneOutcome::Partial(row_group_selection)) => data_file_record
+                .row_selection()
+                .intersection(&row_group_selection),
+            None => data_file_record.row_selection(),
+        }
+    };
 
     let arrow_predicate_opt = if filters.is_empty() {
         None
@@ -223,28 +272,6 @@ pub(crate) async fn read_parquet_file_by_record(
         }
         let predicate_projection_mask = ProjectionMask::roots(parquet_schema, predicate_projection);
         Some(ExprPredicate::try_new(filters, predicate_projection_mask)?)
-    };
-
-    // Row-group pruning: pure in-memory judgment over the footer already in
-    // hand. Intersect the row-group selection with the validity (delete
-    // bitmap) selection; `prune_file_row_groups` abandons pruning when the
-    // footer row total doesn't match the catalog record count, so the two
-    // selections are always aligned on the same row grid here.
-    let row_selection = if stats_predicates.is_empty() {
-        data_file_record.row_selection()
-    } else {
-        match prune_file_row_groups(
-            &metadata,
-            &stats_predicates,
-            data_file_record.record_count as usize,
-        ) {
-            // All row groups pruned: the file cannot contain any matching row.
-            Some(PruneOutcome::Skip) => return Ok(Box::pin(futures::stream::empty())),
-            Some(PruneOutcome::Partial(row_group_selection)) => data_file_record
-                .row_selection()
-                .intersection(&row_group_selection),
-            None => data_file_record.row_selection(),
-        }
     };
 
     arrow_reader_builder = arrow_reader_builder.with_projection(projection_mask);
