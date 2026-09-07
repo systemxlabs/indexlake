@@ -293,13 +293,8 @@ pub(crate) async fn read_row_id_array_from_parquet(
     storage: &dyn Storage,
     relative_path: &str,
 ) -> ILResult<FixedSizeBinaryArray> {
-    let mut input_file = storage.open(relative_path).await?;
-    let size = input_file.metadata().await?.size;
-    let metadata = Arc::new(read_footer_metadata(&mut *input_file, relative_path, size).await?);
-    let arrow_reader_metadata =
-        ArrowReaderMetadata::try_new(metadata, ArrowReaderOptions::default())?;
-    let arrow_reader_builder =
-        ParquetRecordBatchStreamBuilder::new_with_metadata(input_file, arrow_reader_metadata);
+    let input_file = storage.open(relative_path).await?;
+    let arrow_reader_builder = ParquetRecordBatchStreamBuilder::new(input_file).await?;
     let parquet_schema = arrow_reader_builder.parquet_schema();
 
     let projection_mask = ProjectionMask::roots(parquet_schema, [0]);
