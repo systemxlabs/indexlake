@@ -17,11 +17,7 @@ use crate::catalog::{
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
 use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
-use crate::storage::prune::{RowGroupPruner, build_row_group_pruner};
-use crate::storage::{
-    Storage, count_data_file_by_record, read_data_file_by_record,
-    read_data_file_by_record_with_row_group_pruner,
-};
+use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
 use crate::{ILError, ILResult, RecordBatchStream};
@@ -678,10 +674,6 @@ pub struct TablePartitionScanner {
     state: ScanState,
     query_window: Range<usize>,
     row_pointer: usize,
-    /// Row-group pruning predicate built once for the whole scan: it only
-    /// depends on the filters and the table schema, so rebuilding it per file
-    /// would dominate scans over many small files.
-    row_group_pruner: Option<RowGroupPruner>,
 }
 
 impl TablePartitionScanner {
@@ -704,8 +696,6 @@ impl TablePartitionScanner {
             scan.offset..usize::MAX
         };
 
-        let row_group_pruner = build_row_group_pruner(&scan.filters, &table_schema.arrow_schema);
-
         Self {
             table_schema,
             storage,
@@ -714,7 +704,6 @@ impl TablePartitionScanner {
             state,
             query_window,
             row_pointer,
-            row_group_pruner,
         }
     }
 
@@ -767,7 +756,6 @@ impl TablePartitionScanner {
             let row_pointer = self.row_pointer;
             let query_window = self.query_window.clone();
             let needs_count = self.scan.offset_limit_required();
-            let row_group_pruner = self.row_group_pruner.clone();
 
             Box::pin(async move {
                 let count = if needs_count {
@@ -796,14 +784,13 @@ impl TablePartitionScanner {
                     }
                 }
 
-                let stream = read_data_file_by_record_with_row_group_pruner(
+                let stream = read_data_file_by_record(
                     storage.as_ref(),
                     &table_schema,
                     &record,
                     projection,
                     filters,
                     batch_size,
-                    row_group_pruner.as_ref(),
                 )
                 .await?;
                 Ok(GettingDataFileStreamResult::Streaming(stream))
