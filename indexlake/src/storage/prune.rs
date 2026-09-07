@@ -116,6 +116,7 @@ pub(crate) fn prune_file_row_groups(
     pruner: Option<&RowGroupPruner>,
     record_count: usize,
 ) -> Option<PruneOutcome> {
+    let pruner = pruner?;
     let footer_row_count: usize = metadata
         .row_groups()
         .iter()
@@ -124,7 +125,7 @@ pub(crate) fn prune_file_row_groups(
     if footer_row_count != record_count {
         return None;
     }
-    pruner?.prune(metadata)
+    pruner.prune(metadata)
 }
 
 /// Statistics for all columns and row groups in one file. The arrays returned
