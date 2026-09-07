@@ -113,10 +113,9 @@ pub(crate) fn build_row_group_pruner(
 /// systems.
 pub(crate) fn prune_file_row_groups(
     metadata: &ParquetMetaData,
-    pruner: Option<&RowGroupPruner>,
+    pruner: &RowGroupPruner,
     record_count: usize,
 ) -> Option<PruneOutcome> {
-    let pruner = pruner?;
     let footer_row_count: usize = metadata
         .row_groups()
         .iter()
@@ -879,9 +878,9 @@ mod tests {
         Arc::new(Schema::new(vec![Field::new("grp", DataType::Int64, false)]))
     }
 
-    fn int_pruner(expr: Expr) -> Option<RowGroupPruner> {
+    fn int_pruner(expr: Expr) -> RowGroupPruner {
         let schema = int_schema();
-        build_row_group_pruner(&[expr], &schema)
+        build_row_group_pruner(&[expr], &schema).unwrap()
     }
 
     #[test]
@@ -892,7 +891,7 @@ mod tests {
             vec![Arc::new(Int64Array::from_iter_values(0..30)) as ArrayRef],
         );
         let pruner = int_pruner(col("grp").eq(lit(25i64)));
-        match prune_file_row_groups(&metadata, pruner.as_ref(), 30) {
+        match prune_file_row_groups(&metadata, &pruner, 30) {
             Some(PruneOutcome::Partial(selection)) => assert_eq!(selection.row_count(), 10),
             _ => panic!("expected partial pruning"),
         }
@@ -907,7 +906,7 @@ mod tests {
         );
         let pruner = int_pruner(col("grp").eq(lit(500i64)));
         assert!(matches!(
-            prune_file_row_groups(&metadata, pruner.as_ref(), 30),
+            prune_file_row_groups(&metadata, &pruner, 30),
             Some(PruneOutcome::Skip)
         ));
     }
@@ -923,8 +922,8 @@ mod tests {
             &schema,
             vec![Arc::new(Int64Array::from(vec![Some(1), None, Some(2)])) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("value").is_null()], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 3).is_none());
+        let pruner = build_row_group_pruner(&[col("value").is_null()], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 3).is_none());
     }
 
     #[test]
@@ -946,8 +945,8 @@ mod tests {
             col("value").eq(lit(25.5f64)),
             col("name").eq(lit("key_025")),
         ];
-        let pruner = build_row_group_pruner(&filters, &schema);
-        match prune_file_row_groups(&metadata, pruner.as_ref(), 30) {
+        let pruner = build_row_group_pruner(&filters, &schema).unwrap();
+        match prune_file_row_groups(&metadata, &pruner, 30) {
             Some(PruneOutcome::Partial(selection)) => assert_eq!(selection.row_count(), 10),
             _ => panic!("expected partial pruning"),
         }
@@ -975,8 +974,8 @@ mod tests {
                 7.0,
             ])) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("value").gt(lit(10.0f64))], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 10).is_none());
+        let pruner = build_row_group_pruner(&[col("value").gt(lit(10.0f64))], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 10).is_none());
     }
 
     #[test]
@@ -997,8 +996,8 @@ mod tests {
             expr: Box::new(col("value")),
             cast_type: DataType::Int64,
         })));
-        let pruner = build_row_group_pruner(&[filter], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 10).is_none());
+        let pruner = build_row_group_pruner(&[filter], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 10).is_none());
     }
 
     #[test]
@@ -1022,8 +1021,8 @@ mod tests {
                 value: Scalar::TimestampSecond(Some(25), Some(Arc::from("UTC"))),
             })),
         });
-        let pruner = build_row_group_pruner(&[filter], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 30).is_none());
+        let pruner = build_row_group_pruner(&[filter], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 30).is_none());
     }
 
     #[test]
@@ -1042,7 +1041,7 @@ mod tests {
             vec![Arc::new(Int64Array::from_iter_values(0..30)) as ArrayRef],
         );
         let pruner = int_pruner(col("grp").gt(lit(5i32)));
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 30).is_none());
+        assert!(prune_file_row_groups(&metadata, &pruner, 30).is_none());
     }
 
     #[test]
@@ -1058,8 +1057,8 @@ mod tests {
                 list: vec![],
                 negated,
             });
-            let pruner = build_row_group_pruner(&[filter], &schema);
-            assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 30).is_none());
+            let pruner = build_row_group_pruner(&[filter], &schema).unwrap();
+            assert!(prune_file_row_groups(&metadata, &pruner, 30).is_none());
         }
     }
 
@@ -1075,8 +1074,8 @@ mod tests {
             list: vec![lit(25i64), lit(26i64)],
             negated: false,
         });
-        let pruner = build_row_group_pruner(&[filter], &schema);
-        match prune_file_row_groups(&metadata, pruner.as_ref(), 30) {
+        let pruner = build_row_group_pruner(&[filter], &schema).unwrap();
+        match prune_file_row_groups(&metadata, &pruner, 30) {
             Some(PruneOutcome::Partial(selection)) => assert_eq!(selection.row_count(), 10),
             _ => panic!("expected partial pruning"),
         }
@@ -1095,8 +1094,8 @@ mod tests {
             list: vec![lit(2i64)],
             negated: true,
         });
-        let pruner = build_row_group_pruner(&[filter], &schema);
-        match prune_file_row_groups(&metadata, pruner.as_ref(), 30) {
+        let pruner = build_row_group_pruner(&[filter], &schema).unwrap();
+        match prune_file_row_groups(&metadata, &pruner, 30) {
             Some(PruneOutcome::Partial(selection)) => assert_eq!(selection.row_count(), 20),
             _ => panic!("expected partial pruning"),
         }
@@ -1111,8 +1110,8 @@ mod tests {
                 (0..30).map(|i| format!("key-{i:03}")),
             )) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("name").like(lit("key-025"))], &schema);
-        match prune_file_row_groups(&metadata, pruner.as_ref(), 30) {
+        let pruner = build_row_group_pruner(&[col("name").like(lit("key-025"))], &schema).unwrap();
+        match prune_file_row_groups(&metadata, &pruner, 30) {
             Some(PruneOutcome::Partial(selection)) => assert_eq!(selection.row_count(), 10),
             _ => panic!("expected partial pruning"),
         }
@@ -1126,8 +1125,8 @@ mod tests {
             &schema,
             vec![Arc::new(StringArray::from_iter_values(values)) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("name").not_like(lit("foo%"))], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 10).is_none());
+        let pruner = build_row_group_pruner(&[col("name").not_like(lit("foo%"))], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 10).is_none());
     }
 
     #[test]
@@ -1139,8 +1138,9 @@ mod tests {
                 (0..30).map(|i| format!("key-{i:03}")),
             )) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("name").not_like(lit("key-025"))], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 30).is_none());
+        let pruner =
+            build_row_group_pruner(&[col("name").not_like(lit("key-025"))], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 30).is_none());
     }
 
     #[test]
@@ -1152,8 +1152,8 @@ mod tests {
                 (0..30).map(|i| format!("key-{i:03}")),
             )) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("name").like(lit("key-02%"))], &schema);
-        match prune_file_row_groups(&metadata, pruner.as_ref(), 30) {
+        let pruner = build_row_group_pruner(&[col("name").like(lit("key-02%"))], &schema).unwrap();
+        match prune_file_row_groups(&metadata, &pruner, 30) {
             Some(PruneOutcome::Partial(selection)) => assert_eq!(selection.row_count(), 10),
             _ => panic!("expected prefix pruning"),
         }
@@ -1168,8 +1168,8 @@ mod tests {
                 (0..30).map(|i| format!("key-{i:03}")),
             )) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("name").like(lit("%02"))], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 30).is_none());
+        let pruner = build_row_group_pruner(&[col("name").like(lit("%02"))], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 30).is_none());
     }
 
     #[test]
@@ -1181,8 +1181,9 @@ mod tests {
                 (0..30).map(|i| format!("key-{i:03}")),
             )) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("name").not_like(lit("key-02%"))], &schema);
-        match prune_file_row_groups(&metadata, pruner.as_ref(), 30) {
+        let pruner =
+            build_row_group_pruner(&[col("name").not_like(lit("key-02%"))], &schema).unwrap();
+        match prune_file_row_groups(&metadata, &pruner, 30) {
             Some(PruneOutcome::Partial(selection)) => assert_eq!(selection.row_count(), 20),
             _ => panic!("expected NOT LIKE prefix pruning"),
         }
@@ -1197,8 +1198,8 @@ mod tests {
                 (0..30).map(|i| format!("key_{i:03}")),
             )) as ArrayRef],
         );
-        let pruner = build_row_group_pruner(&[col("name").ilike(lit("KEY_025"))], &schema);
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 30).is_none());
+        let pruner = build_row_group_pruner(&[col("name").ilike(lit("KEY_025"))], &schema).unwrap();
+        assert!(prune_file_row_groups(&metadata, &pruner, 30).is_none());
     }
 
     #[test]
@@ -1209,7 +1210,7 @@ mod tests {
             vec![Arc::new(Int64Array::from_iter_values(0..30)) as ArrayRef],
         );
         let pruner = int_pruner(col("grp").eq(lit(25i64)));
-        assert!(prune_file_row_groups(&metadata, pruner.as_ref(), 29).is_none());
+        assert!(prune_file_row_groups(&metadata, &pruner, 29).is_none());
     }
 
     #[test]
@@ -1220,8 +1221,7 @@ mod tests {
             vec![Arc::new(Int64Array::from_iter_values(0..30)) as ArrayRef],
         );
         let pruner = int_pruner(col("grp").eq(lit(25i64)));
-        let Some(PruneOutcome::Partial(selection)) =
-            prune_file_row_groups(&metadata, pruner.as_ref(), 30)
+        let Some(PruneOutcome::Partial(selection)) = prune_file_row_groups(&metadata, &pruner, 30)
         else {
             panic!("expected partial pruning");
         };

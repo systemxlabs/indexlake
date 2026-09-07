@@ -208,12 +208,11 @@ pub(crate) async fn read_parquet_file_by_record(
     // abandons pruning when the footer row total doesn't match the catalog
     // record count, so the two selections are always aligned on the same row
     // grid here.
+    // The scan-level pruner is absent when the scan has no filters.
     let row_selection = {
-        match prune_file_row_groups(
-            &metadata,
-            row_group_pruner.as_ref(),
-            data_file_record.record_count as usize,
-        ) {
+        match row_group_pruner.as_ref().and_then(|pruner| {
+            prune_file_row_groups(&metadata, pruner, data_file_record.record_count as usize)
+        }) {
             // All row groups pruned: the file cannot contain any matching row.
             Some(PruneOutcome::Skip) => return Ok(Box::pin(futures::stream::empty())),
             Some(PruneOutcome::Partial(row_group_selection)) => data_file_record
