@@ -17,13 +17,11 @@ use arrow::array::{Array, ArrayRef};
 use arrow::datatypes::{DataType, SchemaRef};
 use parquet::arrow::arrow_reader::RowSelection;
 use parquet::arrow::arrow_reader::statistics::StatisticsConverter;
-use parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader};
+use parquet::file::metadata::ParquetMetaData;
 use parquet::schema::types::SchemaDescriptor;
 
 use crate::catalog::Scalar;
 use crate::expr::{BinaryExpr, BinaryOp, Expr, Literal, visited_columns};
-use crate::storage::InputFile;
-use crate::{ILError, ILResult};
 
 /// Outcome of statistics-based pruning for one data file.
 pub(crate) enum PruneOutcome {
@@ -808,27 +806,6 @@ fn try_ordering(left: &Scalar, right: &Scalar) -> Option<std::cmp::Ordering> {
 /// default heuristic), at least 64 KiB, clamped to the file size.
 pub(crate) fn footer_size_hint(size: u64) -> usize {
     std::cmp::min(size as usize, std::cmp::max(size as usize / 12, 64 * 1024))
-}
-
-/// Read and decode the footer metadata through an already opened input file.
-/// The file size is provided by the caller (recorded in the catalog), so no
-/// metadata (stat) request is needed: the prefetch hint bounds the initial
-/// suffix read, and `ParquetMetaDataReader` re-fetches only when the footer
-/// is larger than the hint.
-pub(crate) async fn read_footer_metadata(
-    input_file: &mut Box<dyn InputFile>,
-    relative_path: &str,
-    size: u64,
-) -> ILResult<ParquetMetaData> {
-    ParquetMetaDataReader::new()
-        .with_prefetch_hint(Some(footer_size_hint(size)))
-        .load_and_finish(input_file, size)
-        .await
-        .map_err(|e| {
-            ILError::internal(format!(
-                "Failed to read parquet metadata of {relative_path}: {e}"
-            ))
-        })
 }
 
 #[cfg(test)]

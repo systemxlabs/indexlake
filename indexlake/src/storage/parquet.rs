@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::catalog::{DataFileRecord, INTERNAL_ROW_ID_FIELD_NAME};
 use crate::expr::{Expr, merge_filters, visited_columns};
 use crate::storage::prune::{
-    PruneOutcome, build_row_group_pruner, prune_file_row_groups, read_footer_metadata,
+    PruneOutcome, build_row_group_pruner, footer_size_hint, prune_file_row_groups,
 };
 use crate::storage::{DataFileFormat, InputFile, OutputFile, Storage};
 use crate::table::TableSchemaRef;
@@ -167,13 +167,18 @@ pub(crate) async fn read_parquet_file_by_record(
     // once and injected into the reader builder, so row-group statistics
     // pruning and decoding share the same metadata without a second metadata
     // read.
+    let size = data_file_record.size as u64;
     let metadata = Arc::new(
-        read_footer_metadata(
-            &mut input_file,
-            &data_file_record.relative_path,
-            data_file_record.size as u64,
-        )
-        .await?,
+        ParquetMetaDataReader::new()
+            .with_prefetch_hint(Some(footer_size_hint(size)))
+            .load_and_finish(&mut input_file, size)
+            .await
+            .map_err(|e| {
+                ILError::internal(format!(
+                    "Failed to read parquet metadata of {}: {e}",
+                    data_file_record.relative_path
+                ))
+            })?,
     );
     let arrow_reader_metadata =
         ArrowReaderMetadata::try_new(metadata.clone(), ArrowReaderOptions::default())?;
