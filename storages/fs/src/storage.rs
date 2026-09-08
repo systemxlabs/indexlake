@@ -48,8 +48,9 @@ impl Storage for FsStorage {
 
     async fn open(&self, relative_path: &str) -> ILResult<Box<dyn InputFile>> {
         let path = self.absolute_path(relative_path);
-        let file = File::open(path)
-            .await
+        // Sync open: it is a cheap syscall, and each read dups the handle
+        // onto a blocking task (see file.rs).
+        let file = std::fs::File::open(path)
             .map_err(|e| ILError::storage(format!("Failed to open file {relative_path}: {e}")))?;
         let file = LocalInputFile {
             file,
