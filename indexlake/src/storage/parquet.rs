@@ -169,7 +169,7 @@ pub(crate) async fn read_parquet_file_by_record(
     // read.
     let metadata = Arc::new(
         read_footer_metadata(
-            &mut *input_file,
+            &mut input_file,
             &data_file_record.relative_path,
             data_file_record.size as u64,
         )

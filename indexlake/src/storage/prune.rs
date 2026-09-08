@@ -811,43 +811,24 @@ pub(crate) fn footer_size_hint(size: u64) -> usize {
 }
 
 /// Read and decode the footer metadata through an already opened input file.
+/// The file size is provided by the caller (recorded in the catalog), so no
+/// metadata (stat) request is needed: the prefetch hint bounds the initial
+/// suffix read, and `ParquetMetaDataReader` re-fetches only when the footer
+/// is larger than the hint.
 pub(crate) async fn read_footer_metadata(
-    input_file: &mut dyn InputFile,
+    input_file: &mut Box<dyn InputFile>,
     relative_path: &str,
     size: u64,
 ) -> ILResult<ParquetMetaData> {
-    if size < 12 {
-        return Err(ILError::internal(format!(
-            "Parquet file {relative_path} is too small to hold a footer"
-        )));
-    }
-    let hint = footer_size_hint(size);
-    let suffix = input_file.read((size - hint as u64)..size).await?;
-    let n = suffix.len();
-    if n < 8 || &suffix[n - 4..] != b"PAR1" {
-        return Err(ILError::internal(format!(
-            "Parquet file {relative_path} has an invalid footer trailer"
-        )));
-    }
-    let footer_len = u32::from_le_bytes(suffix[n - 8..n - 4].try_into().unwrap()) as u64;
-    if footer_len + 8 > size {
-        return Err(ILError::internal(format!(
-            "Parquet file {relative_path} has an invalid footer length"
-        )));
-    }
-    let footer_len = footer_len as usize;
-    let metadata = if footer_len <= n - 8 {
-        suffix.slice(n - 8 - footer_len..n - 8)
-    } else {
-        input_file
-            .read((size - 8 - footer_len as u64)..(size - 8))
-            .await?
-    };
-    ParquetMetaDataReader::decode_metadata(metadata.as_ref()).map_err(|e| {
-        ILError::internal(format!(
-            "Failed to decode parquet metadata of {relative_path}: {e}"
-        ))
-    })
+    ParquetMetaDataReader::new()
+        .with_prefetch_hint(Some(footer_size_hint(size)))
+        .load_and_finish(input_file, size)
+        .await
+        .map_err(|e| {
+            ILError::internal(format!(
+                "Failed to read parquet metadata of {relative_path}: {e}"
+            ))
+        })
 }
 
 #[cfg(test)]
