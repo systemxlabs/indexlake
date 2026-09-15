@@ -12,7 +12,8 @@ use crate::catalog::{
     TransactionHelper, rows_to_record_batch,
 };
 use crate::expr::{
-    Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters, visited_columns,
+    DEFAULT_CAST_OPTIONS, Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters,
+    visited_columns,
 };
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{IndexManager, Table, TableSchemaRef, process_insert_into_inline_rows_with_tx};
@@ -393,7 +394,14 @@ fn update_record_batch(
     let mut columns = batch.columns().to_vec();
     for (name, value) in set_map {
         let idx = batch.schema().index_of(name)?;
-        let new_array = value.eval(batch)?.into_array(batch.num_rows())?;
+        // Cast the evaluated value to the target column type so that a set
+        // expression whose type differs from the column type (e.g. an Int64
+        // literal onto an Int32 column) is coerced instead of rejected.
+        let target_type = batch.schema().field(idx).data_type().clone();
+        let new_array = value
+            .eval(batch)?
+            .cast_to(&target_type, &DEFAULT_CAST_OPTIONS)?
+            .into_array(batch.num_rows())?;
         columns[idx] = Arc::new(new_array);
     }
     let options = RecordBatchOptions::default().with_row_count(Some(batch.num_rows()));
@@ -467,4 +475,79 @@ async fn build_inline_indexes_for_updated_rows(
     }
 
     Ok(inline_index_records)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::Scalar;
+    use crate::expr::lit;
+    use arrow::array::{Int32Array, StringArray, TimestampMicrosecondArray};
+    use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+
+    #[test]
+    fn test_update_record_batch_casts_to_target_type() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("age", DataType::Int32, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(vec!["Alice", "Bob"])),
+                Arc::new(Int32Array::from(vec![20, 21])),
+            ],
+        )
+        .unwrap();
+
+        // An Int64 literal assigned to an Int32 column must be coerced.
+        let set_map = HashMap::from([("age".to_string(), lit(30i64))]);
+        let updated = update_record_batch(&batch, &set_map).unwrap();
+
+        assert_eq!(updated.column(1).data_type(), &DataType::Int32);
+        let age = updated
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        assert_eq!(age.values(), &[30, 30]);
+    }
+
+    #[test]
+    fn test_update_record_batch_casts_timestamp_precision() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new(
+                "birth",
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                true,
+            ),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(vec!["Alice"])),
+                Arc::new(TimestampMicrosecondArray::from(vec![0])),
+            ],
+        )
+        .unwrap();
+
+        // A Nanosecond literal assigned to a Microsecond column must be coerced.
+        let set_map = HashMap::from([(
+            "birth".to_string(),
+            lit(Scalar::TimestampNanosecond(Some(1_000_123), None)),
+        )]);
+        let updated = update_record_batch(&batch, &set_map).unwrap();
+
+        assert_eq!(
+            updated.column(1).data_type(),
+            &DataType::Timestamp(TimeUnit::Microsecond, None)
+        );
+        let birth = updated
+            .column(1)
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .unwrap();
+        assert_eq!(birth.value(0), 1_000);
+    }
 }

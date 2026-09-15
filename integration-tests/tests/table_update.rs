@@ -69,6 +69,51 @@ async fn update_table_by_condition(
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
 #[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
 #[tokio::test(flavor = "multi_thread")]
+async fn update_table_with_type_mismatched_assignment(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table(&client, format).await?;
+
+    // `age` is Int32; assign an Int64 literal to verify it is coerced to the
+    // column type on the update write path.
+    let update = TableUpdate {
+        set_map: HashMap::from([("age".to_string(), lit(30i64))]),
+        condition: col("name").eq(lit("Alice")),
+    };
+    let update_count = table.update(update).await?;
+    assert_eq!(update_count, 1);
+
+    let table_str = full_table_scan(&table).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 30  |
+| Bob     | 21  |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
 async fn update_table_by_row_id(
     #[future(awt)]
     #[case]

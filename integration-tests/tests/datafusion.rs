@@ -114,6 +114,36 @@ async fn test_datafusion_update(
 +---------+-----+"#,
     );
 
+    // Test update with an integer literal whose type differs from the target
+    // column type (Int64 literal onto Int32 `age`)
+    let table_str = datafusion_update(
+        &session,
+        "UPDATE indexlake_table SET age = 3 WHERE name = 'Bob'",
+    )
+    .await;
+    assert_eq!(
+        table_str,
+        r#"+-------+
+| count |
++-------+
+| 1     |
++-------+"#,
+    );
+
+    // Verify Bob's age updated to 3
+    let table_str = datafusion_scan(&session, "SELECT * FROM indexlake_table").await;
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Alice   | 20  |
+| Bob     | 3   |
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#,
+    );
+
     Ok(())
 }
 
