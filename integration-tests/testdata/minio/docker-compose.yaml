@@ -3,7 +3,7 @@ networks:
 
 services:
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     environment:
       - MINIO_ROOT_USER=admin
       - MINIO_ROOT_PASSWORD=password
@@ -20,7 +20,7 @@ services:
   mc:
     depends_on:
       - minio
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     environment:
       - AWS_ACCESS_KEY_ID=admin
       - AWS_SECRET_ACCESS_KEY=password

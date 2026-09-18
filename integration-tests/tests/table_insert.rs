@@ -344,3 +344,135 @@ async fn insert_unordered_schema(
 
     Ok(())
 }
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn insert_nullable_field(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![
+        Field::new("name", DataType::Utf8, false),
+        Field::new("age", DataType::Int32, true),
+    ]));
+    let table_config = TableConfig {
+        preferred_data_file_format: format,
+        ..Default::default()
+    };
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: table_schema.clone(),
+        default_values: HashMap::new(),
+        config: table_config,
+        if_not_exists: false,
+    };
+    client.create_table(table_creation).await?;
+    let table = client.load_table(&namespace_name, &table_name).await?;
+
+    // A nullable table field accepts both nullable batch fields with null values
+    // and non-nullable batch fields.
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, true),
+            Field::new("age", DataType::Int32, true),
+        ])),
+        vec![
+            Arc::new(StringArray::from(vec![Some("Tom"), Some("Jerry")])),
+            Arc::new(Int32Array::from(vec![None, Some(25)])),
+        ],
+    )?;
+    table.insert(TableInsertion::new(vec![batch])).await?;
+
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("age", DataType::Int32, false),
+        ])),
+        vec![
+            Arc::new(StringArray::from(vec!["Spike"])),
+            Arc::new(Int32Array::from(vec![30])),
+        ],
+    )?;
+    table.insert(TableInsertion::new(vec![batch])).await?;
+
+    let table_str = full_table_scan(&table).await?;
+    println!("{table_str}");
+    assert_eq!(
+        table_str,
+        r#"+-------+-----+
+| name  | age |
++-------+-----+
+| Tom   |     |
+| Jerry | 25  |
+| Spike | 30  |
++-------+-----+"#,
+    );
+
+    // A non-nullable table field accepts a nullable batch field without null
+    // values, but rejects one that carries null values.
+    let non_nullable_table_schema =
+        Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: non_nullable_table_schema.clone(),
+        default_values: HashMap::new(),
+        config: TableConfig {
+            preferred_data_file_format: format,
+            ..Default::default()
+        },
+        if_not_exists: false,
+    };
+    client.create_table(table_creation).await?;
+    let table = client.load_table(&namespace_name, &table_name).await?;
+
+    let nullable_batch_schema =
+        Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+    let batch = RecordBatch::try_new(
+        nullable_batch_schema.clone(),
+        vec![Arc::new(Int64Array::from(vec![Some(1i64), Some(2i64)]))],
+    )?;
+    table.insert(TableInsertion::new(vec![batch])).await?;
+
+    let batch = RecordBatch::try_new(
+        nullable_batch_schema.clone(),
+        vec![Arc::new(Int64Array::from(vec![Some(3i64), None]))],
+    )?;
+    let error = table
+        .insert(TableInsertion::new(vec![batch]))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("not nullable"), "{error}");
+
+    let table_str = full_table_scan(&table).await?;
+    println!("{table_str}");
+    assert_eq!(
+        table_str,
+        r#"+----+
+| id |
++----+
+| 1  |
+| 2  |
++----+"#,
+    );
+
+    Ok(())
+}
