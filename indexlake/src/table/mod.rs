@@ -575,10 +575,16 @@ pub fn check_and_rewrite_insert_batches(
                         .get(batch_field_idx)
                         .cloned()
                         .expect("field index should be valid");
-                    check_insert_batch_field(&batch_field, table_field, output_field_name)?;
+                    let batch_array = batch.column(batch_field_idx);
+                    let rewritten_field = check_and_rewrite_insert_batch_field(
+                        &batch_field,
+                        batch_array,
+                        table_field,
+                        output_field_name,
+                    )?;
 
-                    fields.push(batch_field);
-                    arrays.push(batch.column(batch_field_idx).clone());
+                    fields.push(Arc::new(rewritten_field));
+                    arrays.push(batch_array.clone());
                 } else if let Some(default_expr) =
                     table_schema.field_id_default_expr_map.get(&field_id)
                 {
@@ -681,21 +687,36 @@ fn contains_unsupported_default_expr(expr: &Expr) -> bool {
     }
 }
 
-pub fn check_insert_batch_field(
+/// Validates a batch field against the corresponding table field and returns the
+/// field to use in the rewritten batch.
+///
+/// Nullability is driven by the table field: a nullable table field places no
+/// constraint on the batch field, while a non-nullable table field rejects
+/// batches that carry null values. The returned field always adopts the table
+/// field's nullability so that rewritten batches stay aligned with the table
+/// schema.
+pub fn check_and_rewrite_insert_batch_field(
     batch_field: &Field,
+    batch_array: &ArrayRef,
     table_field: &Field,
     output_field_name: &str,
-) -> ILResult<()> {
+) -> ILResult<Field> {
     if batch_field.name() != table_field.name()
         || batch_field.data_type() != table_field.data_type()
-        || batch_field.is_nullable() != table_field.is_nullable()
     {
         return Err(ILError::invalid_input(format!(
             "Invalid batch field of name {output_field_name}: {batch_field:?}, expected field: {table_field:?}",
         )));
     }
 
-    Ok(())
+    if !table_field.is_nullable() && batch_array.null_count() > 0 {
+        return Err(ILError::invalid_input(format!(
+            "Invalid batch field of name {output_field_name}: table field is not nullable but batch field contains {} null values",
+            batch_array.null_count(),
+        )));
+    }
+
+    Ok(batch_field.clone().with_nullable(table_field.is_nullable()))
 }
 
 pub(crate) async fn insert_task(
