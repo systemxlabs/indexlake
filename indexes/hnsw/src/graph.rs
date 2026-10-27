@@ -20,7 +20,11 @@ pub(crate) const MAX_LEVEL: usize = 32;
 pub(crate) type NodeId = u32;
 pub(crate) const NONE: NodeId = u32::MAX;
 
-const LEVEL_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+/// Added to the node id before the splitmix64 finalizer, making level
+/// assignment deterministic and independent of insertion order. Adding (rather
+/// than XOR-ing with `id * constant`) avoids a fixed point when the seed equals
+/// that constant, which previously pinned node id 1 to the maximum level.
+const LEVEL_SEED: u64 = 0xC2B2_AE3D_27D4_EB4F;
 
 /// A node in an upper layer. Layer `l` (`1..=level`) occupies
 /// `links[(l - 1) * M .. (l - 1) * M + counts[l - 1]]`.
@@ -249,7 +253,96 @@ impl HnswGraph {
                 )?;
             }
         }
+        graph.connect_unreachable();
         Ok(graph)
+    }
+
+    /// Thread every node that is not reachable from the entry into a chain
+    /// hanging off the entry.
+    ///
+    /// HNSW pruning has no reachability guarantee: when many distances tie
+    /// (exact duplicates, for example), pruning can leave nodes in closed
+    /// cycles that a search starting at the entry never enters. Chain links are
+    /// written into the unreachable nodes' own lists, so no reachable node
+    /// loses an edge. If the entry's list is full, its evicted neighbour is
+    /// appended to the chain so that it, and everything reachable only through
+    /// it, stays reachable.
+    fn connect_unreachable(&mut self) {
+        let Some(entry) = self.entry else {
+            return;
+        };
+        let node_count = self.len();
+        let mut seen = vec![false; node_count];
+        seen[entry as usize] = true;
+        let mut stack = vec![entry];
+        while let Some(node) = stack.pop() {
+            for index in 0..self.neighbor_count(0, node) {
+                let neighbor = self.neighbor_at(0, node, index);
+                if !seen[neighbor as usize] {
+                    seen[neighbor as usize] = true;
+                    stack.push(neighbor);
+                }
+            }
+        }
+
+        let unreachable: Vec<NodeId> = (0..node_count as NodeId)
+            .filter(|id| !seen[*id as usize])
+            .collect();
+        if unreachable.is_empty() {
+            return;
+        }
+
+        for pair in unreachable.windows(2) {
+            self.link_forced(pair[0], pair[1]);
+        }
+        let head = unreachable[0];
+        let tail = *unreachable.last().expect("non-empty chain");
+
+        if self.neighbor_count(0, entry) < M0 {
+            self.link_forced(entry, head);
+        } else {
+            let slot = self.farthest_neighbor_slot(0, entry);
+            let evicted = self.neighbor_at(0, entry, slot);
+            self.set_neighbor(0, entry, slot, head);
+            if evicted != head {
+                self.link_forced(tail, evicted);
+            }
+        }
+    }
+
+    /// Append `to` to `from`'s layer-0 list, replacing the farthest neighbour
+    /// when the list is full. Does nothing when the link already exists.
+    fn link_forced(&mut self, from: NodeId, to: NodeId) {
+        if from == to {
+            return;
+        }
+        let count = self.neighbor_count(0, from);
+        for index in 0..count {
+            if self.neighbor_at(0, from, index) == to {
+                return;
+            }
+        }
+        if count < M0 {
+            self.set_neighbor(0, from, count, to);
+            self.set_neighbor_count(0, from, (count + 1) as u8);
+        } else {
+            let slot = self.farthest_neighbor_slot(0, from);
+            self.set_neighbor(0, from, slot, to);
+        }
+    }
+
+    fn farthest_neighbor_slot(&self, layer: usize, node: NodeId) -> usize {
+        let mut worst_index = 0;
+        let mut worst_dist = f32::NEG_INFINITY;
+        for index in 0..self.neighbor_count(layer, node) {
+            let neighbor = self.neighbor_at(layer, node, index);
+            let dist = self.distance_between(node, neighbor);
+            if dist > worst_dist {
+                worst_dist = dist;
+                worst_index = index;
+            }
+        }
+        worst_index
     }
 
     #[inline]
@@ -289,7 +382,15 @@ impl HnswGraph {
 
         let start_layer = level.min(self.max_level);
         for layer in (0..=start_layer).rev() {
-            self.search_layer(query, ep, ef_construction, layer, None, scratch, candidates)?;
+            self.search_layer(
+                query,
+                &[ep],
+                ef_construction,
+                layer,
+                None,
+                scratch,
+                candidates,
+            )?;
             // The entry point is always part of the result set, so this is
             // non-empty.
             debug_assert!(!candidates.is_empty());
@@ -297,14 +398,10 @@ impl HnswGraph {
             self.select_neighbors(candidates, cap, selected);
             self.set_node_links(id, layer, selected);
             for (rank, &neighbor) in selected.iter().enumerate() {
-                // Forcing the nearest neighbor to accept a back link on layer
-                // zero gives every inserted node an incoming edge at insertion
-                // time. That edge can still be pruned later, so long-term
-                // reachability is best effort. In particular, a graph made of
-                // many exact duplicates ties every distance, every node picks
-                // the same low-id hubs, and a full list never accepts an
-                // equal-distance reverse link; such nodes may become
-                // unreachable.
+                // The rank-0 back link gives every inserted node an incoming
+                // edge. Pruning can still isolate closed cycles (notably when
+                // many distances tie), which `connect_unreachable` repairs once
+                // the graph is complete.
                 self.add_backlink(neighbor, id, layer, layer == 0 && rank == 0);
             }
             ep = candidates[0].id;
@@ -355,7 +452,7 @@ impl HnswGraph {
     fn search_layer(
         &self,
         query: &[f32],
-        entry: NodeId,
+        entries: &[NodeId],
         ef: usize,
         layer: usize,
         validity: Option<&RowValidity>,
@@ -368,21 +465,28 @@ impl HnswGraph {
         out.clear();
 
         let epoch = scratch.begin(self.len());
-        let entry_dist = self.distance_to(query, entry);
-        scratch.mark(epoch, entry);
-        scratch.candidates.push(Reverse(Candidate {
-            dist_sq: entry_dist,
-            id: entry,
-        }));
-        let entry_is_valid = match validity {
-            Some(validity) => self.node_is_valid(entry, validity)?,
-            None => true,
-        };
-        if entry_is_valid {
-            scratch.results.push(Candidate {
+        for &entry in entries {
+            if !scratch.mark(epoch, entry) {
+                continue;
+            }
+            let entry_dist = self.distance_to(query, entry);
+            scratch.candidates.push(Reverse(Candidate {
                 dist_sq: entry_dist,
                 id: entry,
-            });
+            }));
+            let entry_is_valid = match validity {
+                Some(validity) => self.node_is_valid(entry, validity)?,
+                None => true,
+            };
+            if entry_is_valid {
+                if scratch.results.len() == ef {
+                    scratch.results.pop();
+                }
+                scratch.results.push(Candidate {
+                    dist_sq: entry_dist,
+                    id: entry,
+                });
+            }
         }
 
         while let Some(Reverse(current)) = scratch.candidates.pop() {
@@ -597,15 +701,25 @@ impl HnswGraph {
         }
         let ef = ef.max(1).min(self.len());
 
-        let mut ep = self.entry.expect("non-empty graph has an entry point");
+        let root = self.entry.expect("non-empty graph has an entry point");
+        let mut ep = root;
         let mut ep_dist = self.distance_to(query, ep);
         for layer in (1..=self.max_level).rev() {
             (ep, ep_dist) = self.greedy_layer(query, ep, ep_dist, layer);
         }
 
+        // Layer 0 is always seeded with the entry as well: `connect_unreachable`
+        // threads every node behind it, so this makes the whole graph reachable
+        // regardless of where the descent ended.
+        let entries = [ep, root];
+        let entries = if ep == root {
+            &entries[..1]
+        } else {
+            &entries[..2]
+        };
         let mut out = Vec::with_capacity(ef);
         with_search_scratch(self.len(), ef, |scratch| {
-            self.search_layer(query, ep, ef, 0, Some(validity), scratch, &mut out)
+            self.search_layer(query, entries, ef, 0, Some(validity), scratch, &mut out)
         })?;
         out.truncate(limit);
         Ok(out.into_iter().map(|c| (c.id, c.dist_sq)).collect())
@@ -613,7 +727,7 @@ impl HnswGraph {
 }
 
 fn deterministic_level(id: NodeId) -> usize {
-    let mut z = LEVEL_SEED ^ (id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut z = (id as u64).wrapping_add(LEVEL_SEED);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^= z >> 31;
@@ -889,44 +1003,52 @@ mod tests {
         seen
     }
 
-    /// Exact duplicates tie every distance, so the id tie-break makes every
-    /// node select the same low-id hubs and a full list never accepts an
-    /// equal-distance reverse link. With 300 identical vectors only ~34 are
-    /// reachable today. Search must still be exact over the reachable
-    /// component, and it must stay usable for ordinary top-k limits.
+    /// Exact duplicates tie every distance, so pruning would otherwise leave
+    /// closed cycles behind. `connect_unreachable` must make every node
+    /// reachable, after which `ef = node_count` is exact.
     #[test]
-    fn duplicate_vectors_are_exact_within_the_reachable_component() {
+    fn duplicate_vectors_match_exact_scan() {
         let points = vec![vec![1.0f32, 1.0]; 300];
         let graph = build(&points, 2, 64);
-        let validity = RowValidity::new(points.len());
         let reachable = reachable_from_entry(&graph);
-        let reachable_count = reachable
-            .iter()
-            .filter(|is_reachable| **is_reachable)
-            .count();
         assert!(
-            reachable_count >= 10,
-            "too few reachable duplicates: {reachable_count}"
-        );
-
-        let query = vec![1.0, 1.0];
-        let actual = graph
-            .search(&query, points.len(), &validity, points.len())
-            .unwrap();
-        let expected: Vec<usize> = (0..points.len()).filter(|id| reachable[*id]).collect();
-        assert_eq!(
-            actual
+            reachable.iter().all(|is_reachable| *is_reachable),
+            "{} nodes unreachable",
+            reachable
                 .iter()
-                .map(|(id, _)| *id as usize)
-                .collect::<Vec<_>>(),
-            expected
+                .filter(|is_reachable| !**is_reachable)
+                .count()
         );
-        assert!(actual.iter().all(|(_, dist)| *dist == 0.0));
 
-        // A typical top-k query must still be fully served.
-        let result = graph.search(&query, 50, &validity, 10).unwrap();
-        assert_eq!(result.len(), 10);
-        assert!(result.iter().all(|(_, dist)| *dist == 0.0));
+        let validity = RowValidity::new(points.len());
+        let queries = vec![vec![1.0, 1.0], vec![0.0, 0.0]];
+        assert_matches_exact_scan(&graph, &points, &validity, &queries, points.len());
+
+        // The repair chain is ordinary layer-0 links and must survive a
+        // persistence roundtrip.
+        let encoded = crate::serialization::encode_graph(&graph).unwrap();
+        let decoded = crate::serialization::decode_graph(&encoded).unwrap();
+        assert_matches_exact_scan(&decoded, &points, &validity, &queries, points.len());
+    }
+
+    /// Level assignment must follow the geometric distribution described by
+    /// the paper (`P(level >= l) = M^-l`). This also guards the seed handling:
+    /// node 1 once hashed to level 13 because the seed cancelled out.
+    #[test]
+    fn level_assignment_is_geometric() {
+        let count = 10_000u32;
+        let levels: Vec<usize> = (0..count).map(deterministic_level).collect();
+        let max_level = levels.iter().copied().max().unwrap();
+        assert!(
+            max_level <= 8,
+            "max level {max_level} is implausible for {count} nodes"
+        );
+        let above_zero = levels.iter().filter(|level| **level > 0).count();
+        let ratio = above_zero as f64 / count as f64;
+        assert!(
+            (0.03..0.12).contains(&ratio),
+            "fraction of nodes above level 0 is {ratio}, expected about 1/M"
+        );
     }
 
     #[test]
