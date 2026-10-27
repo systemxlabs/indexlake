@@ -1,13 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
 
 use arrow::datatypes::SchemaRef;
 use arrow_schema::Schema;
 use futures::StreamExt;
 use uuid::Uuid;
-
-use crate::utils::timestamp_ms_from_now;
 
 use crate::catalog::{
     CatalogSchema, FieldRecord, IndexFileRecord, IndexRecord, InlineIndexRecord, RowValidity,
@@ -357,12 +354,11 @@ pub(crate) async fn build_inline_indexes_for_one_index(
             index_builder.write_bytes(&mut index_data)?;
             inline_index_records.push(InlineIndexRecord {
                 index_id: index_builder.index_def().index_id,
-                created_at: timestamp_ms_from_now(Duration::ZERO),
+                inline_index_id: Uuid::now_v7(),
                 row_ids: all_row_ids.clone(),
                 validity: RowValidity::new(all_row_ids.len()),
                 index_data,
             });
-            tokio::time::sleep(Duration::from_millis(1)).await;
             counter = 0;
             all_row_ids.clear();
             index_builder = index_kind.builder(index_def)?;
@@ -376,7 +372,7 @@ pub(crate) async fn build_inline_indexes_for_one_index(
         index_builder.write_bytes(&mut index_data)?;
         inline_index_records.push(InlineIndexRecord {
             index_id: index_builder.index_def().index_id,
-            created_at: timestamp_ms_from_now(Duration::ZERO),
+            inline_index_id: Uuid::now_v7(),
             row_ids: all_row_ids.clone(),
             validity: RowValidity::new(all_row_ids.len()),
             index_data,

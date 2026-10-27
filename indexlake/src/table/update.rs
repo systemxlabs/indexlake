@@ -16,11 +16,8 @@ use crate::expr::{
 };
 use crate::storage::{Storage, read_data_file_by_record, read_row_id_array_from_data_file};
 use crate::table::{IndexManager, Table, TableSchemaRef, process_insert_into_inline_rows_with_tx};
-use crate::utils::{
-    extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids, timestamp_ms_from_now,
-};
+use crate::utils::{extract_row_ids_from_record_batch, fixed_size_binary_array_to_uuids};
 use crate::{ILError, ILResult, RecordBatchStream};
-use std::time::Duration;
 
 #[derive(Debug)]
 pub struct TableUpdate {
@@ -459,7 +456,7 @@ async fn build_inline_indexes_for_updated_rows(
 
         inline_index_records.push(InlineIndexRecord {
             index_id: index_def.index_id,
-            created_at: timestamp_ms_from_now(Duration::ZERO),
+            inline_index_id: Uuid::now_v7(),
             row_ids,
             validity: RowValidity::new(all_rows.len()),
             index_data,

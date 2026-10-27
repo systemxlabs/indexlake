@@ -14,7 +14,6 @@ use crate::expr::col;
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, Storage, build_parquet_writer};
 use crate::table::{Table, TableConfig, TableSchemaRef, insert_task};
-use crate::utils::timestamp_ms_from_now;
 use crate::{ILError, ILResult};
 
 pub(crate) async fn try_run_dump_task(table: &Table) -> ILResult<()> {
@@ -370,7 +369,7 @@ async fn full_build_inline_index_records(
                     state.builder.write_bytes(&mut index_data)?;
                     inline_index_records.push(InlineIndexRecord {
                         index_id: state.builder.index_def().index_id,
-                        created_at: timestamp_ms_from_now(Duration::ZERO),
+                        inline_index_id: Uuid::now_v7(),
                         row_ids: std::mem::take(&mut state.row_ids),
                         validity: RowValidity::new(state.row_count),
                         index_data,
@@ -381,8 +380,6 @@ async fn full_build_inline_index_records(
                 state.row_count = 0;
             }
         }
-
-        tokio::time::sleep(Duration::from_millis(1)).await;
     }
     drop(chunk_stream);
 
@@ -393,7 +390,7 @@ async fn full_build_inline_index_records(
             state.builder.write_bytes(&mut index_data)?;
             inline_index_records.push(InlineIndexRecord {
                 index_id: state.builder.index_def().index_id,
-                created_at: timestamp_ms_from_now(Duration::ZERO),
+                inline_index_id: Uuid::now_v7(),
                 row_ids: std::mem::take(&mut state.row_ids),
                 validity: RowValidity::new(state.row_count),
                 index_data,
