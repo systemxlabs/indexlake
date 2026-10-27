@@ -755,10 +755,27 @@ impl TablePartitionScanner {
             let batch_size = self.scan.batch_size;
             let row_pointer = self.row_pointer;
             let query_window = self.query_window.clone();
-            let needs_count = self.scan.offset_limit_required();
 
             Box::pin(async move {
-                let count = if needs_count {
+                // Exact counting is only worth paying for when its result can
+                // skip the file entirely. With a filter, counting means decoding
+                // the file, so counting a file that may overlap the query
+                // window would read the same rows twice. Stream those files
+                // instead and let the scanner drop the rows before the window.
+                let count = if filters.is_empty() {
+                    // The catalog already tracks the exact row count and no
+                    // filter can change it.
+                    Some(record.valid_row_count())
+                } else if record.valid_row_count() == 0 {
+                    // No valid row can match, so no need to touch the file.
+                    Some(0)
+                } else if query_window.start > row_pointer
+                    && record.valid_row_count() <= query_window.start - row_pointer
+                {
+                    // Even if every row matched, this file ends before the
+                    // query window starts. Count its matching rows to skip its
+                    // data columns; the exact count keeps `row_pointer` aligned
+                    // for the next file.
                     Some(
                         count_data_file_by_record(
                             storage.as_ref(),
