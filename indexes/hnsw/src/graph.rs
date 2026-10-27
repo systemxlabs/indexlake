@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 
@@ -82,7 +83,7 @@ impl Ord for Candidate {
 }
 
 /// Reusable per-thread search state. Reusing the visited marks and heaps
-/// removes allocation churn from the insert loop.
+/// removes allocation churn from the insert loop and from repeated queries.
 struct Scratch {
     marks: Vec<u32>,
     epoch: u32,
@@ -97,6 +98,19 @@ impl Scratch {
             epoch: 0,
             candidates: BinaryHeap::with_capacity(ef.saturating_mul(2).max(16)),
             results: BinaryHeap::with_capacity(ef.max(16)),
+        }
+    }
+
+    /// Grow the heaps ahead of a search so a steady query stream performs no
+    /// heap allocation. The marks are grown by [`Scratch::begin`]; both heaps
+    /// are empty between searches.
+    fn reserve(&mut self, ef: usize) {
+        let candidates_capacity = ef.saturating_mul(2);
+        if self.candidates.capacity() < candidates_capacity {
+            self.candidates.reserve(candidates_capacity);
+        }
+        if self.results.capacity() < ef {
+            self.results.reserve(ef);
         }
     }
 
@@ -123,6 +137,31 @@ impl Scratch {
             true
         }
     }
+}
+
+thread_local! {
+    /// The query path only gets `&self` from the `Index` trait, so it cannot
+    /// take a caller-owned workspace. Keep one scratch buffer per thread
+    /// instead: at millions of nodes the visited array alone is several
+    /// megabytes, and zeroing it per query would be a noticeable part of the
+    /// search cost.
+    static SEARCH_SCRATCH: RefCell<Option<Scratch>> = const { RefCell::new(None) };
+}
+
+/// Run `f` with the calling thread's reusable scratch state.
+///
+/// `try_borrow_mut` keeps a nested search on the same thread from panicking
+/// should a future callback re-enter the search; it allocates a private
+/// scratch instead.
+fn with_search_scratch<R>(node_count: usize, ef: usize, f: impl FnOnce(&mut Scratch) -> R) -> R {
+    SEARCH_SCRATCH.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut scratch) => {
+            let scratch = scratch.get_or_insert_with(|| Scratch::new(0, 0));
+            scratch.reserve(ef);
+            f(scratch)
+        }
+        Err(_) => f(&mut Scratch::new(node_count, ef)),
+    })
 }
 
 impl HnswGraph {
@@ -402,6 +441,11 @@ impl HnswGraph {
     /// Algorithm 4: keep a candidate only when it is closer to the query than
     /// to every already selected neighbor. This preserves links in different
     /// directions instead of producing a cluster of near-duplicates.
+    ///
+    /// Deliberately does not pad the result with pruned candidates
+    /// (`keepPrunedConnections`). Padding fills the list with short edges,
+    /// which then crowd long-range edges out of the reverse-edge pruning and
+    /// badly hurt routing on clustered data.
     fn select_neighbors(&self, candidates: &[Candidate], m: usize, out: &mut Vec<NodeId>) {
         out.clear();
         if candidates.len() <= m {
@@ -547,7 +591,6 @@ impl HnswGraph {
             )));
         }
         let ef = ef.max(1).min(self.len());
-        let mut scratch = Scratch::new(self.len(), ef);
 
         let mut ep = self.entry.expect("non-empty graph has an entry point");
         let mut ep_dist = self.distance_to(query, ep);
@@ -556,7 +599,9 @@ impl HnswGraph {
         }
 
         let mut out = Vec::with_capacity(ef);
-        self.search_layer(query, ep, ef, 0, Some(validity), &mut scratch, &mut out)?;
+        with_search_scratch(self.len(), ef, |scratch| {
+            self.search_layer(query, ep, ef, 0, Some(validity), scratch, &mut out)
+        })?;
         out.truncate(limit);
         Ok(out.into_iter().map(|c| (c.id, c.dist_sq)).collect())
     }
@@ -769,6 +814,55 @@ mod tests {
             }
             eprintln!("ef={ef} recall={:.4}", recall / queries as f64);
         }
+    }
+
+    /// Clustered data exercises long-range links and cross-cluster routing;
+    /// uniform random data does not. Selections that fill lists with short
+    /// edges (for example `keepPrunedConnections`) pass on uniform data but
+    /// collapse here.
+    #[test]
+    fn recall_on_clustered_data() {
+        let mut rng = SplitMix64(0xABBA_1234);
+        let dim = 16;
+        let clusters = 20;
+        let per_cluster = 100;
+        let count = clusters * per_cluster;
+        let centers: Vec<Vec<f32>> = (0..clusters)
+            .map(|_| (0..dim).map(|_| rng.next_f32() * 4.0).collect())
+            .collect();
+        let points: Vec<Vec<f32>> = (0..count)
+            .map(|index| {
+                let center = &centers[index % clusters];
+                center
+                    .iter()
+                    .map(|value| value + rng.next_f32() * 0.2)
+                    .collect()
+            })
+            .collect();
+        let graph = build(&points, dim, 100);
+        let validity = RowValidity::new(count);
+
+        let queries = 20;
+        let mut total_recall = 0.0f64;
+        for index in 0..queries {
+            let center = &centers[index % clusters];
+            let query: Vec<f32> = center
+                .iter()
+                .map(|value| value + rng.next_f32() * 0.2)
+                .collect();
+            let expected = brute_force(&points, &query, 10);
+            let actual: Vec<usize> = graph
+                .search(&query, 50, &validity, 10)
+                .unwrap()
+                .into_iter()
+                .map(|(id, _)| id as usize)
+                .collect();
+            assert_eq!(actual.len(), 10);
+            let hits = actual.iter().filter(|id| expected.contains(id)).count();
+            total_recall += hits as f64 / 10.0;
+        }
+        let recall = total_recall / queries as f64;
+        assert!(recall >= 0.98, "clustered recall too low: {recall}");
     }
 
     #[test]
