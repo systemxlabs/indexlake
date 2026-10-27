@@ -9,7 +9,7 @@ use crate::ILResult;
 pub use crate::catalog::RowValidity;
 use crate::expr::Expr;
 use crate::storage::{InputFile, OutputFile};
-use arrow::array::{ArrayRef, BooleanArray, RecordBatch};
+use arrow::array::{ArrayRef, RecordBatch};
 use arrow::datatypes::FieldRef;
 use std::any::Any;
 use std::fmt::Debug;
@@ -101,31 +101,23 @@ pub struct SearchIndexEntries {
     pub dynamic_columns: Vec<DynamicColumn>,
 }
 
-/// Re-evaluates an inexact index filter against the table rows.
-///
-/// An index that reports [`FilterSupport::Inexact`] may return a superset of
-/// the matching rows. It must attach a rechecker so the scan can remove false
-/// positives before returning data to the caller. The returned mask must be
-/// aligned with the input batch and the input batch must contain every column
-/// reported by [`FilterRecheck::required_columns`].
-pub trait FilterRecheck: Debug + Send + Sync {
-    fn required_columns(&self) -> Vec<String>;
-
-    fn recheck(&self, batch: &RecordBatch) -> ILResult<BooleanArray>;
-}
-
 #[derive(Debug, Clone)]
 pub struct FilterIndexEntries {
     pub row_ids: Vec<Uuid>,
-    /// Present when the index filter is inexact and the returned row ids are a
-    /// superset of the matching rows.
-    pub recheck: Option<Arc<dyn FilterRecheck>>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum FilterSupport {
     Unsupported,
     Exact,
+    /// The index can only narrow candidates and may return a superset of the
+    /// matching rows.
+    ///
+    /// NOTE: `Table::scan` currently removes index-assigned filters from the
+    /// residual filters without rechecking the returned row ids, so an inexact
+    /// index can make the scan return rows that do not satisfy the filter.
+    /// DataFusion plans are unaffected because `Inexact` pushdown is re-applied
+    /// above the scan; direct `Table::scan` callers are not.
     Inexact,
 }
 

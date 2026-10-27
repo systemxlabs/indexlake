@@ -2886,7 +2886,6 @@ dependencies = [
  "arrow",
  "async-trait",
  "futures",
- "geo",
  "geozero",
  "indexlake",
  "parquet",
