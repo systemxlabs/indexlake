@@ -298,8 +298,13 @@ impl HnswGraph {
             self.set_node_links(id, layer, selected);
             for (rank, &neighbor) in selected.iter().enumerate() {
                 // Forcing the nearest neighbor to accept a back link on layer
-                // zero guarantees that every inserted node has at least one
-                // incoming edge and therefore remains reachable.
+                // zero gives every inserted node an incoming edge at insertion
+                // time. That edge can still be pruned later, so long-term
+                // reachability is best effort. In particular, a graph made of
+                // many exact duplicates ties every distance, every node picks
+                // the same low-id hubs, and a full list never accepts an
+                // equal-distance reverse link; such nodes may become
+                // unreachable.
                 self.add_backlink(neighbor, id, layer, layer == 0 && rank == 0);
             }
             ep = candidates[0].id;
@@ -648,18 +653,90 @@ mod tests {
         HnswGraph::build(vectors, row_ids, row_offsets, dim, ef_construction).unwrap()
     }
 
-    fn brute_force(points: &[Vec<f32>], query: &[f32], limit: usize) -> Vec<usize> {
-        let mut scored: Vec<(f32, usize)> = points
+    /// Independent ground truth: a serial f64 fold and a real square root.
+    /// Deliberately does not call [`l2_sq`] so a bug in the index kernel cannot
+    /// make the oracle agree with it.
+    fn brute_force_exact(points: &[Vec<f32>], query: &[f32], limit: usize) -> Vec<(usize, f64)> {
+        let mut scored: Vec<(f64, usize)> = points
             .iter()
             .enumerate()
-            .map(|(index, point)| (l2_sq(query, point), index))
+            .map(|(index, point)| {
+                let dist_sq: f64 = point
+                    .iter()
+                    .zip(query)
+                    .map(|(a, b)| {
+                        let delta = *a as f64 - *b as f64;
+                        delta * delta
+                    })
+                    .sum();
+                (dist_sq.sqrt(), index)
+            })
             .collect();
         scored.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         scored
             .into_iter()
             .take(limit)
-            .map(|(_, index)| index)
+            .map(|(dist, index)| (index, dist))
             .collect()
+    }
+
+    fn brute_force(points: &[Vec<f32>], query: &[f32], limit: usize) -> Vec<usize> {
+        brute_force_exact(points, query, limit)
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Points on a `1 / scale` grid. Sums of their squared differences are
+    /// exactly representable in f32 for every dimension and accumulation order
+    /// used by the tests, so rank comparisons cannot be perturbed by SIMD
+    /// rounding; ties are resolved by id on both sides.
+    fn quantized_points(
+        rng: &mut SplitMix64,
+        count: usize,
+        dim: usize,
+        scale: f32,
+    ) -> Vec<Vec<f32>> {
+        (0..count)
+            .map(|_| {
+                (0..dim)
+                    .map(|_| (rng.next_f32() * scale).round() / scale)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Search with `ef = node_count` must reproduce the exact scan over the
+    /// valid rows reachable from the entry point, including the result order.
+    /// The graphs used here are connected; the duplicate-vector test below
+    /// covers the disconnected degenerate case.
+    fn assert_matches_exact_scan(
+        graph: &HnswGraph,
+        points: &[Vec<f32>],
+        validity: &RowValidity,
+        queries: &[Vec<f32>],
+        limit: usize,
+    ) {
+        let count = points.len();
+        for query in queries {
+            let expected: Vec<(usize, f64)> = brute_force_exact(points, query, count)
+                .into_iter()
+                .filter(|(index, _)| validity.is_valid(*index).unwrap())
+                .take(limit)
+                .collect();
+            let actual = graph.search(query, count, validity, limit).unwrap();
+            assert_eq!(actual.len(), expected.len());
+            for (&(node_id, dist_sq), &(expected_id, expected_dist)) in actual.iter().zip(&expected)
+            {
+                assert_eq!(node_id as usize, expected_id);
+                let dist = dist_sq.max(0.0).sqrt() as f64;
+                let tolerance = expected_dist.abs().max(1.0) * 1e-5;
+                assert!(
+                    (dist - expected_dist).abs() <= tolerance,
+                    "distance mismatch for node {node_id}: {dist} vs {expected_dist}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -751,6 +828,119 @@ mod tests {
             .unwrap();
         assert_eq!(result.len(), 5);
         assert!(result.iter().all(|(_, dist)| *dist == 0.0));
+    }
+
+    #[test]
+    fn full_ef_search_matches_exact_scan() {
+        let mut rng = SplitMix64(0x5EED_0001);
+        let dim = 8;
+        let count = 300;
+        let points = quantized_points(&mut rng, count, dim, 64.0);
+        let graph = build(&points, dim, 100);
+        let queries = quantized_points(&mut rng, 20, dim, 64.0);
+
+        let all_valid = RowValidity::new(count);
+        assert_matches_exact_scan(&graph, &points, &all_valid, &queries, count);
+
+        // Including row 0 (the entry point) forces traversal to start from an
+        // invalid node while still returning every live row.
+        let mut masked = RowValidity::new(count);
+        let masked_rows = [0, 3, 17, 42, 99, 150, 250, 299];
+        for row in masked_rows {
+            masked.set(row, false);
+        }
+        assert_matches_exact_scan(&graph, &points, &masked, &queries, count);
+        assert_matches_exact_scan(&graph, &points, &masked, &queries, 10);
+    }
+
+    #[test]
+    fn full_ef_search_matches_exact_scan_across_shapes() {
+        let mut rng = SplitMix64(0x5EED_0002);
+        // Dimensions straddle the scalar/SIMD threshold (32) and both tail
+        // classes; counts include degenerate and multi-block sizes.
+        for dim in [1usize, 3, 7, 16, 31, 32, 33, 64, 128] {
+            for count in [2usize, 17, 100, 300] {
+                let points = quantized_points(&mut rng, count, dim, 64.0);
+                let graph = build(&points, dim, 100);
+                let queries = quantized_points(&mut rng, 4, dim, 64.0);
+                let validity = RowValidity::new(count);
+                assert_matches_exact_scan(&graph, &points, &validity, &queries, count);
+            }
+        }
+    }
+
+    /// Nodes reachable from the entry point over layer-0 directed links.
+    fn reachable_from_entry(graph: &HnswGraph) -> Vec<bool> {
+        let mut seen = vec![false; graph.len()];
+        let Some(entry) = graph.entry else {
+            return seen;
+        };
+        seen[entry as usize] = true;
+        let mut stack = vec![entry];
+        while let Some(node) = stack.pop() {
+            for index in 0..graph.neighbor_count(0, node) {
+                let neighbor = graph.neighbor_at(0, node, index);
+                if !seen[neighbor as usize] {
+                    seen[neighbor as usize] = true;
+                    stack.push(neighbor);
+                }
+            }
+        }
+        seen
+    }
+
+    /// Exact duplicates tie every distance, so the id tie-break makes every
+    /// node select the same low-id hubs and a full list never accepts an
+    /// equal-distance reverse link. With 300 identical vectors only ~34 are
+    /// reachable today. Search must still be exact over the reachable
+    /// component, and it must stay usable for ordinary top-k limits.
+    #[test]
+    fn duplicate_vectors_are_exact_within_the_reachable_component() {
+        let points = vec![vec![1.0f32, 1.0]; 300];
+        let graph = build(&points, 2, 64);
+        let validity = RowValidity::new(points.len());
+        let reachable = reachable_from_entry(&graph);
+        let reachable_count = reachable
+            .iter()
+            .filter(|is_reachable| **is_reachable)
+            .count();
+        assert!(
+            reachable_count >= 10,
+            "too few reachable duplicates: {reachable_count}"
+        );
+
+        let query = vec![1.0, 1.0];
+        let actual = graph
+            .search(&query, points.len(), &validity, points.len())
+            .unwrap();
+        let expected: Vec<usize> = (0..points.len()).filter(|id| reachable[*id]).collect();
+        assert_eq!(
+            actual
+                .iter()
+                .map(|(id, _)| *id as usize)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(actual.iter().all(|(_, dist)| *dist == 0.0));
+
+        // A typical top-k query must still be fully served.
+        let result = graph.search(&query, 50, &validity, 10).unwrap();
+        assert_eq!(result.len(), 10);
+        assert!(result.iter().all(|(_, dist)| *dist == 0.0));
+    }
+
+    #[test]
+    fn decoded_graph_matches_exact_scan() {
+        let mut rng = SplitMix64(0x5EED_0003);
+        let dim = 16;
+        let count = 200;
+        let points = quantized_points(&mut rng, count, dim, 64.0);
+        let graph = build(&points, dim, 100);
+        let encoded = crate::serialization::encode_graph(&graph).unwrap();
+        let decoded = crate::serialization::decode_graph(&encoded).unwrap();
+        let queries = quantized_points(&mut rng, 10, dim, 64.0);
+        let validity = RowValidity::new(count);
+        assert_matches_exact_scan(&decoded, &points, &validity, &queries, count);
     }
 
     #[test]
