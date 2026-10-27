@@ -31,14 +31,12 @@ services:
   mc:
     depends_on:
       - minio
-    # The Silo server image also ships the mcli client, so no second image is
-    # needed. Its default entrypoint is overridden below.
-    image: docker.io/pgsty/silo:latest
+    image: docker.io/pgsty/mc:latest
     environment:
       - AWS_ACCESS_KEY_ID=admin
       - AWS_SECRET_ACCESS_KEY=password
       - AWS_REGION=us-east-1
     entrypoint: >
-      /bin/sh -c " until (mcli alias set minio http://minio:9000 admin password) do echo '...waiting...' && sleep 1; done; mcli rm -r --force minio/indexlake; mcli mb --ignore-existing minio/indexlake; mcli anonymous set public minio/indexlake; tail -f /dev/null "
+      /bin/sh -c " until (mc alias set minio http://minio:9000 admin password) do echo '...waiting...' && sleep 1; done; mc rm -r --force minio/indexlake; mc mb --ignore-existing minio/indexlake; mc anonymous set public minio/indexlake; tail -f /dev/null "
     networks:
       minio_bridge:
