@@ -16,7 +16,7 @@ use crate::catalog::{
     rows_to_record_batch,
 };
 use crate::expr::{Expr, merge_filters, row_ids_in_list_expr, split_conjunction_filters};
-use crate::index::{FilterIndexEntries, FilterSupport, IndexManager};
+use crate::index::{FilterRecheck, FilterSupport, IndexManager};
 use crate::storage::{Storage, count_data_file_by_record, read_data_file_by_record};
 use crate::table::{Table, TableSchemaRef};
 use crate::utils::project_schema;
@@ -432,7 +432,8 @@ async fn index_scan_inline_rows(
     }
 
     // filter row ids by indexes, per segment
-    let mut filter_index_entries_list: Vec<FilterIndexEntries> = Vec::new();
+    let mut filter_row_id_sets: Vec<HashSet<Uuid>> = Vec::new();
+    let mut rechecks: Vec<Arc<dyn FilterRecheck>> = Vec::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
         let index_def = table
             .index_manager
@@ -450,12 +451,11 @@ async fn index_scan_inline_rows(
             .collect::<Vec<_>>();
 
         let mut all_valid_row_ids = HashSet::new();
+        let mut index_recheck = None;
 
         let Some(records) = inline_index_records_map.get(&index_def.index_id) else {
             // No inline index records for this index, return empty set
-            filter_index_entries_list.push(FilterIndexEntries {
-                row_ids: Vec::new(),
-            });
+            filter_row_id_sets.push(all_valid_row_ids);
             continue;
         };
 
@@ -466,27 +466,35 @@ async fn index_scan_inline_rows(
             let index = builder.build()?;
             let entries = index.filter(&filters, &record.validity).await?;
             all_valid_row_ids.extend(entries.row_ids);
+            if index_recheck.is_none() {
+                index_recheck = entries.recheck;
+            }
         }
 
-        filter_index_entries_list.push(FilterIndexEntries {
-            row_ids: all_valid_row_ids.into_iter().collect(),
-        });
+        if let Some(recheck) = index_recheck {
+            rechecks.push(recheck);
+        }
+        filter_row_id_sets.push(all_valid_row_ids);
     }
 
-    let mut intersected_row_ids = filter_index_entries_list[0]
-        .row_ids
-        .iter()
-        .collect::<HashSet<_>>();
-    for filter_index_entries in filter_index_entries_list.iter().skip(1) {
-        let set = filter_index_entries.row_ids.iter().collect::<HashSet<_>>();
-        intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
+    let mut intersected_row_ids = filter_row_id_sets[0].clone();
+    for set in filter_row_id_sets.iter().skip(1) {
+        intersected_row_ids = intersected_row_ids.intersection(set).copied().collect();
     }
 
-    let projected_schema = Arc::new(project_schema(
+    let has_rechecks = !rechecks.is_empty();
+    let read_projection = projection_with_recheck_columns(
         &table.table_schema.arrow_schema,
         scan.projection.as_ref(),
+        &rechecks,
+    )?;
+    let output_fields =
+        output_field_names(&table.table_schema.arrow_schema, scan.projection.as_ref())?;
+    let read_schema = Arc::new(project_schema(
+        &table.table_schema.arrow_schema,
+        read_projection.as_ref(),
     )?);
-    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&projected_schema)?);
+    let catalog_schema = Arc::new(CatalogSchema::from_arrow(&read_schema)?);
     let row_stream = catalog_helper
         .scan_inline_rows(
             &table.table_id,
@@ -494,7 +502,6 @@ async fn index_scan_inline_rows(
             Some(
                 intersected_row_ids
                     .into_iter()
-                    .copied()
                     .collect::<Vec<_>>()
                     .as_slice(),
             ),
@@ -504,8 +511,12 @@ async fn index_scan_inline_rows(
         .await?;
     let inline_stream = row_stream.chunks(scan.batch_size).map(move |rows| {
         let rows = rows.into_iter().collect::<ILResult<Vec<_>>>()?;
-        let batch = rows_to_record_batch(&projected_schema, &rows)?;
-        Ok::<_, ILError>(batch)
+        let batch = rows_to_record_batch(&read_schema, &rows)?;
+        if !has_rechecks {
+            return Ok::<_, ILError>(batch);
+        }
+        let batch = apply_filter_rechecks(batch, &rechecks)?;
+        project_batch_by_fields(batch, output_fields.as_deref())
     });
 
     Ok(Box::pin(inline_stream) as RecordBatchStream)
@@ -527,7 +538,7 @@ async fn index_scan_data_file(
         .iter()
         .map(|record| (record.index_id, record))
         .collect::<HashMap<_, _>>();
-    let row_ids = filter_index_files_row_ids(
+    let filter_result = filter_index_files_row_ids(
         table,
         scan_filters,
         &index_file_records_map,
@@ -547,18 +558,44 @@ async fn index_scan_data_file(
         .map(|(_, filter)| filter.clone())
         .collect::<Vec<_>>();
 
-    let row_id_filter = row_ids_in_list_expr(row_ids.into_iter().collect());
+    let row_id_filter = row_ids_in_list_expr(filter_result.row_ids.into_iter().collect());
     left_filters.push(row_id_filter);
 
-    read_data_file_by_record(
+    let has_rechecks = !filter_result.rechecks.is_empty();
+    let read_projection = projection_with_recheck_columns(
+        &table.table_schema.arrow_schema,
+        scan_projection.as_ref(),
+        &filter_result.rechecks,
+    )?;
+    let output_fields =
+        output_field_names(&table.table_schema.arrow_schema, scan_projection.as_ref())?;
+
+    let stream = read_data_file_by_record(
         table.storage.as_ref(),
         &table.table_schema,
         data_file_record,
-        scan_projection,
+        read_projection,
         left_filters,
         scan_batch_size,
     )
-    .await
+    .await?;
+
+    if !has_rechecks {
+        return Ok(stream);
+    }
+
+    let rechecks = filter_result.rechecks;
+    let stream = stream.map(move |batch| {
+        let batch = apply_filter_rechecks(batch?, &rechecks)?;
+        project_batch_by_fields(batch, output_fields.as_deref())
+    });
+
+    Ok(Box::pin(stream))
+}
+
+struct IndexFilterResult {
+    row_ids: HashSet<Uuid>,
+    rechecks: Vec<Arc<dyn FilterRecheck>>,
 }
 
 async fn filter_index_files_row_ids(
@@ -567,8 +604,9 @@ async fn filter_index_files_row_ids(
     index_file_records: &HashMap<Uuid, &IndexFileRecord>,
     index_filter_assignment: &HashMap<String, Vec<usize>>,
     validity: &RowValidity,
-) -> ILResult<HashSet<Uuid>> {
-    let mut filter_index_entries_list = Vec::new();
+) -> ILResult<IndexFilterResult> {
+    let mut filter_row_id_sets = Vec::new();
+    let mut rechecks = Vec::new();
     for (index_name, filter_indices) in index_filter_assignment.iter() {
         let index_def = table
             .index_manager
@@ -598,20 +636,83 @@ async fn filter_index_files_row_ids(
 
         let index = index_builder.build()?;
 
-        let filter_index_entries = index.filter(&filters, validity).await?;
-        filter_index_entries_list.push(filter_index_entries);
+        let entries = index.filter(&filters, validity).await?;
+        if let Some(recheck) = entries.recheck {
+            rechecks.push(recheck);
+        }
+        filter_row_id_sets.push(entries.row_ids.into_iter().collect::<HashSet<_>>());
     }
 
-    let mut intersected_row_ids = filter_index_entries_list[0]
-        .row_ids
+    let mut intersected_row_ids = filter_row_id_sets[0].clone();
+    for set in filter_row_id_sets.iter().skip(1) {
+        intersected_row_ids = intersected_row_ids.intersection(set).copied().collect();
+    }
+
+    Ok(IndexFilterResult {
+        row_ids: intersected_row_ids,
+        rechecks,
+    })
+}
+
+fn projection_with_recheck_columns(
+    schema: &Schema,
+    projection: Option<&Vec<usize>>,
+    rechecks: &[Arc<dyn FilterRecheck>],
+) -> ILResult<Option<Vec<usize>>> {
+    let Some(projection) = projection else {
+        return Ok(None);
+    };
+
+    let mut projection = projection.clone();
+    for recheck in rechecks {
+        for column in recheck.required_columns() {
+            projection.push(schema.index_of(&column)?);
+        }
+    }
+    projection.sort_unstable();
+    projection.dedup();
+    Ok(Some(projection))
+}
+
+fn output_field_names(
+    schema: &Schema,
+    projection: Option<&Vec<usize>>,
+) -> ILResult<Option<Vec<String>>> {
+    projection
+        .map(|projection| {
+            projection
+                .iter()
+                .map(|&index| Ok(schema.field(index).name().clone()))
+                .collect::<ILResult<Vec<_>>>()
+        })
+        .transpose()
+}
+
+fn project_batch_by_fields(batch: RecordBatch, fields: Option<&[String]>) -> ILResult<RecordBatch> {
+    let Some(fields) = fields else {
+        return Ok(batch);
+    };
+    let indices = fields
         .iter()
-        .collect::<HashSet<_>>();
-    for filter_index_entries in filter_index_entries_list.iter().skip(1) {
-        let set = filter_index_entries.row_ids.iter().collect::<HashSet<_>>();
-        intersected_row_ids = intersected_row_ids.intersection(&set).cloned().collect();
-    }
+        .map(|field| batch.schema().index_of(field))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(batch.project(&indices)?)
+}
 
-    Ok(intersected_row_ids.into_iter().copied().collect())
+fn apply_filter_rechecks(
+    mut batch: RecordBatch,
+    rechecks: &[Arc<dyn FilterRecheck>],
+) -> ILResult<RecordBatch> {
+    for recheck in rechecks {
+        let mask = recheck.recheck(&batch)?;
+        if mask.len() != batch.num_rows() {
+            return Err(ILError::internal(
+                "Filter recheck returned a mask with an unexpected length",
+            ));
+        }
+        batch = arrow::compute::filter_record_batch(&batch, &mask)?;
+    }
+    Ok(batch)
 }
 
 fn assign_index_filters(

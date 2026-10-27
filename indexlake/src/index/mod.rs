@@ -9,7 +9,7 @@ use crate::ILResult;
 pub use crate::catalog::RowValidity;
 use crate::expr::Expr;
 use crate::storage::{InputFile, OutputFile};
-use arrow::array::{ArrayRef, RecordBatch};
+use arrow::array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow::datatypes::FieldRef;
 use std::any::Any;
 use std::fmt::Debug;
@@ -101,9 +101,25 @@ pub struct SearchIndexEntries {
     pub dynamic_columns: Vec<DynamicColumn>,
 }
 
+/// Re-evaluates an inexact index filter against the table rows.
+///
+/// An index that reports [`FilterSupport::Inexact`] may return a superset of
+/// the matching rows. It must attach a rechecker so the scan can remove false
+/// positives before returning data to the caller. The returned mask must be
+/// aligned with the input batch and the input batch must contain every column
+/// reported by [`FilterRecheck::required_columns`].
+pub trait FilterRecheck: Debug + Send + Sync {
+    fn required_columns(&self) -> Vec<String>;
+
+    fn recheck(&self, batch: &RecordBatch) -> ILResult<BooleanArray>;
+}
+
 #[derive(Debug, Clone)]
 pub struct FilterIndexEntries {
     pub row_ids: Vec<Uuid>,
+    /// Present when the index filter is inexact and the returned row ids are a
+    /// superset of the matching rows.
+    pub recheck: Option<Arc<dyn FilterRecheck>>,
 }
 
 #[derive(Debug, Clone, Copy)]

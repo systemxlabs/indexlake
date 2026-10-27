@@ -14,7 +14,8 @@ indexlake = { workspace = true }
 arrow = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-geozero = { workspace = true, features = ["with-wkb"] }
+geo = { workspace = true }
+geozero = { workspace = true, features = ["with-geo", "with-wkb"] }
 parquet = { workspace = true, features = ["async"] }
 rstar = { workspace = true }
 serde = { workspace = true }

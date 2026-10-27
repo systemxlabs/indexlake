@@ -138,6 +138,7 @@ impl Index for BTreeIndex {
         if filters.is_empty() {
             return Ok(FilterIndexEntries {
                 row_ids: Vec::new(),
+                recheck: None,
             });
         }
 
@@ -158,6 +159,7 @@ impl Index for BTreeIndex {
 
         Ok(FilterIndexEntries {
             row_ids: result_row_ids,
+            recheck: None,
         })
     }
 }

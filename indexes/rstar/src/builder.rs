@@ -164,6 +164,7 @@ impl RStarIndexBuilder {
         Ok(RStarIndex {
             rtree,
             params: self.params.clone(),
+            key_column: self.index_def.key_columns[0].clone(),
             row_count,
             row_id_to_pos,
         })
