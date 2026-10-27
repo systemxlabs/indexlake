@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{Int64Array, LargeBinaryArray, RecordBatch};
+use arrow::array::{LargeBinaryArray, RecordBatch};
 use uuid::Uuid;
 
 use crate::catalog::{
@@ -166,9 +166,9 @@ impl TransactionHelper {
         if inline_indexes.is_empty() {
             return Ok(());
         }
+        let inline_index_id_arr =
+            build_row_id_array(inline_indexes.iter().map(|r| r.inline_index_id))?;
         let index_id_arr = build_row_id_array(inline_indexes.iter().map(|r| r.index_id))?;
-        let created_at_arr =
-            Int64Array::from_iter_values(inline_indexes.iter().map(|r| r.created_at));
         let row_ids_bytes: Vec<Vec<u8>> = inline_indexes
             .iter()
             .map(|r| crate::utils::serialize_row_ids(&r.row_ids))
@@ -188,8 +188,8 @@ impl TransactionHelper {
         let batch = RecordBatch::try_new(
             InlineIndexRecord::arrow_schema(),
             vec![
+                Arc::new(inline_index_id_arr),
                 Arc::new(index_id_arr),
-                Arc::new(created_at_arr),
                 Arc::new(row_ids_arr),
                 Arc::new(validity_arr),
                 Arc::new(index_data_arr),
@@ -200,8 +200,8 @@ impl TransactionHelper {
             .insert_rows(
                 "indexlake_inline_index",
                 &[
+                    "inline_index_id".to_string(),
                     "index_id".to_string(),
-                    "created_at".to_string(),
                     "row_ids".to_string(),
                     "validity".to_string(),
                     "index_data".to_string(),

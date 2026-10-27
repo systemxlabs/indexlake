@@ -59,10 +59,12 @@ CREATE TABLE IF NOT EXISTS indexlake_index_file (
 );
 
 CREATE TABLE IF NOT EXISTS indexlake_inline_index (
+    inline_index_id UUID PRIMARY KEY,
     index_id UUID NOT NULL,
-    created_at BIGINT NOT NULL,
     row_ids BYTEA NOT NULL,
     validity BYTEA NOT NULL,
-    index_data BYTEA NOT NULL,
-    UNIQUE (index_id, created_at)
+    index_data BYTEA NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS indexlake_inline_index_index_id_idx
+    ON indexlake_inline_index (index_id);

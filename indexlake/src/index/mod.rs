@@ -110,6 +110,14 @@ pub struct FilterIndexEntries {
 pub enum FilterSupport {
     Unsupported,
     Exact,
+    /// The index can only narrow candidates and may return a superset of the
+    /// matching rows.
+    ///
+    /// NOTE: `Table::scan` currently removes index-assigned filters from the
+    /// residual filters without rechecking the returned row ids, so an inexact
+    /// index can make the scan return rows that do not satisfy the filter.
+    /// DataFusion plans are unaffected because `Inexact` pushdown is re-applied
+    /// above the scan; direct `Table::scan` callers are not.
     Inexact,
 }
 

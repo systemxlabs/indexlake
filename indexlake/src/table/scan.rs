@@ -421,7 +421,7 @@ async fn index_scan_inline_rows(
         index_ids.push(index_def.index_id);
     }
 
-    // read inline index records ordered by created_at
+    // read inline index records
     let inline_index_records = catalog_helper.get_inline_indexes(&index_ids).await?;
     let mut inline_index_records_map: HashMap<Uuid, Vec<InlineIndexRecord>> = HashMap::new();
     for record in inline_index_records {
