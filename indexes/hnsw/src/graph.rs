@@ -17,7 +17,7 @@ pub(crate) const M0: usize = 32;
 /// this is `M^-MAX_LEVEL`, far below any realistic node count.
 pub(crate) const MAX_LEVEL: usize = 32;
 
-pub(crate) type NodeId = u32;
+pub type NodeId = u32;
 pub(crate) const NONE: NodeId = u32::MAX;
 
 /// Added to the node id before the splitmix64 finalizer, making level
@@ -44,18 +44,21 @@ pub(crate) struct UpperNode {
 /// * every node records the row offset inside the index segment. Validity is
 ///   expressed in segment row coordinates, and gaps caused by NULL vectors must
 ///   not shift those coordinates.
+///
+/// Exposed through `crate::internals` for benchmarks. The layout and the
+/// public methods below are not a stable API.
 #[derive(Debug)]
-pub(crate) struct HnswGraph {
-    pub dim: usize,
-    pub vectors: Vec<f32>,
-    pub row_ids: Vec<Uuid>,
-    pub row_offsets: Vec<u32>,
-    pub levels: Vec<u8>,
-    pub links0: Vec<NodeId>,
-    pub counts0: Vec<u8>,
-    pub upper: Vec<UpperNode>,
-    pub entry: Option<NodeId>,
-    pub max_level: usize,
+pub struct HnswGraph {
+    pub(crate) dim: usize,
+    pub(crate) vectors: Vec<f32>,
+    pub(crate) row_ids: Vec<Uuid>,
+    pub(crate) row_offsets: Vec<u32>,
+    pub(crate) levels: Vec<u8>,
+    pub(crate) links0: Vec<NodeId>,
+    pub(crate) counts0: Vec<u8>,
+    pub(crate) upper: Vec<UpperNode>,
+    pub(crate) entry: Option<NodeId>,
+    pub(crate) max_level: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -169,7 +172,7 @@ fn with_search_scratch<R>(node_count: usize, ef: usize, f: impl FnOnce(&mut Scra
 }
 
 impl HnswGraph {
-    pub(crate) fn build(
+    pub fn build(
         vectors: Vec<f32>,
         row_ids: Vec<Uuid>,
         row_offsets: Vec<u32>,
@@ -346,12 +349,12 @@ impl HnswGraph {
     }
 
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.row_ids.len()
     }
 
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.row_ids.is_empty()
     }
 
@@ -682,7 +685,7 @@ impl HnswGraph {
 
     /// Search the zero layer and return up to `limit` valid nodes ordered by
     /// ascending distance.
-    pub(crate) fn search(
+    pub fn search(
         &self,
         query: &[f32],
         ef: usize,
@@ -1095,18 +1098,21 @@ mod tests {
         assert!(recall >= 0.95, "recall too low: {recall}");
     }
 
+    /// Recall must be high and improve with `ef`. Kept small enough for a
+    /// regular `cargo test`; the larger parameter sweep lives in the
+    /// `hnsw_graph` benchmark.
     #[test]
-    #[ignore = "recall sweep"]
-    fn recall_sweep() {
+    fn recall_improves_with_ef() {
         let mut rng = SplitMix64(0xDEAD_BEEF);
-        let dim = 64;
-        let count = 5000;
+        let dim = 32;
+        let count = 2_000;
         let points: Vec<Vec<f32>> = (0..count)
             .map(|_| (0..dim).map(|_| rng.next_f32()).collect())
             .collect();
-        let graph = build(&points, dim, 200);
+        let graph = build(&points, dim, 100);
         let validity = RowValidity::new(count);
-        let queries = 50;
+
+        let queries = 20;
         let test_queries: Vec<Vec<f32>> = (0..queries)
             .map(|_| (0..dim).map(|_| rng.next_f32()).collect())
             .collect();
@@ -1114,18 +1120,27 @@ mod tests {
             .iter()
             .map(|query| brute_force(&points, query, 10))
             .collect();
-        for ef in [10usize, 50, 100] {
-            let mut recall = 0.0f64;
+
+        let mut recalls = Vec::new();
+        for ef in [20usize, 100] {
+            let mut total_recall = 0.0f64;
             for (query, expected) in test_queries.iter().zip(&expected) {
                 let actual = graph.search(query, ef, &validity, 10).unwrap();
+                assert_eq!(actual.len(), 10);
                 let hits = actual
                     .iter()
                     .filter(|(id, _)| expected.contains(&(*id as usize)))
                     .count();
-                recall += hits as f64 / 10.0;
+                total_recall += hits as f64 / 10.0;
             }
-            eprintln!("ef={ef} recall={:.4}", recall / queries as f64);
+            recalls.push(total_recall / queries as f64);
         }
+        assert!(recalls[0] >= 0.90, "ef=20 recall too low: {}", recalls[0]);
+        assert!(recalls[1] >= 0.97, "ef=100 recall too low: {}", recalls[1]);
+        assert!(
+            recalls[1] + 0.02 >= recalls[0],
+            "recall should not drop with ef: {recalls:?}"
+        );
     }
 
     /// Clustered data exercises long-range links and cross-cluster routing;
@@ -1175,41 +1190,6 @@ mod tests {
         }
         let recall = total_recall / queries as f64;
         assert!(recall >= 0.98, "clustered recall too low: {recall}");
-    }
-
-    #[test]
-    #[ignore = "performance smoke test"]
-    fn bench_build_and_search() {
-        use std::time::Instant;
-
-        let mut rng = SplitMix64(0x1234_5678);
-        let dim = 256;
-        let count = 20_000;
-        let points: Vec<Vec<f32>> = (0..count)
-            .map(|_| (0..dim).map(|_| rng.next_f32()).collect())
-            .collect();
-
-        let start = Instant::now();
-        let graph = build(&points, dim, 200);
-        eprintln!("built {count} x {dim} in {:?}", start.elapsed());
-
-        let validity = RowValidity::new(count);
-        let queries: Vec<Vec<f32>> = (0..200)
-            .map(|_| (0..dim).map(|_| rng.next_f32()).collect())
-            .collect();
-        let start = Instant::now();
-        let mut total = 0usize;
-        for query in &queries {
-            total += graph.search(query, 100, &validity, 10).unwrap().len();
-        }
-        let elapsed = start.elapsed();
-        eprintln!(
-            "200 queries in {:?} ({:?} per query), {} results",
-            elapsed,
-            elapsed / queries.len() as u32,
-            total
-        );
-        assert_eq!(total, queries.len() * 10);
     }
 
     #[test]
