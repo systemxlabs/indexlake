@@ -13,15 +13,13 @@ indexlake = { workspace = true }
 
 arrow = { workspace = true }
 async-trait = { workspace = true }
+bytemuck = { workspace = true }
 bytes = { workspace = true }
-hnsw = { workspace = true, features = ["serde1"] }
-postcard = { workspace = true }
-rand_pcg = { version = "0.3", features = ["serde1"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-space = { workspace = true }
+simsimd = { workspace = true }
 uuid = { workspace = true }
 
 [lib]
-test = false
+test = true
 doctest = false
