@@ -3,7 +3,13 @@ networks:
 
 services:
   minio:
-    image: quay.io/minio/minio:latest
+    # MinIO no longer allows anonymous pulls from quay.io or Docker Hub.
+    # Silo is a community-maintained fork that keeps the MinIO S3 API and
+    # environment contract, and also bundles the mcli client.
+    image: docker.io/pgsty/silo:latest
+    # The image has no data volume and MinIO creates the backend directories
+    # under /data, so run as root to keep the container filesystem writable.
+    user: "0:0"
     environment:
       - MINIO_ROOT_USER=admin
       - MINIO_ROOT_PASSWORD=password
@@ -16,16 +22,21 @@ services:
       - 9001:9001
       - 9000:9000
     command: ["server", "/data", "--console-address", ":9001"]
+    healthcheck:
+      test: ["CMD", "silo", "healthcheck", "ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   mc:
     depends_on:
       - minio
-    image: quay.io/minio/mc:latest
+    image: docker.io/pgsty/mc:latest
     environment:
       - AWS_ACCESS_KEY_ID=admin
       - AWS_SECRET_ACCESS_KEY=password
       - AWS_REGION=us-east-1
     entrypoint: >
-      /bin/sh -c " until (/usr/bin/mc alias set minio http://minio:9000 admin password) do echo '...waiting...' && sleep 1; done; /usr/bin/mc rm -r --force minio/indexlake; /usr/bin/mc mb minio/indexlake; /usr/bin/mc policy set public minio/indexlake; tail -f /dev/null "
+      /bin/sh -c " until (mc alias set minio http://minio:9000 admin password) do echo '...waiting...' && sleep 1; done; mc rm -r --force minio/indexlake; mc mb --ignore-existing minio/indexlake; mc anonymous set public minio/indexlake; tail -f /dev/null "
     networks:
       minio_bridge:

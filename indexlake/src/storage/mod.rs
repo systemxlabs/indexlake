@@ -8,8 +8,9 @@ pub(crate) use parquet::*;
 use uuid::Uuid;
 
 use crate::catalog::DataFileRecord;
-use crate::expr::Expr;
+use crate::expr::{Expr, merge_filters};
 use crate::table::TableSchemaRef;
+use crate::utils::build_projection_from_condition;
 use crate::{ILError, ILResult, RecordBatchStream};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -152,22 +153,39 @@ pub(crate) async fn count_data_file_by_record(
     filters: Vec<Expr>,
 ) -> ILResult<usize> {
     if filters.is_empty() {
-        Ok(data_file_record.valid_row_count())
-    } else {
-        let stream =
-            read_data_file_by_record(storage, table_schema, data_file_record, None, filters, 8096)
-                .await?;
-        let count: usize = stream
-            .map(|batch| {
-                let batch = batch?;
-                Ok::<_, ILError>(batch.num_rows())
-            })
-            .try_collect::<Vec<_>>()
-            .await?
-            .into_iter()
-            .sum();
-        Ok(count)
+        return Ok(data_file_record.valid_row_count());
     }
+
+    // Counting only needs the columns referenced by the filter. Reading every
+    // column here makes the count as expensive as a full scan of the data
+    // columns, which dominates on object storage.
+    let condition = merge_filters(filters.clone()).expect("filters should not be empty");
+    let mut projection = build_projection_from_condition(&table_schema.arrow_schema, &condition)?;
+    projection.sort_unstable();
+    projection.dedup();
+    // An empty projection is treated as "all columns" by the parquet reader,
+    // which is the only safe fallback for filters without column references.
+    let projection = (!projection.is_empty()).then_some(projection);
+
+    let stream = read_data_file_by_record(
+        storage,
+        table_schema,
+        data_file_record,
+        projection,
+        filters,
+        8096,
+    )
+    .await?;
+    let count: usize = stream
+        .map(|batch| {
+            let batch = batch?;
+            Ok::<_, ILError>(batch.num_rows())
+        })
+        .try_collect::<Vec<_>>()
+        .await?
+        .into_iter()
+        .sum();
+    Ok(count)
 }
 
 pub(crate) async fn find_matched_row_ids_from_data_file(

@@ -1,5 +1,6 @@
 use arrow::array::{Float32Builder, Int32Array, ListBuilder, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
+use futures::TryStreamExt;
 use indexlake::Client;
 use indexlake::catalog::{Catalog, Scalar};
 use indexlake::expr::{col, lit};
@@ -202,6 +203,114 @@ async fn scan_with_limit_offset_filter(
 +------+-----+
 | Bob  | 21  |
 +------+-----+"#
+    );
+
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(async { catalog_sqlite() }, async { storage_fs() }, DataFileFormat::ParquetV2)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV1)]
+#[case(async { catalog_postgres().await }, async { storage_s3().await }, DataFileFormat::ParquetV2)]
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_with_limit_offset_filter_across_data_files(
+    #[future(awt)]
+    #[case]
+    catalog: Arc<dyn Catalog>,
+    #[future(awt)]
+    #[case]
+    storage: Arc<dyn Storage>,
+    #[case] format: DataFileFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let client = Client::new(catalog, storage);
+    let table = prepare_simple_testing_table2(&client, format).await?;
+
+    // `age > 20` matches Bob(21), Charlie(22), David(23), Eve(24), Frank(25),
+    // George(26), Hannah(27), Ivy(28). Bob and Charlie are inline rows; the
+    // rest live in two data files of three rows each.
+    let filters = vec![col("age").gt(lit(20))];
+
+    // offset == 0: stream directly and stop once the limit is reached.
+    let scan = TableScan::default()
+        .with_filters(filters.clone())
+        .with_offset(0)
+        .with_limit(2);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Bob     | 21  |
+| Charlie | 22  |
++---------+-----+"#
+    );
+
+    // offset crosses the inline row / data file boundary.
+    let scan = TableScan::default()
+        .with_filters(filters.clone())
+        .with_offset(1)
+        .with_limit(2);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+---------+-----+
+| name    | age |
++---------+-----+
+| Charlie | 22  |
+| David   | 23  |
++---------+-----+"#
+    );
+
+    // offset crosses the boundary between the two data files.
+    let scan = TableScan::default()
+        .with_filters(filters.clone())
+        .with_offset(4)
+        .with_limit(2);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+--------+-----+
+| name   | age |
++--------+-----+
+| Frank  | 25  |
+| George | 26  |
++--------+-----+"#
+    );
+
+    // limit exceeds the number of rows left after applying offset.
+    let scan = TableScan::default()
+        .with_filters(filters.clone())
+        .with_offset(6)
+        .with_limit(5);
+    let table_str = table_scan(&table, scan).await?;
+    println!("{}", table_str);
+    assert_eq!(
+        table_str,
+        r#"+--------+-----+
+| name   | age |
++--------+-----+
+| Hannah | 27  |
+| Ivy    | 28  |
++--------+-----+"#
+    );
+
+    // offset skips every matching row: each file is provably inside the
+    // discard region and is skipped without reading its data columns.
+    let scan = TableScan::default()
+        .with_filters(filters)
+        .with_offset(8)
+        .with_limit(1);
+    let stream = table.scan(scan).await?;
+    let batches = stream.try_collect::<Vec<_>>().await?;
+    assert_eq!(
+        batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+        0
     );
 
     Ok(())
