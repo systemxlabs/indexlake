@@ -21,8 +21,8 @@ impl Case {
         // since all then results have the same data type, we can choose any one as the
         // return data type except for the null.
         let mut data_type = DataType::Null;
-        for i in 0..self.when_then.len() {
-            data_type = self.when_then[i].1.data_type(schema)?;
+        for (_, then_expr) in &self.when_then {
+            data_type = then_expr.data_type(schema)?;
             if !data_type.equals_datatype(&DataType::Null) {
                 break;
             }
@@ -44,8 +44,8 @@ impl Case {
         // start with nulls as default output
         let mut current_value = new_null_array(&return_type, batch.num_rows());
         let mut remainder = BooleanArray::from(vec![true; batch.num_rows()]);
-        for i in 0..self.when_then.len() {
-            let when_value = self.when_then[i].0.eval_selection(batch, &remainder)?;
+        for (when_expr, then_expr) in &self.when_then {
+            let when_value = when_expr.eval_selection(batch, &remainder)?;
             let when_value = when_value.into_array(batch.num_rows())?;
             let when_value = when_value
                 .as_any()
@@ -66,7 +66,7 @@ impl Case {
                 continue;
             }
 
-            let then_value = self.when_then[i].1.eval_selection(batch, &when_value)?;
+            let then_value = then_expr.eval_selection(batch, &when_value)?;
 
             current_value = match then_value {
                 ColumnarValue::Scalar(then_value) => {

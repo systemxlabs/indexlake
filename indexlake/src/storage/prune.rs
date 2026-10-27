@@ -339,19 +339,14 @@ impl BoolPossibility {
     fn and(self, rhs: Self) -> Self {
         Self {
             can_true: self.can_true && rhs.can_true,
-            can_false: (self.can_false || rhs.can_false)
-                || (self.can_null && rhs.can_false)
-                || (rhs.can_null && self.can_false),
+            can_false: self.can_false || rhs.can_false,
             can_null: (self.can_null && !rhs.can_false) || (rhs.can_null && !self.can_false),
         }
     }
 
     fn or(self, rhs: Self) -> Self {
         Self {
-            can_true: self.can_true
-                || rhs.can_true
-                || (self.can_null && rhs.can_true)
-                || (rhs.can_null && self.can_true),
+            can_true: self.can_true || rhs.can_true,
             can_false: self.can_false && rhs.can_false,
             can_null: (self.can_null && !rhs.can_true) || (rhs.can_null && !self.can_true),
         }
