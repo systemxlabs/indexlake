@@ -339,7 +339,6 @@ impl BoolPossibility {
     fn and(self, rhs: Self) -> Self {
         Self {
             can_true: self.can_true && rhs.can_true,
-            // FALSE AND anything is FALSE, so one FALSE operand is enough.
             can_false: self.can_false || rhs.can_false,
             can_null: (self.can_null && !rhs.can_false) || (rhs.can_null && !self.can_false),
         }
@@ -347,7 +346,6 @@ impl BoolPossibility {
 
     fn or(self, rhs: Self) -> Self {
         Self {
-            // TRUE OR anything is TRUE, so one TRUE operand is enough.
             can_true: self.can_true || rhs.can_true,
             can_false: self.can_false && rhs.can_false,
             can_null: (self.can_null && !rhs.can_true) || (rhs.can_null && !self.can_true),

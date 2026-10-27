@@ -284,34 +284,21 @@ impl DataFileRecord {
         self.valid_record_count as usize
     }
 
-    pub(crate) fn row_ranges(&self) -> Vec<Range<usize>> {
-        let offsets = self
-            .validity
-            .iter()
-            .enumerate()
-            .filter(|(_, valid)| *valid)
-            .map(|(i, _)| i)
-            .collect::<Vec<_>>();
-
-        let mut ranges = Vec::new();
-        let mut offset_idx = 0;
-        while offset_idx < offsets.len() {
-            let current_offset = offsets[offset_idx];
-            let mut next_offset_idx = offset_idx + 1;
-            while next_offset_idx < offsets.len()
-                && offsets[next_offset_idx] == current_offset + (next_offset_idx - offset_idx)
-            {
-                next_offset_idx += 1;
-            }
-            ranges.push(current_offset..offsets[next_offset_idx - 1] + 1);
-            offset_idx = next_offset_idx;
-        }
-        ranges
-    }
-
     pub(crate) fn row_selection(&self) -> RowSelection {
-        let ranges = self.row_ranges();
-        RowSelection::from_consecutive_ranges(ranges.into_iter(), self.record_count as usize)
+        let num_rows = self.record_count as usize;
+        let valid_rows = self.valid_row_count();
+
+        // Fully valid and fully deleted files are the common cases. Neither
+        // needs to look at the validity bitmap, and both collapse into a
+        // single selector covering the whole file.
+        if valid_rows == num_rows {
+            return RowSelection::from_consecutive_ranges(std::iter::once(0..num_rows), num_rows);
+        }
+        if valid_rows == 0 {
+            return RowSelection::from_consecutive_ranges(std::iter::empty(), num_rows);
+        }
+
+        RowSelection::from_consecutive_ranges(self.validity.valid_ranges(), num_rows)
     }
 }
 
@@ -378,9 +365,36 @@ impl RowValidity {
                 self.num_rows
             )));
         }
-        let byte_idx = row_idx / 8;
-        let bit_idx = row_idx % 8;
-        Ok((self.validity[byte_idx] & (1 << bit_idx)) != 0)
+        Ok(self.is_valid_at(row_idx))
+    }
+
+    /// Iterates over maximal runs of consecutive valid rows.
+    ///
+    /// Ranges are produced lazily from the bitmap, so no per-row index buffer
+    /// is allocated.
+    pub(crate) fn valid_ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
+        let mut next_row = 0;
+        let mut run_start: Option<usize> = None;
+
+        std::iter::from_fn(move || {
+            while next_row < self.num_rows {
+                let row = next_row;
+                next_row += 1;
+
+                if self.is_valid_at(row) {
+                    run_start.get_or_insert(row);
+                } else if let Some(start) = run_start.take() {
+                    return Some(start..row);
+                }
+            }
+
+            run_start.take().map(|start| start..self.num_rows)
+        })
+    }
+
+    #[inline]
+    fn is_valid_at(&self, row_idx: usize) -> bool {
+        (self.validity[row_idx / 8] & (1 << (row_idx % 8))) != 0
     }
 }
 
@@ -566,7 +580,26 @@ impl InlineIndexRecord {
 
 #[cfg(test)]
 mod tests {
+    use parquet::arrow::arrow_reader::RowSelector;
+
     use super::*;
+
+    fn data_file_record(validity: RowValidity) -> DataFileRecord {
+        DataFileRecord {
+            data_file_id: Uuid::nil(),
+            table_id: Uuid::nil(),
+            format: DataFileFormat::ParquetV1,
+            relative_path: String::new(),
+            size: 0,
+            record_count: validity.num_rows as i64,
+            valid_record_count: validity.count_valid() as i64,
+            validity,
+        }
+    }
+
+    fn selectors(validity: RowValidity) -> Vec<RowSelector> {
+        data_file_record(validity).row_selection().into()
+    }
 
     #[test]
     fn test_row_validity() {
@@ -581,6 +614,74 @@ mod tests {
         assert_eq!(
             bool_vec,
             vec![true, true, false, true, true, true, true, true]
+        );
+    }
+
+    #[test]
+    fn test_row_selection_all_valid() {
+        assert_eq!(
+            selectors(RowValidity::new(20)),
+            vec![RowSelector::select(20)]
+        );
+    }
+
+    #[test]
+    fn test_row_selection_all_deleted() {
+        let mut validity = RowValidity::new(20);
+        for row in 0..20 {
+            validity.set(row, false);
+        }
+
+        assert_eq!(selectors(validity), vec![RowSelector::skip(20)]);
+    }
+
+    #[test]
+    fn test_row_selection_partial() {
+        let mut validity = RowValidity::new(20);
+        for row in [0, 3, 4, 5, 19] {
+            validity.set(row, false);
+        }
+
+        assert_eq!(
+            selectors(validity),
+            vec![
+                RowSelector::skip(1),
+                RowSelector::select(2),
+                RowSelector::skip(3),
+                RowSelector::select(13),
+                RowSelector::skip(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_row_selection_ignores_trailing_bits() {
+        // With 10 rows the last byte has 6 unused bits that `RowValidity::new`
+        // initializes to 1; they must not be selected.
+        let mut validity = RowValidity::new(10);
+        validity.set(7, false);
+        validity.set(8, false);
+
+        assert_eq!(
+            selectors(validity),
+            vec![
+                RowSelector::select(7),
+                RowSelector::skip(2),
+                RowSelector::select(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_valid_ranges() {
+        let mut validity = RowValidity::new(20);
+        for row in [0, 3, 4, 5, 19] {
+            validity.set(row, false);
+        }
+
+        assert_eq!(
+            validity.valid_ranges().collect::<Vec<_>>(),
+            vec![1..3, 6..19]
         );
     }
 }
