@@ -172,15 +172,14 @@ impl TransactionHelper {
 
         // Fetch only the columns we need to invalidate rows
         let schema = std::sync::Arc::new(CatalogSchema::new(vec![
-            Column::new("index_id", CatalogDataType::Uuid, false),
-            Column::new("created_at", CatalogDataType::Int64, false),
+            Column::new("inline_index_id", CatalogDataType::Uuid, false),
             Column::new("row_ids", CatalogDataType::Binary, false),
             Column::new("validity", CatalogDataType::Binary, false),
         ]));
         let rows = self
             .query_rows(
                 &format!(
-                    "SELECT index_id, created_at, row_ids, validity FROM indexlake_inline_index WHERE index_id = {} ORDER BY created_at ASC",
+                    "SELECT inline_index_id, row_ids, validity FROM indexlake_inline_index WHERE index_id = {}",
                     self.catalog.sql_uuid_literal(index_id),
                 ),
                 schema,
@@ -190,11 +189,10 @@ impl TransactionHelper {
         let mut updated_count = 0;
 
         for mut row in rows {
-            let idx_id = row.uuid(0)?.expect("index_id is not null");
-            let idx_created_at = row.int64(1)?.expect("created_at is not null");
-            let row_ids_bytes = row.binary_owned(2)?.expect("row_ids is not null");
+            let inline_index_id = row.uuid(0)?.expect("inline_index_id is not null");
+            let row_ids_bytes = row.binary_owned(1)?.expect("row_ids is not null");
             let row_ids = crate::utils::deserialize_row_ids(&row_ids_bytes)?;
-            let validity_bytes = row.binary_owned(3)?.expect("validity is not null");
+            let validity_bytes = row.binary_owned(2)?.expect("validity is not null");
             let mut validity = RowValidity::from(validity_bytes, row_ids.len());
             let mut modified = false;
 
@@ -211,9 +209,8 @@ impl TransactionHelper {
                     let delete_count = self
                         .transaction
                         .execute(&format!(
-                            "DELETE FROM indexlake_inline_index WHERE index_id = {} AND created_at = {}",
-                            self.catalog.sql_uuid_literal(&idx_id),
-                            idx_created_at,
+                            "DELETE FROM indexlake_inline_index WHERE inline_index_id = {}",
+                            self.catalog.sql_uuid_literal(&inline_index_id),
                         ))
                         .await?;
                     updated_count += delete_count;
@@ -221,10 +218,9 @@ impl TransactionHelper {
                     let update_count = self
                         .transaction
                         .execute(&format!(
-                            "UPDATE indexlake_inline_index SET validity = {} WHERE index_id = {} AND created_at = {}",
+                            "UPDATE indexlake_inline_index SET validity = {} WHERE inline_index_id = {}",
                             self.catalog.sql_binary_literal(validity.bytes()),
-                            self.catalog.sql_uuid_literal(&idx_id),
-                            idx_created_at,
+                            self.catalog.sql_uuid_literal(&inline_index_id),
                         ))
                         .await?;
                     updated_count += update_count;

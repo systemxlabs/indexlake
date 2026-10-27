@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
 use arrow::array::*;
 use arrow::datatypes::{DataType, TimeUnit, i256};
@@ -14,7 +13,7 @@ use crate::catalog::{
 use crate::index::{IndexBuilder, IndexManager};
 use crate::storage::{DataFileFormat, OutputFile, build_parquet_writer};
 use crate::table::Table;
-use crate::utils::{rewrite_batch_schema, serialize_array, timestamp_ms_from_now};
+use crate::utils::{rewrite_batch_schema, serialize_array};
 use crate::{ILError, ILResult, RecordBatchStream};
 
 #[derive(Debug, With)]
@@ -180,7 +179,7 @@ pub(crate) fn build_inline_indexes(
                     state.builder.write_bytes(&mut index_data)?;
                     records.push(InlineIndexRecord {
                         index_id: state.builder.index_def().index_id,
-                        created_at: timestamp_ms_from_now(Duration::ZERO),
+                        inline_index_id: Uuid::now_v7(),
                         row_ids: std::mem::take(&mut state.row_ids),
                         validity: RowValidity::new(state.row_count),
                         index_data,
@@ -200,7 +199,7 @@ pub(crate) fn build_inline_indexes(
             state.builder.write_bytes(&mut index_data)?;
             records.push(InlineIndexRecord {
                 index_id: state.builder.index_def().index_id,
-                created_at: timestamp_ms_from_now(Duration::ZERO),
+                inline_index_id: Uuid::now_v7(),
                 row_ids: std::mem::take(&mut state.row_ids),
                 validity: RowValidity::new(state.row_count),
                 index_data,

@@ -61,13 +61,15 @@ CREATE TABLE IF NOT EXISTS indexlake_index_file (
 );
 
 CREATE TABLE IF NOT EXISTS indexlake_inline_index (
+    inline_index_id BLOB PRIMARY KEY NOT NULL,
     index_id BLOB NOT NULL,
-    created_at BIGINT NOT NULL,
     row_ids BLOB NOT NULL,
     validity BLOB NOT NULL,
-    index_data BLOB NOT NULL,
-    UNIQUE (index_id, created_at)
+    index_data BLOB NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS indexlake_inline_index_index_id_idx
+    ON indexlake_inline_index (index_id);
 
 CREATE TABLE IF NOT EXISTS indexlake_data_file_stats (
     data_file_id BLOB NOT NULL,

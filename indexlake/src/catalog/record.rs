@@ -532,8 +532,8 @@ impl IndexFileRecord {
 }
 
 pub(crate) struct InlineIndexRecord {
+    pub(crate) inline_index_id: Uuid,
     pub(crate) index_id: Uuid,
-    pub(crate) created_at: i64,
     pub(crate) row_ids: Vec<Uuid>,
     pub(crate) validity: RowValidity,
     pub(crate) index_data: Vec<u8>,
@@ -542,8 +542,8 @@ pub(crate) struct InlineIndexRecord {
 impl InlineIndexRecord {
     pub(crate) fn catalog_schema() -> CatalogSchema {
         CatalogSchema::new(vec![
+            Column::new("inline_index_id", CatalogDataType::Uuid, false),
             Column::new("index_id", CatalogDataType::Uuid, false),
-            Column::new("created_at", CatalogDataType::Int64, false),
             Column::new("row_ids", CatalogDataType::Binary, false),
             Column::new("validity", CatalogDataType::Binary, false),
             Column::new("index_data", CatalogDataType::Binary, false),
@@ -552,8 +552,8 @@ impl InlineIndexRecord {
 
     pub(crate) fn arrow_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
+            Field::new("inline_index_id", DataType::FixedSizeBinary(16), false),
             Field::new("index_id", DataType::FixedSizeBinary(16), false),
-            Field::new("created_at", DataType::Int64, false),
             Field::new("row_ids", DataType::LargeBinary, false),
             Field::new("validity", DataType::LargeBinary, false),
             Field::new("index_data", DataType::LargeBinary, false),
@@ -561,16 +561,16 @@ impl InlineIndexRecord {
     }
 
     pub(crate) fn from_row(mut row: Row) -> ILResult<Self> {
-        let index_id = row.uuid(0)?.expect("index_id is not null");
-        let created_at = row.int64(1)?.expect("created_at is not null");
+        let inline_index_id = row.uuid(0)?.expect("inline_index_id is not null");
+        let index_id = row.uuid(1)?.expect("index_id is not null");
         let row_ids_bytes = row.binary_owned(2)?.expect("row_ids is not null");
         let row_ids = crate::utils::deserialize_row_ids(&row_ids_bytes)?;
         let validity_bytes = row.binary_owned(3)?.expect("validity is not null");
         let validity = RowValidity::from(validity_bytes, row_ids.len());
         let index_data = row.binary_owned(4)?.expect("index_data is not null");
         Ok(Self {
+            inline_index_id,
             index_id,
-            created_at,
             row_ids,
             validity,
             index_data,
