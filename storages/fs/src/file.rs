@@ -100,7 +100,12 @@ pub struct LocalOutputFile {
 #[async_trait::async_trait]
 impl OutputFile for LocalOutputFile {
     async fn write(&mut self, data: Bytes) -> ILResult<()> {
-        self.file.write(&data).await.map_err(|e| {
+        // `AsyncWriteExt::write` performs a single write, which for tokio's
+        // file implementation is capped by its internal buffer (2 MiB by
+        // default). Index files routinely exceed that, so a bare `write`
+        // silently truncates them. `write_all` loops until the buffer is
+        // drained.
+        self.file.write_all(&data).await.map_err(|e| {
             ILError::storage(format!("Failed to write file {}: {e}", self.relative_path))
         })?;
         Ok(())
