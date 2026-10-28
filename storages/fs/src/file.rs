@@ -100,7 +100,12 @@ pub struct LocalOutputFile {
 #[async_trait::async_trait]
 impl OutputFile for LocalOutputFile {
     async fn write(&mut self, data: Bytes) -> ILResult<()> {
-        self.file.write(&data).await.map_err(|e| {
+        // `AsyncWriteExt::write` performs a single write, which for tokio's
+        // file implementation is capped by its internal buffer (2 MiB by
+        // default). Index files routinely exceed that, so a bare `write`
+        // silently truncates them. `write_all` loops until the buffer is
+        // drained.
+        self.file.write_all(&data).await.map_err(|e| {
             ILError::storage(format!("Failed to write file {}: {e}", self.relative_path))
         })?;
         Ok(())
@@ -111,5 +116,44 @@ impl OutputFile for LocalOutputFile {
             ILError::storage(format!("Failed to flush file {}: {e}", self.relative_path))
         })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: `tokio::fs::File::write` stops at its internal buffer
+    /// size (2 MiB by default), so a single `write` call used to truncate any
+    /// larger index file.
+    #[tokio::test]
+    async fn writes_more_than_the_tokio_file_buffer() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("indexlake-fs-write-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("large.index");
+
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut output = LocalOutputFile {
+            file,
+            relative_path: path.display().to_string(),
+        };
+        let data = Bytes::from(vec![7u8; 5 * 1024 * 1024]);
+        output.write(data.clone()).await.unwrap();
+        output.close().await.unwrap();
+
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), data.len() as u64);
+
+        let mut input = LocalInputFile {
+            file: std::fs::File::open(&path).unwrap(),
+            relative_path: path.display().to_string(),
+        };
+        let read = input.read(0..data.len() as u64).await.unwrap();
+        assert_eq!(read, data);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
