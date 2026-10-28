@@ -2,17 +2,13 @@ use std::sync::Arc;
 
 use arrow::array::Float64Array;
 use arrow::datatypes::{DataType, Field};
-use hnsw::{Hnsw, Searcher};
 use indexlake::expr::Expr;
 use indexlake::index::{
     DynamicColumn, FilterIndexEntries, Index, RowValidity, SearchIndexEntries, SearchQuery,
 };
 use indexlake::{ILError, ILResult};
-use rand_pcg::Pcg64;
-use space::Neighbor;
-use uuid::Uuid;
 
-use crate::Euclidean;
+use crate::graph::HnswGraph;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HnswSearchQuery {
@@ -48,20 +44,14 @@ impl indexlake::index::SearchQueryCodec for HnswSearchQueryCodec {
     }
 }
 
+#[derive(Debug)]
 pub struct HnswIndex {
-    hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>,
-    row_ids: Vec<Uuid>,
+    graph: HnswGraph,
 }
 
 impl HnswIndex {
-    pub fn new(hnsw: Hnsw<Euclidean, Vec<f32>, Pcg64, 24, 48>, row_ids: Vec<Uuid>) -> Self {
-        Self { hnsw, row_ids }
-    }
-}
-
-impl std::fmt::Debug for HnswIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HnswIndex").finish()
+    pub(crate) fn new(graph: HnswGraph) -> Self {
+        Self { graph }
     }
 }
 
@@ -81,44 +71,39 @@ impl Index for HnswIndex {
         })?;
 
         let limit = limit.unwrap_or(usize::MAX);
-        // Keep fetching until we get enough valid rows or exhaust the index
-        let mut row_ids = Vec::new();
-        let mut scores = Vec::new();
-        let total = self.hnsw.len();
-        // Use explicit ef_search to control search beam width independently
-        // from the number of requested results. hnsw::nearest() uses ef to
-        // bound the candidate pool, giving better recall than knn() which
-        // internally sets ef = num + 16.
-        let ef = query.ef_search.max(limit).min(total);
-        let mut searcher = Searcher::<u32>::default();
-        let mut dest: Vec<Neighbor<u32>> = vec![
-            Neighbor {
-                index: !0,
-                distance: 0
+        let (row_ids, scores) = if self.graph.is_empty() || limit == 0 {
+            (Vec::new(), Vec::new())
+        } else {
+            if query.vector.len() != self.graph.dim {
+                return Err(ILError::invalid_input(format!(
+                    "HNSW query dimension {} does not match index dimension {}",
+                    query.vector.len(),
+                    self.graph.dim
+                )));
+            }
+            if query.vector.iter().any(|value| !value.is_finite()) {
+                return Err(ILError::invalid_input(
+                    "HNSW query vector must contain only finite values",
+                ));
+            }
+
+            let node_count = self.graph.len();
+            // A finite `limit` bounds the result set. When the caller does not
+            // ask for a limit we have to visit every node to return all rows.
+            let ef = if limit == usize::MAX {
+                node_count
+            } else {
+                query.ef_search.max(limit).max(1).min(node_count)
             };
-            ef
-        ];
-        let mut fetch_limit = limit.min(total);
-        let mut scanned_count = 0;
-        while row_ids.len() < limit && fetch_limit <= total {
-            let found = self
-                .hnsw
-                .nearest(&query.vector, ef, &mut searcher, &mut dest);
-            for neighbor in &found[scanned_count..] {
-                if validity.is_valid(neighbor.index)? {
-                    row_ids.push(self.row_ids[neighbor.index]);
-                    scores.push(f32::from_bits(neighbor.distance) as f64);
-                    if row_ids.len() >= limit {
-                        break;
-                    }
-                }
+            let found = self.graph.search(&query.vector, ef, validity, limit)?;
+            let mut row_ids = Vec::with_capacity(found.len());
+            let mut scores = Vec::with_capacity(found.len());
+            for (node_id, dist_sq) in found {
+                row_ids.push(self.graph.row_ids[node_id as usize]);
+                scores.push(dist_sq.max(0.0).sqrt() as f64);
             }
-            scanned_count = found.len();
-            if fetch_limit >= total {
-                break;
-            }
-            fetch_limit = (fetch_limit * 2).min(total);
-        }
+            (row_ids, scores)
+        };
 
         let mut dynamic_columns = Vec::with_capacity(dynamic_fields.len());
         for dynamic_field in dynamic_fields {
@@ -134,6 +119,7 @@ impl Index for HnswIndex {
                 }
             }
         }
+
         Ok(SearchIndexEntries {
             row_ids,
             scores,

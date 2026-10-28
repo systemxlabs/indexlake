@@ -1,23 +1,19 @@
 mod builder;
+mod distance;
+mod graph;
 mod index;
 mod kind;
+mod serialization;
 
 pub use builder::*;
 pub use index::*;
 pub use kind::*;
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct Euclidean;
-
-impl space::Metric<Vec<f32>> for Euclidean {
-    type Unit = u32;
-
-    fn distance(&self, a: &Vec<f32>, b: &Vec<f32>) -> u32 {
-        a.iter()
-            .zip(b.iter())
-            .map(|(&a, &b)| (a - b).powi(2))
-            .sum::<f32>()
-            .sqrt()
-            .to_bits()
-    }
+/// Graph internals exposed for benchmarks and diagnostics.
+///
+/// This is not a stable API: the graph layout and method signatures may change
+/// with the implementation.
+#[doc(hidden)]
+pub mod internals {
+    pub use crate::graph::{HnswGraph, NodeId};
 }
