@@ -69,10 +69,17 @@ pub fn catalog_sqlite() -> Arc<dyn Catalog> {
 }
 
 pub async fn catalog_postgres() -> Arc<dyn Catalog> {
+    catalog_postgres_with_pool_size(100).await
+}
+
+/// Same as [`catalog_postgres`], but with an explicit pool size. Useful to
+/// simulate a degraded pool (e.g. `max_size = 1`) and check that a scan never
+/// needs more than one catalog connection at a time.
+pub async fn catalog_postgres_with_pool_size(pool_max_size: u32) -> Arc<dyn Catalog> {
     let _ = POSTGRES_DB.get_or_init(setup_postgres_db);
     let builder = PostgresCatalogBuilder::new("localhost", 5432, "postgres", "password")
         .dbname("postgres")
-        .pool_max_size(100)
+        .pool_max_size(pool_max_size)
         .pool_idle_timeout(Some(Duration::from_secs(10)));
     let catalog = Arc::new(builder.build().await.unwrap());
 

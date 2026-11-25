@@ -1,4 +1,4 @@
-use arrow::array::{Float32Builder, Int32Array, ListBuilder, RecordBatch, StringArray};
+use arrow::array::{Array, Float32Builder, Int32Array, ListBuilder, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use futures::TryStreamExt;
 use indexlake::Client;
@@ -489,6 +489,150 @@ async fn scan_with_catalog_unsupported_filter(
 | 4  | [40.0, 40.0, 40.0] |
 +----+--------------------+"#,
     );
+
+    Ok(())
+}
+
+const WIDE_INLINE_ROWS: i32 = 5000;
+
+/// Insert `row_count` rows of ~1KB payload and keep *all* of them inline.
+///
+/// The wide payload matters: a tokio-postgres response is delivered in batches,
+/// so a small inline table fits in a single batch and hides the connection
+/// lifecycle bug. ~300KB of rows spans several batches.
+async fn prepare_wide_inline_table(
+    client: &Client,
+    row_count: i32,
+) -> indexlake::ILResult<(String, String, indexlake::table::Table)> {
+    let namespace_name = uuid::Uuid::new_v4().to_string();
+    client.create_namespace(&namespace_name, true).await?;
+
+    let table_schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int32, false),
+        Field::new("payload", DataType::Utf8, false),
+    ]));
+    let table_name = uuid::Uuid::new_v4().to_string();
+    let table_creation = TableCreation {
+        namespace_name: namespace_name.clone(),
+        table_name: table_name.clone(),
+        schema: table_schema.clone(),
+        config: TableConfig {
+            inline_row_count_limit: 100_000,
+            parquet_row_group_size: 1024,
+            preferred_data_file_format: DataFileFormat::ParquetV2,
+        },
+        ..Default::default()
+    };
+    client.create_table(table_creation).await?;
+
+    let table = client.load_table(&namespace_name, &table_name).await?;
+
+    let payload = "x".repeat(1024);
+    let record_batch = RecordBatch::try_new(
+        table_schema,
+        vec![
+            Arc::new(Int32Array::from((0..row_count).collect::<Vec<_>>())),
+            Arc::new(StringArray::from(vec![payload; row_count as usize])),
+        ],
+    )?;
+    table
+        .insert(TableInsertion::new(vec![record_batch]))
+        .await?;
+
+    Ok((namespace_name, table_name, table))
+}
+
+async fn collect_ids(
+    table: &indexlake::table::Table,
+    scan: TableScan,
+) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
+    let duration = std::time::Duration::from_secs(120);
+    let batches = tokio::time::timeout(duration, async {
+        let stream = table.scan(scan).await?;
+        stream.try_collect::<Vec<_>>().await
+    })
+    .await
+    .expect("scan timed out: the catalog connection was most likely not held by the row stream")?;
+
+    let mut ids = Vec::new();
+    for batch in &batches {
+        let column = batch
+            .column_by_name("id")
+            .expect("id column should be present")
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .expect("id column should be Int32");
+        ids.extend((0..column.len()).map(|idx| column.value(idx)));
+    }
+    Ok(ids)
+}
+
+/// A full inline scan must work with a pool that only holds a single connection.
+///
+/// Regression test for a scan that opened the inline row stream first (keeping a
+/// connection busy with an unread response) and then asked the catalog for the
+/// partitioned data file records, which needs a second connection: the checkout
+/// of that second connection hung in `is_valid` until `connection_timeout`.
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_inline_rows_with_single_connection_pool() -> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let setup_client = Client::new(catalog_postgres().await, storage_fs());
+    let (namespace_name, table_name, table) =
+        prepare_wide_inline_table(&setup_client, WIDE_INLINE_ROWS).await?;
+    assert_inline_row_count(&table, |count| count == WIDE_INLINE_ROWS as usize).await?;
+    assert_data_file_count(&table, |count| count == 0).await?;
+
+    // Same database and storage, but a pool of exactly one connection.
+    let scan_client = Client::new(
+        indexlake_integration_tests::catalog_postgres_with_pool_size(1).await,
+        storage_fs(),
+    );
+    let table = scan_client.load_table(&namespace_name, &table_name).await?;
+
+    let ids = collect_ids(&table, TableScan::default().with_projection(Some(vec![1]))).await?;
+    assert_eq!(ids, (0..WIDE_INLINE_ROWS).collect::<Vec<_>>());
+
+    Ok(())
+}
+
+/// Paginated inline scans must push the window down and stay correct with a
+/// single-connection pool.
+#[tokio::test(flavor = "multi_thread")]
+async fn paginated_scan_inline_rows_with_single_connection_pool()
+-> Result<(), Box<dyn std::error::Error>> {
+    init_env_logger();
+
+    let setup_client = Client::new(catalog_postgres().await, storage_fs());
+    let (namespace_name, table_name, table) =
+        prepare_wide_inline_table(&setup_client, WIDE_INLINE_ROWS).await?;
+    assert_inline_row_count(&table, |count| count == WIDE_INLINE_ROWS as usize).await?;
+
+    let scan_client = Client::new(
+        indexlake_integration_tests::catalog_postgres_with_pool_size(1).await,
+        storage_fs(),
+    );
+    let table = scan_client.load_table(&namespace_name, &table_name).await?;
+
+    let page = |offset: usize, limit: usize| {
+        TableScan::default()
+            .with_projection(Some(vec![1]))
+            .with_offset(offset)
+            .with_limit(limit)
+    };
+
+    assert_eq!(collect_ids(&table, page(0, 2)).await?, vec![0, 1]);
+    assert_eq!(collect_ids(&table, page(1, 3)).await?, vec![1, 2, 3]);
+    assert_eq!(collect_ids(&table, page(5, 4)).await?, vec![5, 6, 7, 8]);
+    // A window that runs past the end of the inline rows must not error out.
+    let tail = WIDE_INLINE_ROWS as usize - 2;
+    assert_eq!(
+        collect_ids(&table, page(tail, 10)).await?,
+        vec![WIDE_INLINE_ROWS - 2, WIDE_INLINE_ROWS - 1]
+    );
+    // Offset beyond the last inline row yields nothing.
+    let beyond = WIDE_INLINE_ROWS as usize + 100;
+    assert!(collect_ids(&table, page(beyond, 10)).await?.is_empty());
 
     Ok(())
 }
