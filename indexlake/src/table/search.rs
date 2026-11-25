@@ -576,6 +576,7 @@ async fn read_rows(
                 Some(&inline_row_ids),
                 &[],
                 None,
+                None,
             )
             .await?;
         let rows: Vec<Row> = row_stream.try_collect::<Vec<_>>().await?;

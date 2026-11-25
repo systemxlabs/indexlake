@@ -347,6 +347,7 @@ impl CatalogHelper {
         row_ids: Option<&[Uuid]>,
         filters: &[Expr],
         offset: Option<usize>,
+        limit: Option<usize>,
     ) -> ILResult<RowStream<'static>> {
         if let Some(row_ids) = row_ids
             && row_ids.is_empty()
@@ -376,19 +377,25 @@ impl CatalogHelper {
             format!(" WHERE {}", filter_strs.join(" AND "))
         };
 
-        let offset_clause = if let Some(offset) = offset {
-            match self.catalog.database() {
-                CatalogDatabase::Sqlite => format!(" LIMIT {} OFFSET {}", i64::MAX, offset),
-                CatalogDatabase::Postgres => format!(" OFFSET {}", offset),
-            }
-        } else {
-            "".to_string()
+        let offset_limit_clause = match self.catalog.database() {
+            CatalogDatabase::Sqlite => match (limit, offset) {
+                (Some(limit), Some(offset)) => format!(" LIMIT {limit} OFFSET {offset}"),
+                (Some(limit), None) => format!(" LIMIT {limit}"),
+                (None, Some(offset)) => format!(" LIMIT {} OFFSET {offset}", i64::MAX),
+                (None, None) => "".to_string(),
+            },
+            CatalogDatabase::Postgres => match (limit, offset) {
+                (Some(limit), Some(offset)) => format!(" LIMIT {limit} OFFSET {offset}"),
+                (Some(limit), None) => format!(" LIMIT {limit}"),
+                (None, Some(offset)) => format!(" OFFSET {offset}"),
+                (None, None) => "".to_string(),
+            },
         };
 
         self.catalog
             .query(
                 &format!(
-                    "SELECT {} FROM {}{where_clause}{offset_clause}",
+                    "SELECT {} FROM {}{where_clause}{offset_limit_clause}",
                     table_schema.select_items(self.catalog.as_ref()).join(", "),
                     inline_row_table_name(table_id),
                 ),
