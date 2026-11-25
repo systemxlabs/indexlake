@@ -188,6 +188,13 @@ async fn process_table_scan(
         None
     };
 
+    // Resolve the partitioned data file records before opening the inline row
+    // stream: the inline stream keeps a catalog connection busy until it is
+    // drained, and a scan should never need two catalog connections at once.
+    let partitioned_data_file_records =
+        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition.clone())
+            .await?;
+
     let (inline_row_stream, inline_row_skip_count) = if scan.partition.contains_inline_rows() {
         // TODO we can skip stream if possible
         let inline_offset = if let Some(row_count) = inline_row_count {
@@ -210,10 +217,6 @@ async fn process_table_scan(
             0,
         )
     };
-
-    let partitioned_data_file_records =
-        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition.clone())
-            .await?;
 
     let scanner = TablePartitionScanner::new(
         table.table_schema.clone(),
@@ -287,17 +290,27 @@ async fn scan_inline_rows(
 
     let arrow_filter = merge_filters(arrow_filters);
 
+    // Push the window down to the catalog when the offset is already handled by
+    // SQL (i.e. nothing is filtered on the arrow side). This keeps a paginated
+    // scan from streaming the whole inline table, which is both wasteful and
+    // the main trigger of the "unread response" connection stall.
+    let (sql_offset, sql_limit) = if arrow_filter.is_some() || !scan.offset_limit_required() {
+        (None, None)
+    } else {
+        let limit = scan
+            .limit
+            .map(|limit| scan.offset.saturating_add(limit).saturating_sub(offset));
+        (Some(offset), limit)
+    };
+
     let mut row_stream = catalog_helper
         .scan_inline_rows(
             table_id,
             &catalog_schema,
             None,
             &db_filters,
-            if arrow_filter.is_some() {
-                None
-            } else {
-                Some(offset)
-            },
+            sql_offset,
+            sql_limit,
         )
         .await?;
 
@@ -358,8 +371,15 @@ async fn process_index_scan(
         .map(|(_, filter)| filter.clone())
         .collect::<Vec<_>>();
 
+    // Same as `process_table_scan`: resolve data file records before opening the
+    // inline row stream, so a single scan never holds two catalog connections.
+    let contains_inline_rows = scan.partition.contains_inline_rows();
+    let data_file_records =
+        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition.clone())
+            .await?;
+
     // Scan inline rows
-    let mut streams: Vec<RecordBatchStream> = if scan.partition.contains_inline_rows() {
+    let mut streams: Vec<RecordBatchStream> = if contains_inline_rows {
         let inline_rows_stream = index_scan_inline_rows(
             catalog_helper,
             table,
@@ -372,9 +392,6 @@ async fn process_index_scan(
     } else {
         vec![]
     };
-
-    let data_file_records =
-        get_partitioned_data_file_records(catalog_helper, &table.table_id, scan.partition).await?;
 
     let mut futs = Vec::with_capacity(data_file_records.len());
     for data_file_record in data_file_records {
@@ -499,6 +516,7 @@ async fn index_scan_inline_rows(
                     .as_slice(),
             ),
             non_index_filters,
+            None,
             None,
         )
         .await?;
