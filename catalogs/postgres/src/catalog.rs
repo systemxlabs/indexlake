@@ -1,3 +1,5 @@
+use std::pin::Pin;
+
 use arrow::array::RecordBatch;
 use arrow::datatypes::Schema;
 use bb8::Pool;
@@ -5,7 +7,7 @@ use bb8_postgres::PostgresConnectionManager;
 use bb8_postgres::tokio_postgres::NoTls;
 use bb8_postgres::tokio_postgres::binary_copy::BinaryCopyInWriter;
 use bb8_postgres::tokio_postgres::types::ToSql;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use indexlake::catalog::{
     Catalog, CatalogDataType, CatalogDatabase, CatalogSchemaRef, Row, RowStream, Scalar,
     Transaction,
@@ -49,10 +51,22 @@ impl Catalog for PostgresCatalog {
                 ILError::catalog(format!("failed to query postgres: {} {e}", SqlDisplay(sql)))
             })?;
 
-        let stream = pg_row_stream.map(move |row| {
-            let pg_row =
-                row.map_err(|e| ILError::catalog(format!("failed to get postgres row: {e}")))?;
-            pg_row_to_row(&pg_row, &schema)
+        let rows: Pin<Box<dyn Stream<Item = ILResult<Row>> + Send>> =
+            Box::pin(pg_row_stream.map(move |row| {
+                let pg_row =
+                    row.map_err(|e| ILError::catalog(format!("failed to get postgres row: {e}")))?;
+                pg_row_to_row(&pg_row, &schema)
+            }));
+
+        // The pooled connection must outlive the response stream, otherwise it is
+        // returned to the pool with an unread response still in flight.
+        // tokio-postgres delivers each response through an internal channel of
+        // capacity 1, so once that channel is full the connection task stops
+        // reading the socket, and *every* later request on this connection blocks
+        // until the previous stream is drained - including bb8's `is_valid` check
+        // (an empty simple query), which then times out with `Timed out in bb8`.
+        let stream = futures::stream::unfold((conn, rows), |(conn, mut rows)| async move {
+            rows.next().await.map(|row| (row, (conn, rows)))
         });
         Ok(Box::pin(stream))
     }
